@@ -290,9 +290,9 @@ brain_sessions
 
 ---
 
-## 12. Open Questions
+## 12. Resolved Questions
 
-1. **Wing auto-creation:** should agents be able to create wings on write, or should wings be pre-defined by the user? (Recommendation: auto-create on write, user can rename/merge in Filament)
-2. **Wiki conflict resolution:** when palace content contradicts a wiki page, how does the agent surface this? (Recommendation: `brain_status` reports wiki pages older than 30 days as stale)
-3. **Embedding dimension mismatch on driver switch:** require full re-embed, or support mixed-dimension storage with separate indexes? (Recommendation: require re-embed, provide artisan command)
-4. **Repo naming:** `mnemon` or `laravel-mnemon`? (Recommendation: `mnemon` now, rename to `laravel-mnemon` at Phase 3 Packagist publish)
+1. **Wing auto-creation:** ✅ Auto-create on write. User can rename/merge/delete in Filament after the fact.
+2. **Wiki conflict resolution:** ✅ Freshness signals only in Phase 1. `brain_status` reports wiki pages not updated in 30+ days as stale. Automatic conflict detection deferred to Phase 2 `wiki_lint` tool.
+3. **Embedding dimension mismatch on driver switch:** ✅ Require full re-embed via `php artisan mnemon:reembed`. No mixed-dimension storage.
+4. **Repo naming:** ✅ Keep `mnemon` for now. Rename pending brand decision (Cairn, Lodestar, Tidepool under consideration). `laravel-` prefix at Phase 3 Packagist publish.

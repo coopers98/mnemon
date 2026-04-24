@@ -20,4 +20,18 @@ class WikiPage extends Model
         'type' => 'string',
         'last_compiled_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (WikiPage $page) {
+            if (empty($page->title)) {
+                // Auto-generate title from name: "project:atlas" → "Atlas"
+                $page->title = str($page->name)
+                    ->afterLast(':')
+                    ->replace(['-', '_'], ' ')
+                    ->title()
+                    ->toString() ?: $page->name;
+            }
+        });
+    }
 }

@@ -24,11 +24,36 @@ Primary consumer: OpenClaw (dogfood), then Laravel developers via Composer packa
 
 ## 2. Users & Access
 
-**Phase 1: Single user.** No auth complexity. Filament admin protected by a single admin user.
+**Phase 1: Single user with scoped API keys.** Filament admin protected by a single admin user.
 
-**Agents** access Mnemon exclusively via MCP. No agent-facing auth in Phase 1 — MCP is served locally or over a trusted network. Rate limiting deferred to Phase 2.
+**Agents** access Mnemon via MCP, authenticated with scoped API keys. Each key has a name (e.g., "openclaw-main", "claude-code", "cursor"), a set of permission scopes, and optional wing restrictions.
 
-**Phase 2:** API key auth for MCP connections. Multi-user deferred to Phase 3.
+### 2.1 API Key Scopes
+
+| Scope | Allows |
+|---|---|
+| `palace:read` | `drawer_search`, `drawer_get`, `brain_status`, `palace_wake_up` |
+| `palace:write` | `drawer_add` |
+| `palace:delete` | Hard delete drawers |
+| `wiki:read` | `context_get`, `context_list` |
+| `wiki:write` | `context_set` |
+| `*` | Full access (admin key) |
+
+**Wing restrictions (optional):** A key can be limited to specific wings. Example: a Claude Code key scoped to `project:*` wings cannot read `person:*` content. Default: all wings accessible.
+
+**Key management:** via Filament UI. Create, revoke, edit scopes, view last-used timestamp.
+
+**Schema:**
+```sql
+api_keys
+  id, name (varchar), key_hash (varchar unique), scopes (jsonb),
+  wing_restrictions (jsonb nullable), last_used_at, revoked_at,
+  created_at, updated_at
+```
+
+Every MCP request must include a valid API key. Requests with revoked, missing, or insufficient-scope keys return an error. All MCP calls are logged to `brain_sessions` with the key name as `source`.
+
+**Phase 3:** Multi-user and tenant isolation.
 
 ---
 
@@ -267,14 +292,13 @@ brain_sessions
 
 ## 10. Non-Goals (Phase 1)
 
-- No multi-user support
+- No multi-user / multi-tenant support
 - No public-facing parent/consumer UI
 - No automatic wiki compilation (always human-directed)
 - No real-time features (Reverb deferred)
 - No mobile app
 - No Composer package (Phase 3)
 - No import from MemPalace, Mem0, or other systems
-- No API key auth for MCP (trusted network assumed)
 - No rate limiting
 - No background queue for embeddings (synchronous on write, acceptable for personal scale)
 

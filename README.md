@@ -61,8 +61,7 @@ Seven tools, gated by API-key scope:
 
 ## Status
 
-Sprints 1–4 complete (foundation, embeddings, hybrid retrieval, MCP server).
-Sprint 5 (Filament dashboard) is next. See the implementation plan for details.
+Sprints 1–5 complete (foundation, embeddings, hybrid retrieval, MCP server, Filament admin panel). Sprint 6 (OpenClaw integration) is next. See the implementation plan for details.
 
 ## License
 

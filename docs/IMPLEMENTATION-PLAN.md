@@ -16,11 +16,11 @@
 | 2 | Embedding Engine | Driver system, OpenAI + Ollama + none drivers, reembed command | 1 session | ✅ Complete (#2) |
 | 3 | Hybrid Retrieval | pgvector search + full-text + temporal boost, search API | 1 session | ✅ Complete (#3) |
 | 4 | MCP Server | All 7 Phase 1 tools, API key auth middleware | 1-2 sessions | ✅ Complete (#4) |
-| 5 | Filament Dashboard | Palace browser, wiki browser, search, audit log, key management | 1-2 sessions | ⏳ **Next** |
-| 6 | OpenClaw Integration | Session ingest, memory file import, search routing | 1 session | ⏳ Not started |
+| 5 | Filament Dashboard | Palace browser, wiki browser, search, audit log, key management | 1-2 sessions | ✅ Complete |
+| 6 | OpenClaw Integration | Session ingest, memory file import, search routing | 1 session | ⏳ **Next** |
 | 7 | Deploy & Polish | Forge setup, domain, SSL, smoke tests, CLAUDE.md | 1 session | ⏳ Not started |
 
-**Current state:** Sprints 1–4 merged to `main`. Filament 5 is installed (`composer.json`) but `app/Filament/` is empty — Sprint 5 is where to pick up.
+**Current state:** Sprints 1–5 complete on `main`. The admin panel ships six resources (Wing, Room, Drawer, WikiPage, ApiKey, BrainSession), a stats overview widget, and a custom palace+wiki Search page. 225 tests passing. Sprint 6 (OpenClaw integration) is next.
 
 ---
 
@@ -271,7 +271,7 @@ return [
 
 ---
 
-## Sprint 5: Filament Dashboard ⏳ Next
+## Sprint 5: Filament Dashboard ✅
 
 ### Dashboard Page
 - Stat widgets: total drawers, total wiki pages, drawers added (7d), last write
@@ -331,7 +331,7 @@ return [
 
 ---
 
-## Sprint 6: OpenClaw Integration ⏳
+## Sprint 6: OpenClaw Integration ⏳ Next
 
 ### Session Ingest Command
 - `mnemon:ingest-sessions` — reads OpenClaw session transcripts and stores as drawers

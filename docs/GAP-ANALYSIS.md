@@ -25,7 +25,7 @@
 
 ---
 
-## Tier 1 — Core Karpathy Features Missing (Next Sprint)
+## Tier 1 — Core Karpathy Features ✅ COMPLETE (2026-04-25)
 
 ### 1. `wiki_lint` MCP Tool
 **Karpathy:** "Periodically, ask the LLM to health-check the wiki."
@@ -102,7 +102,7 @@ Implementation:
 
 ---
 
-## Tier 2 — Production Hardening (Future)
+## Tier 2 — Production Hardening (Next)
 
 ### 6. Confidence Scoring + Decay
 Every fact carries confidence based on: source count, recency, contradiction status.
@@ -145,9 +145,8 @@ Multiple agents writing to the same wiki with conflict resolution.
 
 ## Priority Recommendation
 
-**Next sprint (Sprint 7):** Tier 1 items 1-4 (wiki_lint, cascade awareness, source citations, frontmatter).
-These are core Karpathy pattern features that make the wiki compound rather than just accumulate.
+**Tier 1:** ✅ COMPLETE (2026-04-25) — wiki_lint, wiki_compile, cascade awareness, source citations, structured metadata.
 
-**After dogfood validation:** Tier 2 items based on what we learn from real usage.
+**Next (Tier 2):** Confidence scoring, supersession, consolidation tiers, automation hooks, security filtering. These harden the wiki for production use and reduce manual maintenance.
 
-**When scaling:** Tier 3 items if/when the wiki grows past hundreds of pages.
+**Later (Tier 3):** Knowledge graph, quality scoring, self-healing lint, retention curves, multi-agent sync. When the wiki grows past hundreds of pages.

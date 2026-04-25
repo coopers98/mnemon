@@ -5,6 +5,7 @@ namespace App\Mcp\Tools;
 use App\Mcp\BaseTool;
 use App\Mcp\McpException;
 use App\Models\ApiKey;
+use App\Models\Drawer;
 use App\Models\WikiPage;
 
 class ContextSetTool extends BaseTool
@@ -30,21 +31,74 @@ class ContextSetTool extends BaseTool
         }
 
         $description = $params['description'] ?? null;
+        $confidence = $params['confidence'] ?? null;
+        $sources = $params['sources'] ?? null;
+        $related = $params['related'] ?? null;
+
+        if ($confidence !== null && ! in_array($confidence, WikiPage::CONFIDENCE_LEVELS, true)) {
+            throw McpException::invalidParams(
+                'Parameter "confidence" must be one of: high, medium, low.'
+            );
+        }
+
+        if ($sources !== null) {
+            if (! is_array($sources)) {
+                throw McpException::invalidParams('Parameter "sources" must be an array of drawer IDs.');
+            }
+            foreach ($sources as $id) {
+                if (! is_int($id)) {
+                    throw McpException::invalidParams(
+                        'All elements in "sources" must be integers. Got: '.gettype($id)
+                    );
+                }
+            }
+            $sources = array_values(array_unique($sources));
+            $existingCount = Drawer::whereIn('id', $sources)->count();
+            if ($existingCount !== count($sources)) {
+                throw McpException::invalidParams('One or more source drawer IDs do not exist.');
+            }
+        }
+
+        if ($related !== null) {
+            if (! is_array($related)) {
+                throw McpException::invalidParams('Parameter "related" must be an array of wiki page names.');
+            }
+            foreach ($related as $r) {
+                if (! is_string($r) || trim($r) === '') {
+                    throw McpException::invalidParams(
+                        'All elements in "related" must be non-empty strings.'
+                    );
+                }
+            }
+        }
 
         $type = $this->inferType($name);
 
         $existing = WikiPage::where('name', $name)->first();
         $createdOrUpdated = $existing === null ? 'created' : 'updated';
 
+        $attributes = [
+            'title' => $existing?->title ?? $name,
+            'content' => $content,
+            'type' => $type,
+            'description' => $description ?? ($existing?->description),
+            'last_compiled_at' => now(),
+            'pending_drawers_since_compile' => 0,
+        ];
+
+        if ($confidence !== null) {
+            $attributes['confidence'] = $confidence;
+        }
+        if ($sources !== null) {
+            $attributes['sources'] = $sources;
+        }
+        if ($related !== null) {
+            $attributes['related'] = $related;
+        }
+
         $page = WikiPage::updateOrCreate(
             ['name' => $name],
-            [
-                'title' => $existing?->title ?? $name,
-                'content' => $content,
-                'type' => $type,
-                'description' => $description ?? ($existing?->description),
-                'last_compiled_at' => now(),
-            ]
+            $attributes
         );
 
         $this->updateWikiIndex($apiKey);

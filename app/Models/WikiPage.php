@@ -24,18 +24,27 @@ class WikiPage extends Model
         'synthesis' => 'info',
     ];
 
+    public const CONFIDENCE_LEVELS = ['high', 'medium', 'low'];
+
     protected $fillable = [
         'name',
         'type',
         'title',
         'content',
         'description',
+        'confidence',
+        'sources',
+        'related',
+        'pending_drawers_since_compile',
         'embedding',
         'last_compiled_at',
     ];
 
     protected $casts = [
         'type' => 'string',
+        'sources' => 'array',
+        'related' => 'array',
+        'pending_drawers_since_compile' => 'integer',
         'last_compiled_at' => 'datetime',
     ];
 
@@ -63,6 +72,15 @@ class WikiPage extends Model
                 return $value;
             },
         );
+    }
+
+    /**
+     * Scope: wiki pages that have pending drawer content since their last compile.
+     */
+    public function scopePendingUpdates($query)
+    {
+        return $query->where('pending_drawers_since_compile', '>', 0)
+            ->orderByDesc('pending_drawers_since_compile');
     }
 
     protected static function booted(): void

@@ -46,6 +46,14 @@ class BrainStatusTool extends BaseTool
             'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
         ])->values()->all();
 
+        $pendingUpdatePages = WikiPage::pendingUpdates()
+            ->get()
+            ->map(fn ($p) => [
+                'name' => $p->name,
+                'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
+                'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
+            ])->values()->all();
+
         $result = [
             'drawer_count' => $drawerCount,
             'wiki_page_count' => $wikiPageCount,
@@ -53,6 +61,7 @@ class BrainStatusTool extends BaseTool
             'embedding_driver' => $embeddingDriver,
             'last_write' => $lastWrite ? $lastWrite->toIso8601String() : null,
             'stale_wiki_pages' => $staleWikiPages,
+            'pending_update_pages' => $pendingUpdatePages,
         ];
 
         $this->logSession('brain_status', $apiKey, $params, 1);

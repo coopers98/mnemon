@@ -38,6 +38,8 @@ class ContextListTool extends BaseTool
             'type' => $p->type,
             'title' => $p->title,
             'description' => $p->description,
+            'confidence' => $p->confidence,
+            'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
             'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
             'word_count' => $p->content ? str_word_count($p->content) : 0,
         ])->values()->all();

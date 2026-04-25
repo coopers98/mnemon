@@ -31,17 +31,20 @@
 **Karpathy:** "Periodically, ask the LLM to health-check the wiki."
 **v2:** "The lint operation should automatically fix what it can."
 
-What it should detect:
+What it detects (implemented):
+- **Stale pages** — pages with pending drawers since last compile, or not compiled recently
+- **Orphan pages** — wiki pages not referenced in any other page's related array
+- **Empty pages** — pages with very short content (<50 chars)
+- **Low confidence** — pages marked with low confidence rating
+
+Deferred detectors (require LLM calls, not yet implemented):
 - **Contradictions** — claims that conflict between wiki pages
-- **Orphan pages** — wiki pages with no incoming [[wikilinks]]
-- **Stale claims** — assertions superseded by newer drawers
 - **Missing concepts** — topics referenced in wiki pages but lacking their own page
 - **Missing cross-references** — pages that should link to each other but don't
-- **Data gaps** — areas where more information could be gathered
 
 MCP interface:
 ```
-wiki_lint(focus?: "contradictions" | "orphans" | "stale" | "missing" | "all")
+wiki_lint(focus?: "stale" | "orphans" | "empty" | "low_confidence" | "all")
 → { findings: [{ type, severity, page, description, suggestion }] }
 ```
 

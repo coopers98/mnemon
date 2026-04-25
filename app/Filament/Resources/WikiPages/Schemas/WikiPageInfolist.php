@@ -25,6 +25,21 @@ class WikiPageInfolist
                     ->label('Description')
                     ->placeholder('—')
                     ->columnSpanFull(),
+                TextEntry::make('confidence')
+                    ->label('Confidence')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'high' => 'success',
+                        'medium' => 'warning',
+                        'low' => 'danger',
+                        default => 'gray',
+                    })
+                    ->placeholder('—'),
+                TextEntry::make('pending_drawers_since_compile')
+                    ->label('Pending drawers')
+                    ->numeric()
+                    ->badge()
+                    ->color(fn (int $state): string => $state > 0 ? 'warning' : 'gray'),
                 TextEntry::make('word_count')
                     ->label('Word count')
                     ->numeric(),
@@ -32,6 +47,30 @@ class WikiPageInfolist
                     ->label('Last compiled')
                     ->dateTime()
                     ->placeholder('Never compiled'),
+                TextEntry::make('sources')
+                    ->label('Source Drawers')
+                    ->placeholder('None')
+                    ->columnSpanFull()
+                    ->formatStateUsing(function ($state, $record) {
+                        if (empty($record->sources)) {
+                            return '—';
+                        }
+
+                        return collect($record->sources)
+                            ->map(fn ($id) => "Drawer #{$id}")
+                            ->join(', ');
+                    }),
+                TextEntry::make('related')
+                    ->label('Related Pages')
+                    ->placeholder('None')
+                    ->columnSpanFull()
+                    ->formatStateUsing(function ($state, $record) {
+                        if (empty($record->related)) {
+                            return '—';
+                        }
+
+                        return collect($record->related)->join(', ');
+                    }),
                 TextEntry::make('content')
                     ->label('Content')
                     ->markdown()

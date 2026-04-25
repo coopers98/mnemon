@@ -10,19 +10,21 @@
 
 ## Sprint Overview
 
-| Sprint | Name | What Ships | Est. |
-|--------|------|-----------|------|
-| 1 | Foundation | Laravel project, migrations, models, config, seeders | 1 session |
-| 2 | Embedding Engine | Driver system, OpenAI + Ollama + none drivers, reembed command | 1 session |
-| 3 | Hybrid Retrieval | pgvector search + full-text + temporal boost, search API | 1 session |
-| 4 | MCP Server | All 7 Phase 1 tools, API key auth middleware | 1-2 sessions |
-| 5 | Filament Dashboard | Palace browser, wiki browser, search, audit log, key management | 1-2 sessions |
-| 6 | OpenClaw Integration | Session ingest, memory file import, search routing | 1 session |
-| 7 | Deploy & Polish | Forge setup, domain, SSL, smoke tests, CLAUDE.md | 1 session |
+| Sprint | Name | What Ships | Est. | Status |
+|--------|------|-----------|------|--------|
+| 1 | Foundation | Laravel project, migrations, models, config, seeders | 1 session | ✅ Complete (#1) |
+| 2 | Embedding Engine | Driver system, OpenAI + Ollama + none drivers, reembed command | 1 session | ✅ Complete (#2) |
+| 3 | Hybrid Retrieval | pgvector search + full-text + temporal boost, search API | 1 session | ✅ Complete (#3) |
+| 4 | MCP Server | All 7 Phase 1 tools, API key auth middleware | 1-2 sessions | ✅ Complete (#4) |
+| 5 | Filament Dashboard | Palace browser, wiki browser, search, audit log, key management | 1-2 sessions | ⏳ **Next** |
+| 6 | OpenClaw Integration | Session ingest, memory file import, search routing | 1 session | ⏳ Not started |
+| 7 | Deploy & Polish | Forge setup, domain, SSL, smoke tests, CLAUDE.md | 1 session | ⏳ Not started |
+
+**Current state:** Sprints 1–4 merged to `main`. Filament 5 is installed (`composer.json`) but `app/Filament/` is empty — Sprint 5 is where to pick up.
 
 ---
 
-## Sprint 1: Foundation
+## Sprint 1: Foundation ✅
 
 ### Laravel Project Setup
 - `laravel new mnemon` (or scaffold in existing repo)
@@ -128,7 +130,7 @@ return [
 
 ---
 
-## Sprint 2: Embedding Engine
+## Sprint 2: Embedding Engine ✅
 
 ### EmbeddingManager (Driver Pattern)
 - `App\Services\EmbeddingManager` — resolves driver from config
@@ -154,7 +156,7 @@ return [
 
 ---
 
-## Sprint 3: Hybrid Retrieval
+## Sprint 3: Hybrid Retrieval ✅
 
 ### PalaceSearchService
 - `App\Services\PalaceSearchService`
@@ -193,7 +195,7 @@ return [
 
 ---
 
-## Sprint 4: MCP Server
+## Sprint 4: MCP Server ✅
 
 ### MCP Registration
 - Use Laravel's native MCP server support
@@ -269,7 +271,7 @@ return [
 
 ---
 
-## Sprint 5: Filament Dashboard
+## Sprint 5: Filament Dashboard ⏳ Next
 
 ### Dashboard Page
 - Stat widgets: total drawers, total wiki pages, drawers added (7d), last write
@@ -329,7 +331,7 @@ return [
 
 ---
 
-## Sprint 6: OpenClaw Integration
+## Sprint 6: OpenClaw Integration ⏳
 
 ### Session Ingest Command
 - `mnemon:ingest-sessions` — reads OpenClaw session transcripts and stores as drawers
@@ -357,7 +359,7 @@ return [
 
 ---
 
-## Sprint 7: Deploy & Polish
+## Sprint 7: Deploy & Polish ⏳
 
 ### Forge Setup
 - Create site on 198.51.100.10

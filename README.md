@@ -1,58 +1,69 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Mnemon
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A self-hosted second brain. Two layers:
 
-## About Laravel
+- **Palace** — verbatim, append-only storage organized as wings → rooms → drawers
+- **Wiki** — compiled, synthesized pages distilled from palace content
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+Exposed to AI agents via MCP (Model Context Protocol) tools. Managed through a Filament admin panel. API-key authenticated with per-key scopes and wing restrictions.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Framework:** Laravel 13 (PHP 8.3+)
+- **Admin UI:** Filament 5
+- **Primary DB:** PostgreSQL with pgvector
+- **Test DB:** SQLite (vector columns are skipped on SQLite)
+- **Embeddings:** OpenAI `text-embedding-3-small` (1536d) or Ollama `nomic-embed-text` (768d)
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Quick Start
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed   # creates an admin user + a `*` admin API key (printed once)
+php artisan serve            # http://localhost:8000/admin
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Common Commands
 
-## Contributing
+```bash
+php artisan test --compact            # run the test suite
+./vendor/bin/pint                     # format PHP
+php artisan migrate:fresh --seed      # rebuild DB from scratch
+php artisan mnemon:reembed            # re-embed all drawers + wiki pages with current driver
+php artisan mnemon:create-key NAME    # mint an API key from the CLI
+php artisan mcp:serve                 # start the MCP server (Sprint 4)
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## MCP Tools
 
-## Code of Conduct
+Seven tools, gated by API-key scope:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+| Tool | Scope | What it does |
+|------|-------|--------------|
+| `brain_status` | `palace:read` | Drawer/wiki counts, wings, embedding driver, staleness |
+| `palace_wake_up` | `palace:read` | Recent drawers + wing activity + stale wiki pages |
+| `drawer_add` | `palace:write` | Add a drawer (auto-creates wing/room) |
+| `drawer_search` | `palace:read` | Hybrid semantic + full-text + temporal search |
+| `drawer_get` | `palace:read` | Fetch a drawer by ID |
+| `context_get` | `wiki:read` | Read a wiki page by name |
+| `context_set` | `wiki:write` | Upsert a wiki page (auto-updates index/log) |
+| `context_list` | `wiki:read` | List wiki pages, optionally filtered by type |
 
-## Security Vulnerabilities
+## Documentation
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- [`CLAUDE.md`](./CLAUDE.md) — agent / contributor conventions (canonical)
+- [`AGENTS.md`](./AGENTS.md) — pointer for non-Claude agents
+- [`docs/FRD.md`](./docs/FRD.md) — functional requirements
+- [`docs/IMPLEMENTATION-PLAN.md`](./docs/IMPLEMENTATION-PLAN.md) — sprint plan + status
+- [`docs/discovery.md`](./docs/discovery.md) — initial discovery notes
+
+## Status
+
+Sprints 1–4 complete (foundation, embeddings, hybrid retrieval, MCP server).
+Sprint 5 (Filament dashboard) is next. See the implementation plan for details.
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT.

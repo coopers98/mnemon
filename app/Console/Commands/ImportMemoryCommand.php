@@ -93,14 +93,42 @@ class ImportMemoryCommand extends Command
             ];
         }
 
-        // memory/YYYY-MM-DD.md → wing: session:daily, room: YYYY-MM
+        // memory/YYYY-MM-DD*.md → wing: session:daily, room: YYYY-MM
+        // Matches both strict dates (2026-02-10.md) and suffixed variants
+        // (2026-02-10-onboarding-bug.md, 2026-02-13-afternoon.md)
         $memoryDir = is_dir($path.'/memory') ? $path.'/memory' : $path;
         $dailyDir = $memoryDir;
         if ($wingFilter === null || $wingFilter === 'daily') {
-            $dailyFiles = glob($dailyDir.'/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md');
+            $dailyFiles = glob($dailyDir.'/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*.md');
             foreach (($dailyFiles ?: []) as $file) {
                 $basename = basename($file, '.md');
                 $room = substr($basename, 0, 7); // YYYY-MM
+                $files[] = [
+                    'path' => $file,
+                    'wing' => 'session:daily',
+                    'room' => $room,
+                    'wiki_name' => null,
+                    'wiki_type' => null,
+                ];
+            }
+        }
+
+        // Catch non-date .md files in the memory root (e.g., lessons-learned.md,
+        // helios-server.md) that don't match any other category
+        if ($wingFilter === null || $wingFilter === 'daily') {
+            $allMdFiles = glob($memoryDir.'/*.md') ?: [];
+            $capturedPaths = array_map(fn ($f) => $f['path'], $files);
+            foreach ($allMdFiles as $file) {
+                if (in_array($file, $capturedPaths)) {
+                    continue; // already captured by date pattern or MEMORY.md
+                }
+                $basename = basename($file, '.md');
+                // Try to extract a date for room assignment
+                if (preg_match('/^(\d{4}-\d{2})/', $basename, $m)) {
+                    $room = $m[1];
+                } else {
+                    $room = 'misc';
+                }
                 $files[] = [
                     'path' => $file,
                     'wing' => 'session:daily',

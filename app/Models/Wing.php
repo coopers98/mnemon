@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Support\Str;
 
 class Wing extends Model
@@ -26,5 +27,13 @@ class Wing extends Model
     public function rooms(): HasMany
     {
         return $this->hasMany(Room::class);
+    }
+
+    /**
+     * HasManyThrough relation used by the Filament WingsTable aggregate count (`drawers_count`).
+     */
+    public function drawers(): HasManyThrough
+    {
+        return $this->hasManyThrough(Drawer::class, Room::class);
     }
 }

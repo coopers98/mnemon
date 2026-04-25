@@ -329,6 +329,31 @@ return [
 - Revoked keys show as revoked
 - Search page returns results
 
+### What shipped (10 commits)
+
+Filament v5.6.1; resources auto-discovered via `discoverResources` / `discoverPages` / `discoverWidgets`. Test count went from **128 → 225** (+97).
+
+**Resources:**
+- **WingResource** — name, description; columns include rooms_count, drawers_count (via a new `Wing::drawers()` HasManyThrough), last_activity_at; default sort by activity desc; slug stays read-only on edit so the model owns generation.
+- **RoomResource** — flat under Wing for now (true nested routing deferred); SelectFilter narrows by wing; same slug-on-edit pattern.
+- **DrawerResource** — adds soft-delete handling: TrashedFilter, ViewAction, EditAction, DeleteAction (soft), ForceDeleteAction (hard, with confirmation modal), RestoreAction. `source` SelectFilter is cached 60s to avoid `SELECT DISTINCT` on every render. The form deliberately omits `embedding` so the EmbeddingManager observer remains the single source of truth.
+- **WikiPageResource** — markdown rendering on the View page; type badges colored per type (`person/project/concept/decision/synthesis`) sourced from `WikiPage::TYPE_COLORS`; word count via a `getWordCountAttribute()` accessor; Create/Edit bump `last_compiled_at` only when `name`/`type`/`content` actually changed (description-only edits don't reset staleness).
+- **ApiKeyResource** — Create flow calls `ApiKey::generate(...)` and fires a persistent Filament Notification with the plaintext key (warning that it won't be shown again, plus a Copy button). No key/key_hash field anywhere on the form. Revoke is the only mutation — there is no DeleteAction on this resource.
+- **BrainSessionResource** — strictly read-only: only List + View pages; `canCreate`/`canEdit`/`canDelete`/`canDeleteAny` all return false; `GET /admin/brain-sessions/{id}/edit` returns 404. Pretty-prints the input JSON in the infolist.
+
+**Dashboard widget:**
+- **MnemonStatsOverviewWidget** replaces the default `AccountWidget`/`FilamentInfoWidget`. Four tiles: Drawers, Wiki pages (with stale-count subtitle from `mnemon.wiki.stale_days`), Drawers added 7d (with sparkline built via driver-dispatched `GROUP BY` so the chart query stays bounded), Last write (eager-loads `room.wing` to avoid N+1, "Never" when empty).
+
+**Search page:**
+- Custom `/admin/search` page (not a resource) with a live form (q + scope + wing). Calls `PalaceSearchService` (hybrid) and `WikiSearchService` directly. When scope is `all`, each result set is re-normalized against its own max so the cross-source sort is meaningful. Click-through links use `Resource::getUrl('view', ...)` so URL generation stays decoupled from the panel slug.
+
+**Decisions / deviations from the original spec:**
+- Wing/Room "View" pages with a nested children table were not built — the list pages plus the hover/edit affordances cover the same ground.
+- True Filament nested resources (`Rooms` under `Wings` URL hierarchy) were deferred. Rooms is a flat resource with a wing filter for now.
+- `AccountWidget` was removed from the dashboard along with `FilamentInfoWidget`. The Filament user-menu chrome is unaffected.
+- Empirical finding (load-bearing for future work): Filament v5's `Notification::assertNotified()` matches by **title only**; there is no built-in body assertion. Tests that need to inspect a notification body must read `session('filament.notifications')` BEFORE calling `assertNotified()`, since that helper consumes the queue.
+- Empirical finding: SQLite 3.50+ places NULLs LAST on `ORDER BY ... DESC` by default (contrary to older docs). All three tables that use `defaultSort('...desc')` over a nullable column rely on this.
+
 ---
 
 ## Sprint 6: OpenClaw Integration ⏳ Next

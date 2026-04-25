@@ -32,7 +32,7 @@ class Drawer extends Model
         return Attribute::make(
             set: function (mixed $value) {
                 if (is_array($value)) {
-                    return DB::raw("'[" . implode(",", $value) . "]'::vector");
+                    return DB::raw("'[".implode(',', $value)."]'::vector");
                 }
 
                 return $value;

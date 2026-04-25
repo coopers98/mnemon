@@ -39,7 +39,6 @@ class WikiPage extends Model
         'last_compiled_at' => 'datetime',
     ];
 
-
     public static function typeOptions(): array
     {
         return self::TYPES;
@@ -58,7 +57,7 @@ class WikiPage extends Model
         return Attribute::make(
             set: function (mixed $value) {
                 if (is_array($value)) {
-                    return DB::raw("'[" . implode(',', $value) . "]'::vector");
+                    return DB::raw("'[".implode(',', $value)."]'::vector");
                 }
 
                 return $value;

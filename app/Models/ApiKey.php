@@ -60,6 +60,11 @@ class ApiKey extends Model
         return $this->revoked_at !== null;
     }
 
+    public function revoke(): void
+    {
+        $this->update(['revoked_at' => now()]);
+    }
+
     public static function generate(string $name, array $scopes, ?array $wingRestrictions = null): array
     {
         $plaintext = Str::random(64);

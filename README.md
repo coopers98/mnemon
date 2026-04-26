@@ -2,7 +2,7 @@
 
 A self-hosted second brain for AI-augmented work. Mnemon stores everything you and your agents care about — verbatim — and exposes it back to any AI tool that speaks the [Model Context Protocol](https://modelcontextprotocol.io/). It is one shared memory across Claude, Cursor, ChatGPT, your own scripts, and whatever else you connect.
 
-Built on Laravel 13, PostgreSQL + pgvector, and Filament v5.
+Built on Laravel 13, PostgreSQL + pgvector, and Filament v5. Deployed at [mnemon.example.com](https://mnemon.example.com).
 
 ---
 
@@ -13,7 +13,7 @@ Mnemon has two layers:
 - **The palace** — verbatim, append-only storage organised as **wings → rooms → drawers**. Everything you put in comes back out exactly as it went in. Nothing is summarised at ingest, nothing is lost. Retrieval is hybrid: pgvector cosine distance + Postgres full-text search + a temporal recency boost, weighted and merged.
 - **The wiki** — synthesised, structured pages that distill what's in the palace into knowledge you can read directly. Wiki pages are typed (`person:`, `project:`, `concept:`, `decision:`, `synthesis:`), markdown-rendered, and tracked for staleness. They compound over time.
 
-Agents read and write both layers via a small MCP toolset. Humans manage everything through a Filament admin panel at `/admin`.
+Agents read and write both layers via 12 MCP tools. Humans manage everything through a Filament admin panel at `/admin`, browse the wiki at `/wiki`, and explore the palace at `/palace`.
 
 The name is from [Mnemosyne](https://en.wikipedia.org/wiki/Mnemosyne) — the Greek personification of memory. The wing/room/drawer hierarchy is named after the classical [method of loci](https://en.wikipedia.org/wiki/Method_of_loci) (the original "memory palace").
 
@@ -43,13 +43,24 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 - **Synthesis without losing source.** The wiki is the compiled view; the palace remains the canonical record. Wiki pages can be regenerated from drawers; the reverse is not true.
 - **Per-agent authorisation.** API keys carry scopes (`palace:read`, `wiki:write`, `*`, etc.) and optional wing restrictions (`work`, `project:*`). A scratch agent can read but not write; a project-specific agent can only see its own wing.
 - **Audit trail.** Every MCP tool invocation lands in `brain_sessions`. You can see what each agent has been doing, when, and against which key.
+- **Knowledge graph.** Entities and typed relationships extracted from drawers and wiki pages, with graph traversal queries for discovering connections across your knowledge base.
+- **Confidence & quality scoring.** Every piece of content carries a confidence score that decays over time, plus a multi-factor quality score. Stale or low-quality content surfaces automatically for review.
+- **Self-healing maintenance.** Automated lint, confidence decay, retention management, and stale-page recompilation run on schedule — the system takes care of itself.
 - **Owned and self-hosted.** All data lives in your Postgres. No third-party SaaS, no vendor lock-in, no terms of service that change next quarter.
 
 ---
 
 ## How to use it
 
-### As a human (admin panel)
+### As a human
+
+**Admin panel** at `/admin` — full CRUD for wings, rooms, drawers, wiki pages, and API keys. Dashboard with stats, sparklines, and audit log browser.
+
+**Wiki frontend** at `/wiki` — browsable, rendered wiki pages. No login required for reading.
+
+**Palace browser** at `/palace` — explore wings, rooms, and drawers visually.
+
+**Landing page** at `/` — overview and entry point.
 
 ```bash
 composer install
@@ -70,22 +81,34 @@ Then visit `http://localhost:8000/admin`. The panel ships:
 
 ### As an AI agent (MCP)
 
-Mnemon exposes seven Phase 1 tools over a JSON-RPC-ish HTTP transport at `/api/mcp/call`. Authenticate with a bearer API key. Each tool is gated by scope.
+Mnemon exposes 12 tools over a JSON-RPC-ish HTTP transport at `/api/mcp/call`. Authenticate with a bearer API key. Each tool is gated by scope.
 
 | Tool | Scope | What it does |
 |---|---|---|
 | `brain_status` | `palace:read` | Drawer/wiki counts, wings, embedding driver, staleness summary |
 | `palace_wake_up` | `palace:read` | Recent drawers, wing activity, stale wiki pages |
-| `drawer_add` | `palace:write` | Add a drawer (auto-creates the wing/room if missing, embeds content) |
+| `drawer_add` | `palace:write` | Add a drawer (auto-creates wing/room if missing, embeds content, flags related wiki pages for recompilation) |
 | `drawer_search` | `palace:read` | Hybrid search; supports `wing`, `room`, `mode`, `limit` |
 | `drawer_get` | `palace:read` | Fetch a single drawer by id |
-| `context_get` | `wiki:read` | Read a wiki page by name |
-| `context_set` | `wiki:write` | Upsert a wiki page (auto-updates the index/log; stamps `last_compiled_at`) |
+| `context_get` | `wiki:read` | Read a wiki page by name (includes structured metadata, confidence, sources) |
+| `context_set` | `wiki:write` | Upsert a wiki page (auto-updates index/log; stamps `last_compiled_at`) |
 | `context_list` | `wiki:read` | List wiki pages, optionally filtered by type |
+| `wiki_lint` | `wiki:read` | Detect stale, orphan, empty, and low-confidence wiki pages; auto-fix mode with audit trail |
+| `wiki_compile` | `wiki:write` | Gather related drawers for wiki page compilation; supports consolidation tiers |
+| `wiki_graph` | `wiki:read` | Query the knowledge graph — entities, typed relationships, graph traversal |
+| `wiki_history` | `wiki:read` | Supersession and revision history for wiki pages; track how knowledge evolved |
 
 Wing restrictions on a key short-circuit before the tool even runs — a key restricted to `project:atlas` can never see a drawer in `personal`.
 
-A small reference client and example agent integrations land alongside Sprint 6.
+### OpenClaw integration
+
+Mnemon integrates with [OpenClaw](https://openclaw.com) for automatic memory synchronisation:
+
+- `mnemon:import-memory` — imports OpenClaw memory files into the palace
+- `mnemon:ingest-sessions` — ingests OpenClaw session transcripts as drawers
+- `mnemon:sync-openclaw` — bidirectional sync between Mnemon and OpenClaw memory
+
+OpenClaw's `memory_search` can route queries to Mnemon alongside local files, giving agents a unified view across both systems.
 
 ### As an embedding backend
 
@@ -107,9 +130,9 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)
-- **Tests:** PHPUnit 12, Livewire-style Filament page tests
+- **Tests:** PHPUnit 12, Livewire-style Filament page tests (413 passing)
 
-The MCP server is a small in-house implementation in `app/Mcp/` and `app/Http/Controllers/McpController.php`. It is intentionally minimal — Phase 1 only needs HTTP + bearer auth + tool dispatch + audit logging.
+The MCP server is a small in-house implementation in `app/Mcp/` and `app/Http/Controllers/McpController.php`. It is intentionally minimal — HTTP + bearer auth + tool dispatch + audit logging.
 
 ---
 
@@ -121,21 +144,42 @@ Mnemon is a synthesis of three quite different projects, plus the protocol that 
 - **[Karpathy's LLM Wiki](https://x.com/karpathy/status/1893140634685850106)** — the wiki compilation layer. The idea that LLMs should be writing into a structured, interlinked wiki (not just into vector stores) is what makes the wiki/palace split natural. Wiki pages compound; chat history evaporates.
 - **[Anthropic's Model Context Protocol](https://modelcontextprotocol.io/)** — the access layer. Every tool Mnemon exposes is an MCP tool, so any MCP-aware client (Claude Desktop, Claude Code, Cursor, custom agents built on Anthropic's SDK) connects without bespoke integration.
 - **[Mem0](https://github.com/mem0ai/mem0)** and **Memori** — the extract-and-store competitors. Mnemon deliberately rejects this approach (extraction loses fidelity), but they are the reason there's a clear opinion about NOT doing it.
-- **OpenClaw** — the personal-agent runtime that Sprint 6 will integrate with for session ingest and memory-file imports. Mnemon is built so OpenClaw can route its `memory_search` to Mnemon alongside local files.
+- **[OpenClaw](https://openclaw.com)** — the personal-agent runtime that Mnemon integrates with for session ingest, memory-file imports, and bidirectional memory sync.
 
 The classical **method of loci** is the naming convention. A wing is a section of a memory palace; a room is a place within it; a drawer is a single thing you remember. Slugs and human-readable identifiers everywhere — the wing called `project:atlas` is searchable, scopable, and human-meaningful.
 
 ---
 
-## What ships today
+## What's built
 
-Sprints 1–5 are complete on `main` (≈225 tests passing).
+All sprints complete. 413 tests passing. Deployed at [mnemon.example.com](https://mnemon.example.com).
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions/ApiKeys models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
 - **Sprint 3 — Hybrid retrieval.** `PalaceSearchService` (semantic / fulltext / hybrid modes with temporal boost), `WikiSearchService`, wing/room scoping.
-- **Sprint 4 — MCP server.** All seven Phase 1 tools, API key middleware with scope and wing-restriction enforcement, audit logging on every call.
-- **Sprint 5 — Filament v5 admin panel.** Six resources, dashboard stats widget, custom palace + wiki Search page. See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md#sprint-5-filament-dashboard) for the full breakdown.
+- **Sprint 4 — MCP server.** All 12 MCP tools, API key middleware with scope and wing-restriction enforcement, audit logging on every call.
+- **Sprint 5 — Filament v5 admin panel.** Six resources, dashboard stats widget, custom palace + wiki Search page.
+- **Sprint 6 — OpenClaw integration.** Session ingest, memory-file imports, bidirectional sync, reference client.
+- **Tier 1 — Karpathy core.** Structured metadata (confidence, sources, related), source citations with drawer previews, cascade awareness (`drawer_add` flags wiki pages), `wiki_lint`, `wiki_compile`.
+- **Tier 2 — Production hardening.** Confidence scoring + decay, supersession / revision history, consolidation tiers (raw → reviewed → consolidated), quality scoring (multi-factor heuristic), self-healing lint (auto-fixer with audit trail), retention management (configurable half-lives), security filtering (ContentSanitizer).
+- **Tier 3 — Scale & Advanced.** Knowledge graph (entities, typed relationships, graph traversal via `wiki_graph`), revision history queries via `wiki_history`.
+- **Wiki Frontend.** Browsable wiki at `/wiki`, palace browser at `/palace`, landing page at `/`. Public read access, login at `/login` for write operations.
+
+See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the full breakdown of each sprint.
+
+---
+
+## Scheduled tasks
+
+Mnemon runs several automated maintenance tasks to keep the knowledge base healthy:
+
+| Schedule | Command | What it does |
+|---|---|---|
+| Daily | `mnemon:decay-confidence` | Applies time-based confidence decay to drawers and wiki pages |
+| Every 6 hours | `mnemon:auto-lint` | Runs wiki_lint with auto-fix enabled; repairs stale, orphan, and low-confidence pages |
+| Every 6 hours | `mnemon:auto-compile-stale` | Gathers drawers and recompiles wiki pages flagged as stale |
+| Daily | `mnemon:apply-retention` | Enforces retention policies; archives or removes content past its configured half-life |
+| Daily | `mnemon:sync-openclaw` | Syncs memory between Mnemon and OpenClaw |
 
 ---
 
@@ -143,9 +187,6 @@ Sprints 1–5 are complete on `main` (≈225 tests passing).
 
 This is a working personal tool, not a finished product. Honest constraints today:
 
-- **Phase 1 toolset only.** Seven MCP tools cover read/write of drawers and wiki pages. There is no automatic synthesis (drawers → wiki page), no scheduled compaction, no cross-page link resolution, and no streaming.
-- **No OpenClaw / no automatic ingest yet.** Sprint 6 will add `mnemon:ingest-sessions` and `mnemon:import-memory`. Until then, agents add drawers explicitly via `drawer_add`, or you paste content through the admin panel.
-- **Not deployed.** Sprint 7 (Forge setup, domain, SSL) is open. The README's quick-start gets you running locally; production deploy is your problem for now.
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). There are no per-user scopes inside the panel — API keys provide the agent-level isolation, not user-level.
 - **API key plaintext is shown exactly once.** No recovery, no email-the-secret. If you lose it, revoke and regenerate.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
@@ -154,6 +195,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 - **`brain_sessions.source` is non-nullable.** The audit log requires every invocation to identify itself with a key name; anonymous calls are rejected upstream by the auth middleware.
 - **No drawer hard delete from the API.** The Filament Drawer resource exposes `forceDelete` and `restore`, but the MCP layer is read+append only — agents can't delete or modify existing drawers, by design.
 - **No nested resource routing.** Rooms-under-Wings and Drawers-under-Rooms are flat resources with filters in the panel. True Filament nested URLs (`/admin/wings/{wing}/rooms/{room}`) are deferred.
+- **No streaming.** MCP transport is request/response only. Server-sent events or WebSocket streaming is not implemented.
 
 ---
 
@@ -170,12 +212,23 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Common commands
 
 ```bash
-php artisan test --compact            # run the test suite (target: ~225 tests passing)
-./vendor/bin/pint                     # format PHP
-php artisan migrate:fresh --seed      # rebuild the DB from scratch
-php artisan mnemon:reembed            # re-embed all drawers + wiki pages with the current driver
-php artisan mnemon:create-key NAME    # mint an API key from the CLI
-php artisan serve                     # http://localhost:8000  (admin: /admin)
+php artisan test --compact              # run the test suite (413 tests passing)
+./vendor/bin/pint                       # format PHP
+php artisan migrate:fresh --seed        # rebuild the DB from scratch
+php artisan mnemon:reembed              # re-embed all drawers + wiki pages with the current driver
+php artisan mnemon:create-key NAME      # mint an API key from the CLI
+php artisan serve                       # http://localhost:8000  (admin: /admin, wiki: /wiki, palace: /palace)
+
+# Import & sync
+php artisan mnemon:import-memory        # import OpenClaw memory files into the palace
+php artisan mnemon:ingest-sessions      # ingest OpenClaw session transcripts as drawers
+php artisan mnemon:sync-openclaw        # bidirectional sync with OpenClaw
+
+# Maintenance (also run on schedule)
+php artisan mnemon:decay-confidence     # apply time-based confidence decay
+php artisan mnemon:auto-lint            # run wiki_lint with auto-fix
+php artisan mnemon:auto-compile-stale   # recompile stale wiki pages
+php artisan mnemon:apply-retention      # enforce retention policies
 ```
 
 ---

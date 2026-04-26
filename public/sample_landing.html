@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mnemon — The memory your AI deserves.</title>
+  <link rel="stylesheet" href="styles/mnemon.css" />
+  <style>
+    /* ---------- Page-local: landing ---------- */
+
+    /* Frontispiece hero */
+    .frontispiece {
+      position: relative;
+      padding: clamp(3rem, 7vw, 6rem) 0 clamp(4rem, 10vw, 8rem);
+      border-bottom: var(--hairline) solid var(--rule-strong);
+      overflow: hidden;
+    }
+    .front-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(2rem, 5vw, 5rem);
+      align-items: end;
+    }
+    .front-pretitle {
+      display: flex; align-items: center; gap: 1rem;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin-bottom: 2rem;
+    }
+    .front-pretitle .bar { flex: 1; height: 1px; background: var(--rule-strong); max-width: 5rem; }
+
+    .front-title {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: clamp(3rem, 8.5vw, 7.5rem);
+      line-height: 0.94;
+      letter-spacing: -0.025em;
+      margin: 0;
+      color: var(--ink);
+    }
+    .front-title .amp {
+      font-style: italic;
+      color: var(--rubric);
+      font-weight: 400;
+    }
+    .front-title .small {
+      display: block;
+      font-size: 0.36em;
+      font-style: italic;
+      font-weight: 400;
+      color: var(--ink-faint);
+      letter-spacing: 0;
+      margin-top: 0.4em;
+    }
+
+    .front-lede {
+      font-family: var(--serif);
+      font-size: clamp(1.05rem, 1.4vw, 1.3rem);
+      line-height: 1.55;
+      color: var(--ink-soft);
+      max-width: 32rem;
+      margin: 0 0 2.25rem;
+    }
+    .front-lede .firstcap::first-letter {
+      font-size: 1.7em;
+      font-weight: 600;
+      color: var(--rubric);
+      line-height: 1;
+    }
+
+    .front-cta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .front-meta {
+      margin-top: 2rem;
+      display: flex;
+      gap: 2.5rem;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      padding-top: 1.25rem;
+      border-top: var(--hairline) solid var(--rule);
+    }
+    .front-meta b { color: var(--ink); font-weight: 500; }
+
+    /* Right-side emblem: classical memory-theater diagram */
+    .emblem {
+      position: relative;
+      aspect-ratio: 1 / 1.05;
+      max-width: 36rem;
+      margin-left: auto;
+      width: 100%;
+    }
+    .emblem svg { width: 100%; height: 100%; }
+    .emblem .caption {
+      margin-top: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .emblem .caption em {
+      font-family: var(--serif);
+      font-style: italic;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--ink-soft);
+      font-size: 0.95rem;
+    }
+
+    /* ---------- Marquee of axioms ---------- */
+    .axioms {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .axiom {
+      padding: 2rem 1.75rem;
+      border-right: var(--hairline) solid var(--rule);
+    }
+    .axiom:last-child { border-right: 0; }
+    .axiom .num {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.18em;
+      color: var(--rubric);
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+    .axiom .h {
+      font-family: var(--serif);
+      font-size: 1.4rem;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.4rem;
+    }
+    .axiom .b {
+      font-size: 0.875rem;
+      color: var(--ink-faint);
+      line-height: 1.5;
+    }
+
+    /* ---------- Section: The Two Layers ---------- */
+    .layers {
+      padding: clamp(4rem, 8vw, 6rem) 0;
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .layer-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: clamp(2.5rem, 6vw, 5rem);
+      align-items: start;
+    }
+    .layer-prose p { font-family: var(--serif); font-size: 1.1rem; line-height: 1.65; color: var(--ink-soft); }
+    .layer-prose .first p:first-child { font-size: 1.25rem; color: var(--ink); }
+    .layer-fig {
+      position: sticky;
+      top: 6rem;
+      border: var(--hairline) solid var(--rule-strong);
+      background: var(--paper-deep);
+      padding: 2rem;
+    }
+    .layer-fig .stack {
+      position: relative;
+      display: grid;
+      gap: 1px;
+      background: var(--rule-strong);
+      border: 1px solid var(--rule-strong);
+    }
+    .layer-fig .row {
+      display: grid;
+      grid-template-columns: 5rem 1fr;
+      background: var(--paper);
+      padding: 1.25rem 1.25rem;
+      gap: 1rem;
+      align-items: start;
+    }
+    .layer-fig .row .lab {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);
+      padding-top: 0.2rem;
+    }
+    .layer-fig .row .ttl {
+      font-family: var(--serif); font-size: 1.15rem; line-height: 1.2; margin-bottom: 0.25rem;
+    }
+    .layer-fig .row .desc {
+      font-family: var(--mono); font-size: var(--t-micro); color: var(--ink-faint); letter-spacing: 0.04em;
+    }
+    .layer-fig .row.compiled .ttl { color: var(--rubric); }
+    .layer-fig .row.compiled .lab { color: var(--rubric); }
+    .layer-fig .row.compiled { background: color-mix(in oklch, var(--paper) 92%, var(--rubric) 8%); }
+
+    .layer-fig .arrow-down {
+      display: flex; justify-content: center; padding: 0.5rem 0;
+      font-family: var(--mono); font-size: var(--t-micro); color: var(--ink-faint);
+      letter-spacing: 0.16em; text-transform: uppercase;
+    }
+
+    .layer-list {
+      list-style: none; padding: 0; margin: 1.5rem 0 0;
+      display: grid; gap: 0;
+      border-top: var(--hairline) solid var(--rule);
+    }
+    .layer-list li {
+      display: grid;
+      grid-template-columns: 2.5rem 1fr auto;
+      gap: 1rem;
+      padding: 1rem 0;
+      border-bottom: var(--hairline) solid var(--rule);
+      align-items: baseline;
+    }
+    .layer-list .n {
+      font-family: var(--mono); font-size: var(--t-micro); color: var(--rubric);
+      letter-spacing: 0.16em;
+    }
+    .layer-list .h {
+      font-family: var(--serif); font-size: 1.1rem; line-height: 1.25;
+    }
+    .layer-list .meta {
+      font-family: var(--mono); font-size: var(--t-micro); color: var(--ink-faint);
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+
+    /* ---------- Palace preview section ---------- */
+    .palace-prev {
+      padding: clamp(4rem, 8vw, 6rem) 0;
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .palace-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr;
+      gap: clamp(2rem, 5vw, 4rem);
+      align-items: start;
+    }
+    .palace-prose p {
+      font-family: var(--serif); font-size: 1.1rem; line-height: 1.65; color: var(--ink-soft);
+    }
+    .palace-prose p strong { color: var(--ink); font-weight: 600; }
+    .palace-canvas {
+      position: relative;
+      aspect-ratio: 16 / 11;
+      border: var(--hairline) solid var(--rule-strong);
+      background:
+        linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--paper-deep);
+    }
+    .palace-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    .palace-canvas .crosshair {
+      position: absolute; padding: 0.35rem 0.5rem;
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--ink); background: var(--paper);
+      border: 1px solid var(--ink);
+      transition: transform 0.18s ease, color 0.18s, border-color 0.18s, background 0.18s;
+      cursor: default;
+    }
+    .palace-canvas .crosshair:hover {
+      color: var(--paper); background: var(--rubric); border-color: var(--rubric);
+      transform: translate(-50%, -50%) scale(1.04);
+    }
+    .palace-canvas .crosshair { transform: translate(-50%, -50%); }
+
+    .palace-foot {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-top: 1rem;
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+    }
+
+    /* ---------- Specs (technical sheet) ---------- */
+    .specs { padding: clamp(4rem, 8vw, 6rem) 0; border-bottom: var(--hairline) solid var(--rule-strong); }
+    .specs-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      border-top: var(--hairline) solid var(--rule-strong);
+      border-left: var(--hairline) solid var(--rule);
+    }
+    .spec {
+      padding: 1.75rem 1.5rem;
+      border-right: var(--hairline) solid var(--rule);
+      border-bottom: var(--hairline) solid var(--rule);
+      min-height: 11rem;
+      position: relative;
+    }
+    .spec .lab {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+      margin-bottom: 0.5rem;
+    }
+    .spec .v {
+      font-family: var(--serif); font-size: 1.65rem; line-height: 1.15;
+      letter-spacing: -0.01em; margin-bottom: 0.4rem;
+    }
+    .spec .v .unit { font-family: var(--mono); font-size: 0.7em; color: var(--ink-faint); margin-left: 0.25em; }
+    .spec .desc { font-size: 0.875rem; color: var(--ink-faint); line-height: 1.5; }
+    .spec .corner {
+      position: absolute; top: 0.65rem; right: 0.75rem;
+      font-family: var(--mono); font-size: 0.6rem; color: var(--rubric); letter-spacing: 0.14em;
+    }
+
+    /* ---------- Code excerpt ---------- */
+    .code-section { padding: clamp(3rem, 6vw, 5rem) 0; border-bottom: var(--hairline) solid var(--rule-strong); }
+    .code-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+    .code-block {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      line-height: 1.7;
+      background: oklch(0.16 0.012 50);
+      color: oklch(0.92 0.012 80);
+      padding: 1.75rem 1.5rem 1.75rem 4rem;
+      position: relative;
+      counter-reset: line;
+      border: var(--hairline) solid var(--rule-strong);
+      overflow-x: auto;
+    }
+    .code-block .ln {
+      display: block;
+      position: relative;
+      white-space: pre;
+    }
+    .code-block .ln::before {
+      counter-increment: line;
+      content: counter(line, decimal-leading-zero);
+      position: absolute;
+      left: -2.5rem;
+      width: 2rem;
+      text-align: right;
+      color: oklch(0.45 0.012 60);
+    }
+    .code-block .k  { color: oklch(0.78 0.10 30); }    /* keyword: rubric-ish */
+    .code-block .s  { color: oklch(0.85 0.06 90); }    /* string: gilt */
+    .code-block .c  { color: oklch(0.55 0.012 60); font-style: italic; }  /* comment */
+    .code-block .v  { color: oklch(0.85 0.012 80); }
+    .code-block .fn { color: oklch(0.80 0.05 75); }
+
+    /* ---------- Closing CTA ---------- */
+    .closing {
+      padding: clamp(5rem, 10vw, 8rem) 0;
+      text-align: center;
+      position: relative;
+    }
+    .closing h2 {
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      max-width: 22ch;
+      margin: 0 auto 1.5rem;
+      letter-spacing: -0.02em;
+    }
+    .closing h2 em { color: var(--rubric); font-style: italic; font-weight: 400; }
+    .closing p {
+      font-family: var(--serif); font-style: italic;
+      font-size: 1.25rem; color: var(--ink-faint);
+      max-width: 38rem; margin: 0 auto 2.5rem;
+    }
+    .closing .ornament {
+      font-family: var(--serif);
+      color: var(--rubric);
+      letter-spacing: 0.5em;
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr 1fr 1fr;
+      gap: 2.5rem;
+    }
+    .footer-grid h5 {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin: 0 0 1rem;
+      font-weight: 500;
+    }
+    .footer-grid ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.55rem; font-size: 0.875rem; }
+    .footer-grid p { font-family: var(--serif); font-style: italic; color: var(--ink-faint); max-width: 30ch; }
+
+    @media (max-width: 960px) {
+      .front-grid, .layer-grid, .palace-grid, .code-grid { grid-template-columns: 1fr; }
+      .axioms { grid-template-columns: repeat(2, 1fr); }
+      .axiom { border-right: 0; border-bottom: var(--hairline) solid var(--rule); }
+      .specs-grid { grid-template-columns: 1fr 1fr; }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============== Colophon / top nav ============== -->
+  <header class="colophon">
+    <div class="frame colophon-inner">
+      <a href="index.html" class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Mnemon</span>
+        <span class="dim" style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.14em;text-transform:uppercase;align-self:center;">v0.4 · primer</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html" class="is-active">Overview</a>
+        <a href="wiki.html">Wiki</a>
+        <a href="palace.html">Palace</a>
+        <a href="#specs">Spec sheet</a>
+        <a href="#install">Self-host</a>
+      </nav>
+      <div class="nav-meta">
+        <span>MIT · self-hosted</span>
+        <a class="btn-bare" href="#install">github / mnemon-hq</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============== Frontispiece ============== -->
+    <section class="frontispiece">
+      <div class="frame">
+        <div class="front-pretitle">
+          <span class="bar"></span>
+          <span>Treatise No. 001 — On the Furnishing of Memory</span>
+          <span class="bar"></span>
+        </div>
+
+        <div class="front-grid">
+          <div>
+            <h1 class="front-title">
+              The memory<br />
+              <span class="amp italic">your</span> AI<br />
+              deserves.
+              <span class="small serif">— a field manual for self-hosted recollection</span>
+            </h1>
+
+            <p class="front-lede mt-3">
+              <span class="firstcap">M</span>nemon is a self-hosted second brain for your agents. It stores
+              everything <em>verbatim</em>, retrieves with hybrid search, and compiles the
+              archive into a living wiki that your models can actually reason against — without
+              extraction loss, vendor lock-in, or a SaaS sitting between you and your own thoughts.
+            </p>
+
+            <div class="front-cta">
+              <a class="btn" href="#install">
+                <span>Read the install rite</span>
+                <span class="arrow">→</span>
+              </a>
+              <a class="btn btn-ghost" href="palace.html">
+                <span>Tour the palace</span>
+                <span class="arrow">→</span>
+              </a>
+            </div>
+
+            <div class="front-meta">
+              <span><b>Laravel</b> · native package</span>
+              <span><b>Postgres</b> · pgvector + tsvector</span>
+              <span><b>MCP</b> · first-class</span>
+            </div>
+          </div>
+
+          <!-- Right: classical theater diagram -->
+          <figure class="emblem" aria-hidden="true">
+            <svg viewBox="0 0 400 420" fill="none" stroke="currentColor" stroke-width="0.75">
+              <!-- outer ring with tick marks -->
+              <g style="color: var(--ink);">
+                <circle cx="200" cy="210" r="190" />
+                <circle cx="200" cy="210" r="178" stroke-dasharray="1 5" />
+                <circle cx="200" cy="210" r="150" />
+                <circle cx="200" cy="210" r="105" />
+                <circle cx="200" cy="210" r="55"  />
+              </g>
+              <!-- ticks -->
+              <g style="color: var(--ink-faint);">
+                <g transform="translate(200 210)">
+                  <!-- 24 ticks -->
+                  <g id="tickset">
+                    <line x1="0" y1="-178" x2="0" y2="-168" />
+                  </g>
+                </g>
+                <!-- replicate ticks via repeated transforms -->
+                <g transform="translate(200 210)">
+                  <g><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(15)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(30)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(45)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(60)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(75)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(90)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(105)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(120)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(135)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(150)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(165)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(180)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(195)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(210)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(225)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(240)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(255)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(270)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(285)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(300)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(315)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(330)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                  <g transform="rotate(345)"><line x1="0" y1="-178" x2="0" y2="-168" /></g>
+                </g>
+              </g>
+
+              <!-- segments / spokes -->
+              <g style="color: var(--ink-faint);">
+                <line x1="200" y1="60"  x2="200" y2="360" />
+                <line x1="50"  y1="210" x2="350" y2="210" />
+                <line x1="94"  y1="104" x2="306" y2="316" />
+                <line x1="306" y1="104" x2="94"  y2="316" />
+              </g>
+
+              <!-- inner square diamond -->
+              <g style="color: var(--ink);">
+                <rect x="145" y="155" width="110" height="110" transform="rotate(45 200 210)" />
+              </g>
+
+              <!-- center mark (rubric) -->
+              <g style="color: var(--rubric);">
+                <circle cx="200" cy="210" r="6" fill="currentColor" stroke="none" />
+                <circle cx="200" cy="210" r="14" />
+              </g>
+
+              <!-- chamber labels (Renaissance memory wheel) -->
+              <g style="color: var(--ink-soft); font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 1.4px;" stroke="none" fill="currentColor">
+                <text x="200" y="38" text-anchor="middle">CAMERA · I</text>
+                <text x="378" y="214" text-anchor="end">II</text>
+                <text x="200" y="396" text-anchor="middle">III</text>
+                <text x="22"  y="214">IV</text>
+                <text x="200" y="138" text-anchor="middle" style="font-family:'EB Garamond';font-style:italic;font-size:13px;letter-spacing:0;">verbatim</text>
+                <text x="200" y="288" text-anchor="middle" style="font-family:'EB Garamond';font-style:italic;font-size:13px;letter-spacing:0;">recollect</text>
+              </g>
+
+              <!-- corner annotations -->
+              <g style="color: var(--ink-faint); font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 1.2px;" stroke="none" fill="currentColor">
+                <text x="10"  y="14">Fig. 01</text>
+                <text x="390" y="14"  text-anchor="end">A.M. MMXXVI</text>
+                <text x="10"  y="414">Mnemon · plate i</text>
+                <text x="390" y="414" text-anchor="end">de loci memoriae</text>
+              </g>
+            </svg>
+
+            <figcaption class="caption">
+              <span>Fig. 1 — The four chambers</span>
+              <em>"a wheel for what the model must not forget"</em>
+              <span>Plate i</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== Axioms ============== -->
+    <section class="axioms" aria-label="Founding axioms">
+      <div class="axiom">
+        <span class="num">i.</span>
+        <h4 class="h serif">Store <em class="italic rubric">verbatim</em>.</h4>
+        <p class="b">Every message, every transcript, every artefact, byte-perfect. Extraction is a derivative, never the original.</p>
+      </div>
+      <div class="axiom">
+        <span class="num">ii.</span>
+        <h4 class="h serif">Retrieve <em class="italic rubric">hybrid</em>.</h4>
+        <p class="b">BM25 over tsvector, joined to pgvector cosine. Ranked, deduped, attributed. No black-box re-rankers.</p>
+      </div>
+      <div class="axiom">
+        <span class="num">iii.</span>
+        <h4 class="h serif">Compile <em class="italic rubric">upward</em>.</h4>
+        <p class="b">Raw notes condense into entries; entries link into a living wiki; the palace remembers their geometry.</p>
+      </div>
+      <div class="axiom">
+        <span class="num">iv.</span>
+        <h4 class="h serif">Own <em class="italic rubric">your house</em>.</h4>
+        <p class="b">A Laravel package and a Postgres schema. No vendors, no rate limits, no quiet exfiltration of your archive.</p>
+      </div>
+    </section>
+
+    <!-- ============== Two layers ============== -->
+    <section class="layers" id="architecture">
+      <div class="frame">
+        <div class="sec-head">
+          <span class="num">§ I — Architecture</span>
+          <div>
+            <div class="title">Raw storage at the base.<br/>Compiled knowledge on top.</div>
+            <span class="lede">Two layers, one substrate. Designed so neither layer lies to the other.</span>
+          </div>
+        </div>
+
+        <div class="layer-grid">
+          <div class="layer-prose">
+            <div class="first">
+              <p class="dropcap">
+                Most "memory" tools begin by destroying the source. They chunk, embed, summarise, and
+                discard — leaving the agent to hallucinate its way back to whatever was lost in
+                translation. <em>Mnemon does the opposite.</em>
+              </p>
+            </div>
+            <p>
+              The base layer is a faithful archive: original messages, original files, original
+              timestamps, sealed by content hash. Nothing is rewritten, nothing is destroyed. The
+              compiled layer reads from the base and produces something the model can actually use —
+              a wiki of <em>entries</em>, each with a clear lineage back to the verbatim record that
+              authored it.
+            </p>
+            <p>
+              An agent that wants the gist queries the wiki. An agent that wants the source follows
+              the lineage one step deeper. Both speak MCP. Neither path requires trust in a third
+              party.
+            </p>
+
+            <ul class="layer-list">
+              <li><span class="n">01</span><span class="h serif">Capture</span><span class="meta">verbatim · sealed</span></li>
+              <li><span class="n">02</span><span class="h serif">Index</span><span class="meta">tsvector + pgvector</span></li>
+              <li><span class="n">03</span><span class="h serif">Compile</span><span class="meta">jobs · queued</span></li>
+              <li><span class="n">04</span><span class="h serif">Recall</span><span class="meta">MCP · hybrid</span></li>
+              <li><span class="n">05</span><span class="h serif">Reason</span><span class="meta">in your model</span></li>
+            </ul>
+          </div>
+
+          <aside class="layer-fig" aria-label="Architecture diagram">
+            <div class="flex between" style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:0.85rem;">
+              <span>Fig. 2 · The two layers</span>
+              <span class="rubric">↑ upward</span>
+            </div>
+
+            <div class="stack">
+              <div class="row compiled">
+                <span class="lab">L₂</span>
+                <div>
+                  <div class="ttl serif">Compiled wiki <em class="italic dim" style="font-size:0.85em;">— living, regenerated</em></div>
+                  <div class="desc">entries · sections · backlinks · open graph</div>
+                </div>
+              </div>
+              <div class="row compiled">
+                <span class="lab">L₁.₅</span>
+                <div>
+                  <div class="ttl serif">Hybrid retrieval</div>
+                  <div class="desc">BM25 · cosine · re-rank · attribution</div>
+                </div>
+              </div>
+              <div class="row">
+                <span class="lab">L₁</span>
+                <div>
+                  <div class="ttl serif">Verbatim archive</div>
+                  <div class="desc">messages · files · transcripts · sealed</div>
+                </div>
+              </div>
+              <div class="row">
+                <span class="lab">L₀</span>
+                <div>
+                  <div class="ttl serif">Postgres + your filesystem</div>
+                  <div class="desc">your hardware · your jurisdiction</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="arrow-down">↑ compile · ↓ recall</div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem 1rem;font-family:var(--mono);font-size:var(--t-micro);color:var(--ink-faint);letter-spacing:0.1em;margin-top:1rem;border-top:1px solid var(--rule);padding-top:0.75rem;">
+              <span><span class="rubric">●</span> trusted boundary</span>
+              <span style="text-align:right;">no external egress</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== Palace preview ============== -->
+    <section class="palace-prev" id="palace">
+      <div class="frame">
+        <div class="sec-head">
+          <span class="num">§ II — The palace</span>
+          <div>
+            <div class="title">Memory has a shape.<br/>Mnemon gives it floors.</div>
+            <span class="lede">An old technique — the <em>method of loci</em> — brought forward as a spatial UI for your agent's recall.</span>
+          </div>
+        </div>
+
+        <div class="palace-grid">
+          <div class="palace-prose">
+            <p>
+              The Romans called it <em>memoria artificiosa</em>: place each thing you must
+              remember in a familiar room, then walk the building when you need it back. Mnemon
+              borrows the geometry literally.
+            </p>
+            <p>
+              Each <strong>room</strong> is a coherent context — a project, a client, a research
+              thread. Each <strong>locus</strong> within a room pins a memory: a chat, a file, an
+              entry. Agents traverse rooms like a careful librarian, not a confused intern.
+            </p>
+            <p>
+              The browser is a blueprint. Hover any locus to read its provenance. Open one to
+              walk its lineage all the way down to the verbatim row.
+            </p>
+
+            <div style="margin-top:2rem;">
+              <a class="btn btn-ghost" href="palace.html">
+                <span>Walk the palace</span><span class="arrow">→</span>
+              </a>
+            </div>
+          </div>
+
+          <div>
+            <div class="palace-canvas" aria-label="Floor plan preview">
+              <!-- floor plan SVG -->
+              <svg viewBox="0 0 640 440" preserveAspectRatio="none" fill="none" stroke="currentColor" stroke-width="1">
+                <g style="color: var(--ink); stroke-width: 1.25;">
+                  <!-- outer wall -->
+                  <rect x="20" y="20" width="600" height="400" />
+                  <!-- inner partitions -->
+                  <line x1="280" y1="20"  x2="280" y2="220" />
+                  <line x1="280" y1="260" x2="280" y2="420" />
+                  <line x1="20"  y1="220" x2="240" y2="220" />
+                  <line x1="320" y1="220" x2="620" y2="220" />
+                  <line x1="440" y1="20"  x2="440" y2="180" />
+                  <line x1="440" y1="220" x2="440" y2="420" />
+                  <line x1="120" y1="220" x2="120" y2="420" />
+                </g>
+                <!-- door swings -->
+                <g style="color: var(--ink-faint); stroke-width: 0.75;">
+                  <path d="M240 220 A20 20 0 0 1 260 240" />
+                  <path d="M120 320 A18 18 0 0 1 138 338" />
+                  <path d="M440 100 A18 18 0 0 0 458 118" />
+                </g>
+                <!-- room hatching (very subtle) -->
+                <g style="color: var(--ink-ghost); stroke-width: 0.5;" stroke-dasharray="2 4">
+                  <line x1="40"  y1="40"  x2="260" y2="40"  />
+                  <line x1="40"  y1="200" x2="260" y2="200" />
+                  <line x1="300" y1="40"  x2="420" y2="40"  />
+                  <line x1="460" y1="40"  x2="600" y2="40"  />
+                </g>
+                <!-- room labels -->
+                <g style="color: var(--ink-faint); font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 1.4px;" stroke="none" fill="currentColor">
+                  <text x="40" y="38">ROOM · I</text>
+                  <text x="40" y="240">ROOM · IV</text>
+                  <text x="140" y="240">ROOM · V</text>
+                  <text x="300" y="38">ROOM · II</text>
+                  <text x="460" y="38">ROOM · III</text>
+                  <text x="300" y="240">ROOM · VI</text>
+                  <text x="460" y="240">ROOM · VII</text>
+                </g>
+                <!-- compass / north arrow -->
+                <g style="color: var(--rubric); stroke: currentColor;" transform="translate(580 380)">
+                  <circle r="22" fill="none" />
+                  <path d="M0 -16 L6 8 L0 2 L-6 8 Z" fill="currentColor" stroke="none" />
+                  <text x="0" y="-26" text-anchor="middle" fill="currentColor" stroke="none" style="font-family:'JetBrains Mono';font-size:8px;letter-spacing:1.2px;">N</text>
+                </g>
+              </svg>
+
+              <!-- pinned loci -->
+              <div class="crosshair" style="left:14%; top:24%;">research/agents.md</div>
+              <div class="crosshair" style="left:22%; top:60%;">stripe-incident.log</div>
+              <div class="crosshair" style="left:48%; top:18%;">notes/loci.draft</div>
+              <div class="crosshair" style="left:78%; top:18%;">tx · 2026-04-17</div>
+              <div class="crosshair" style="left:50%; top:62%;">chat/agent-7</div>
+              <div class="crosshair" style="left:80%; top:64%;">readme.mnemon</div>
+            </div>
+
+            <div class="palace-foot">
+              <span>Fig. 3 — Floor plan, ground level</span>
+              <span><span class="rubric">●</span> 6 of 142 loci shown</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== Spec sheet ============== -->
+    <section class="specs" id="specs">
+      <div class="frame">
+        <div class="sec-head">
+          <span class="num">§ III — Spec sheet</span>
+          <div>
+            <div class="title">What's actually under the floorboards.</div>
+            <span class="lede">Boring, knowable infrastructure. Audit it on a Sunday afternoon.</span>
+          </div>
+        </div>
+
+        <div class="specs-grid">
+          <div class="spec">
+            <div class="corner">a.</div>
+            <div class="lab">Substrate</div>
+            <div class="v serif">Postgres <span class="unit">≥ 15</span></div>
+            <p class="desc">Single dependency. <code>pgvector</code> for embeddings, <code>tsvector</code> for full-text. No Pinecone, no Weaviate, no surprises.</p>
+          </div>
+          <div class="spec">
+            <div class="corner">b.</div>
+            <div class="lab">Host language</div>
+            <div class="v serif">Laravel <span class="unit">11.x</span></div>
+            <p class="desc">Composer-installable package. Drops cleanly into existing apps. Uses the framework's queue, cache, jobs, and broadcasting.</p>
+          </div>
+          <div class="spec">
+            <div class="corner">c.</div>
+            <div class="lab">Agent protocol</div>
+            <div class="v serif">MCP <span class="unit">stdio + sse</span></div>
+            <p class="desc">First-class. Twelve tools out of the box: <code>recall</code>, <code>seal</code>, <code>compile</code>, <code>walk</code>, <code>cite</code>…</p>
+          </div>
+          <div class="spec">
+            <div class="corner">d.</div>
+            <div class="lab">Retrieval</div>
+            <div class="v serif">Hybrid · BM25 + cosine</div>
+            <p class="desc">Reciprocal-rank fusion by default. Tunable per-room. Every result carries provenance to the verbatim row.</p>
+          </div>
+          <div class="spec">
+            <div class="corner">e.</div>
+            <div class="lab">Embeddings</div>
+            <div class="v serif">Bring your own</div>
+            <p class="desc">Local <code>nomic-embed</code>, <code>bge-m3</code>, <code>text-embedding-3</code> — anything that returns a vector. Swap them; we re-index in the background.</p>
+          </div>
+          <div class="spec">
+            <div class="corner">f.</div>
+            <div class="lab">Egress</div>
+            <div class="v serif">Zero <span class="unit">by default</span></div>
+            <p class="desc">No telemetry, no analytics, no phone-home. Outbound calls require an allow-list and live on the audit log.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== Code excerpt ============== -->
+    <section class="code-section" id="install">
+      <div class="frame">
+        <div class="sec-head">
+          <span class="num">§ IV — The install rite</span>
+          <div>
+            <div class="title">Five lines. One migration. One config.</div>
+            <span class="lede">If you have run <code>composer require</code> before, you have already finished the difficult part.</span>
+          </div>
+        </div>
+
+        <div class="code-grid">
+          <div>
+            <p class="serif" style="font-size:1.1rem;line-height:1.65;color:var(--ink-soft);">
+              Install the package, run the migration, point your agent's MCP client at the
+              local socket. Mnemon will create its own schema, register its own tools, and
+              begin receiving sealed memories on the next request.
+            </p>
+            <p class="serif" style="font-size:1.1rem;line-height:1.65;color:var(--ink-soft);">
+              The compile worker runs on Laravel's queue. Embeddings are computed lazily —
+              only when an agent actually asks. Your wiki rebuilds itself each night, or
+              on demand, or never. The choice is yours; the archive is always the truth.
+            </p>
+
+            <ul class="layer-list" style="margin-top:1rem;">
+              <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">composer require mnemon/laravel</span><span class="meta">step 1</span></li>
+              <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">php artisan mnemon:install</span><span class="meta">step 2</span></li>
+              <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">php artisan mnemon:mcp --stdio</span><span class="meta">step 3</span></li>
+            </ul>
+          </div>
+
+          <pre class="code-block" aria-label="Sample MCP recall call"><code><span class="ln"><span class="c"># request — your agent</span></span><span class="ln"><span class="k">POST</span> /mcp/recall</span><span class="ln">{</span><span class="ln">  <span class="v">"room"</span>: <span class="s">"client/aurelia"</span>,</span><span class="ln">  <span class="v">"query"</span>: <span class="s">"what did we decide about the webhook retries?"</span>,</span><span class="ln">  <span class="v">"k"</span>: <span class="v">8</span>, <span class="v">"hybrid"</span>: <span class="v">true</span></span><span class="ln">}</span><span class="ln"></span><span class="ln"><span class="c"># response — mnemon</span></span><span class="ln">{</span><span class="ln">  <span class="v">"entries"</span>: [</span><span class="ln">    {</span><span class="ln">      <span class="v">"id"</span>: <span class="s">"e_017aa4"</span>,</span><span class="ln">      <span class="v">"title"</span>: <span class="s">"Webhook retry policy — Aurelia"</span>,</span><span class="ln">      <span class="v">"score"</span>: <span class="v">0.94</span>,</span><span class="ln">      <span class="v">"verbatim"</span>: [<span class="s">"v_8821"</span>, <span class="s">"v_8843"</span>, <span class="s">"v_9010"</span>],</span><span class="ln">      <span class="v">"locus"</span>: <span class="s">"room/client·aurelia/desk"</span></span><span class="ln">    }, ...</span><span class="ln">  ],</span><span class="ln">  <span class="v">"sealed"</span>: <span class="v">true</span>, <span class="v">"latency_ms"</span>: <span class="v">42</span></span><span class="ln">}</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== Closing CTA ============== -->
+    <section class="closing">
+      <div class="frame">
+        <div class="ornament">❦ · ❦ · ❦</div>
+        <h2 class="serif">
+          Your agents remember everything —<br/>
+          and <em>actually</em> understand it.
+        </h2>
+        <p>
+          Mnemon is free, MIT-licensed, and runs on the laptop already humming under your desk.
+          The rest is up to you.
+        </p>
+        <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+          <a class="btn" href="#install"><span>Install Mnemon</span><span class="arrow">→</span></a>
+          <a class="btn btn-ghost" href="wiki.html"><span>Read the wiki</span><span class="arrow">→</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============== Footer ============== -->
+  <footer class="footer">
+    <div class="frame">
+      <div class="footer-grid">
+        <div>
+          <div class="brand mb-2">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span>Mnemon</span>
+          </div>
+          <p>
+            "Memoria est thesaurus omnium rerum et custos." — a treasury of all things,
+            and the keeper of them. We build the treasury; you keep your own keys.
+          </p>
+        </div>
+        <div>
+          <h5>Pages</h5>
+          <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><a href="wiki.html">Wiki</a></li>
+            <li><a href="palace.html">Palace browser</a></li>
+            <li><a href="#specs">Spec sheet</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Source</h5>
+          <ul>
+            <li><a href="#">github / mnemon-hq</a></li>
+            <li><a href="#">packagist</a></li>
+            <li><a href="#">changelog</a></li>
+            <li><a href="#">RFCs</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Colophon</h5>
+          <ul class="mono" style="font-size:var(--t-micro);letter-spacing:0.1em;color:var(--ink-faint);">
+            <li>Set in EB Garamond &amp; JetBrains Mono</li>
+            <li>Vermilion <code>oklch(0.55 0.17 30)</code></li>
+            <li>Treatise No. 001 · A.M. MMXXVI</li>
+            <li>Hand-bound on parchment</li>
+          </ul>
+        </div>
+      </div>
+
+      <hr class="rule mt-4 mb-3" />
+      <div class="flex between" style="flex-wrap:wrap;gap:1rem;">
+        <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">© Mnemon HQ · MIT License</span>
+        <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">No SaaS. No telemetry. No vendor.</span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

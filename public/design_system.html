@@ -1,0 +1,1261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mnemon — Design System</title>
+  <link rel="stylesheet" href="styles/mnemon.css" />
+  <style>
+    /* Showcase-specific layout */
+    .ds-shell {
+      display: grid;
+      grid-template-columns: 16rem minmax(0, 1fr);
+      gap: clamp(2rem, 4vw, 3.5rem);
+      padding: 3rem 0 6rem;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .ds-shell { grid-template-columns: 1fr; }
+      .ds-toc { position: static !important; border-right: 0 !important; padding-right: 0 !important; }
+    }
+
+    .ds-toc {
+      position: sticky;
+      top: 5rem;
+      align-self: start;
+      max-height: calc(100vh - 6rem);
+      overflow-y: auto;
+      padding-right: 1.25rem;
+      border-right: var(--hairline) solid var(--rule);
+      font-size: 0.875rem;
+    }
+    .ds-toc h6 {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin: 0 0 0.85rem;
+      font-weight: 500;
+    }
+    .ds-toc ul { list-style: none; padding: 0; margin: 0 0 1.5rem; display: grid; gap: 0.35rem; }
+    .ds-toc a {
+      display: grid;
+      grid-template-columns: 1.6rem 1fr;
+      gap: 0.4rem;
+      padding: 0.25rem 0;
+      color: var(--ink-soft);
+      transition: color 0.15s;
+    }
+    .ds-toc a:hover { color: var(--rubric); }
+    .ds-toc a .num {
+      font-family: var(--mono); font-size: 0.7rem; color: var(--ink-ghost);
+      letter-spacing: 0.06em; padding-top: 0.1em;
+    }
+
+    .ds-content { max-width: 56rem; min-width: 0; }
+
+    .ds-section {
+      margin-bottom: 5rem;
+      padding-top: 2rem;
+      border-top: var(--hairline) solid var(--rule-strong);
+    }
+    .ds-section:first-child { border-top: 0; padding-top: 0; }
+    .ds-section > .head {
+      display: grid;
+      grid-template-columns: 6rem 1fr;
+      gap: 1.5rem;
+      align-items: baseline;
+      margin-bottom: 2rem;
+    }
+    .ds-section > .head .num {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--rubric);
+    }
+    .ds-section > .head .title {
+      font-family: var(--serif);
+      font-size: 2.2rem;
+      letter-spacing: -0.015em;
+      line-height: 1.05;
+    }
+    .ds-section > .head .lede {
+      display: block;
+      margin-top: 0.4rem;
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 1.1rem;
+      color: var(--ink-faint);
+    }
+
+    /* Each example block */
+    .ex {
+      margin-bottom: 2.5rem;
+      border: var(--hairline) solid var(--rule-strong);
+      background: var(--paper);
+    }
+    .ex > .ex-cap {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      padding: 0.65rem 1rem;
+      border-bottom: var(--hairline) solid var(--rule);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .ex > .ex-cap .name { color: var(--ink); }
+    .ex > .ex-body {
+      padding: 1.75rem;
+      background: var(--paper);
+      position: relative;
+    }
+    .ex > .ex-body.dense { padding: 1.25rem; }
+    .ex > .ex-body.flush { padding: 0; }
+
+    .ex > .ex-note {
+      padding: 0.85rem 1rem;
+      border-top: var(--hairline) solid var(--rule);
+      font-family: var(--serif);
+      font-size: 0.95rem;
+      color: var(--ink-soft);
+      background: var(--paper-deep);
+    }
+    .ex > .ex-note code { font-size: 0.85em; }
+
+    /* Color swatches */
+    .swatch-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: var(--hairline) solid var(--rule);
+      border-left: var(--hairline) solid var(--rule);
+    }
+    @media (max-width: 720px) { .swatch-grid { grid-template-columns: repeat(2, 1fr); } }
+    .swatch {
+      border-right: var(--hairline) solid var(--rule);
+      border-bottom: var(--hairline) solid var(--rule);
+      display: grid;
+      grid-template-rows: 6.5rem auto;
+    }
+    .swatch .chip { width: 100%; height: 100%; }
+    .swatch .meta {
+      padding: 0.65rem 0.75rem 0.85rem;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.06em;
+      color: var(--ink-faint);
+      line-height: 1.5;
+    }
+    .swatch .meta .tok {
+      display: block;
+      color: var(--ink);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.15rem;
+    }
+    .swatch .meta .val { color: var(--ink-faint); }
+
+    /* Type specimen */
+    .spec-grid { display: grid; gap: 1.5rem; }
+    .spec-row {
+      display: grid;
+      grid-template-columns: 6rem 1fr;
+      gap: 1.5rem;
+      align-items: baseline;
+      padding-bottom: 1.25rem;
+      border-bottom: var(--hairline) solid var(--rule);
+    }
+    .spec-row .lab {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      padding-top: 0.4rem;
+    }
+    .spec-row .v { line-height: 1.05; color: var(--ink); }
+
+    /* Demo: button row */
+    .demo-row {
+      display: flex;
+      gap: 0.85rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .demo-stack { display: grid; gap: 1rem; }
+
+    /* For positioned locus pins demo */
+    .pin-stage {
+      position: relative;
+      height: 14rem;
+      background:
+        linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--paper-deep);
+      border: var(--hairline) solid var(--rule);
+    }
+    .pin-stage .locus {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.55rem;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      color: var(--ink);
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: transform 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .pin-stage .locus::before {
+      content: ""; width: 6px; height: 6px;
+      background: var(--rubric); transform: rotate(45deg);
+    }
+    .pin-stage .locus:hover {
+      background: var(--ink); color: var(--paper); border-color: var(--ink);
+      transform: translate(-50%, -50%) scale(1.04);
+    }
+    .pin-stage .locus.is-active {
+      background: var(--rubric); color: var(--paper); border-color: var(--rubric);
+    }
+    .pin-stage .locus.is-active::before { background: var(--paper); }
+
+    /* Tiny status / token table */
+    .token-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    .token-table th, .token-table td {
+      text-align: left;
+      padding: 0.55rem 0.85rem;
+      border-bottom: var(--hairline) solid var(--rule);
+      vertical-align: top;
+    }
+    .token-table th {
+      font-size: var(--t-micro);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      font-weight: 500;
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .token-table td:first-child { color: var(--rubric); }
+    .token-table td:last-child { color: var(--ink-faint); }
+
+    .ornament {
+      text-align: center;
+      font-family: var(--serif);
+      color: var(--rubric);
+      letter-spacing: 0.5em;
+      font-size: 1.5rem;
+      margin: 5rem 0 2rem;
+    }
+
+    /* Inline figure for floor-plan demo (small) */
+    .floor-demo {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      position: relative;
+      background: var(--paper-deep);
+      border: var(--hairline) solid var(--rule);
+    }
+    .floor-demo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    /* show stamp at rest, not absolutely positioned */
+    .stamp {
+      display: inline-block;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--rubric);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--rubric);
+      transform: rotate(-1deg);
+    }
+
+    /* pull / glossary etc. used here too */
+    .pull {
+      margin: 0;
+      padding: 1.5rem 1.5rem 1.5rem 1.75rem;
+      border-left: 3px solid var(--rubric);
+      background: var(--paper-deep);
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 1.35rem;
+      line-height: 1.4;
+    }
+    .pull cite {
+      display: block;
+      margin-top: 0.85rem;
+      font-style: normal;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .pull cite::before { content: "— "; color: var(--rubric); }
+
+    .glossary {
+      list-style: none;
+      padding: 0; margin: 0;
+      border-top: var(--hairline) solid var(--rule);
+    }
+    .glossary li {
+      display: grid;
+      grid-template-columns: 9rem 1fr;
+      gap: 1.5rem;
+      padding: 0.85rem 0;
+      border-bottom: var(--hairline) solid var(--rule);
+      align-items: baseline;
+    }
+    .glossary dt {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--rubric); padding-top: 0.2rem;
+    }
+    .glossary dd {
+      font-family: var(--serif); font-size: 1.05rem;
+      line-height: 1.55; margin: 0;
+    }
+
+    /* spec-card mini */
+    .spec-mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: var(--hairline) solid var(--rule-strong);
+      border-left: var(--hairline) solid var(--rule);
+    }
+    .spec-mini {
+      padding: 1.5rem 1.25rem;
+      border-right: var(--hairline) solid var(--rule);
+      border-bottom: var(--hairline) solid var(--rule);
+      position: relative;
+    }
+    .spec-mini .corner {
+      position: absolute; top: 0.6rem; right: 0.7rem;
+      font-family: var(--mono); font-size: 0.6rem;
+      color: var(--rubric); letter-spacing: 0.14em;
+    }
+    .spec-mini .lab {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--ink-faint); margin-bottom: 0.5rem;
+    }
+    .spec-mini .v {
+      font-family: var(--serif); font-size: 1.4rem;
+      line-height: 1.15; letter-spacing: -0.01em;
+      margin-bottom: 0.3rem;
+    }
+    .spec-mini .desc {
+      font-size: 0.85rem; color: var(--ink-faint); line-height: 1.5;
+    }
+
+    /* Code mini */
+    pre.code-mini {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.7;
+      background: oklch(0.16 0.012 50);
+      color: oklch(0.92 0.012 80);
+      padding: 1.25rem 1.25rem 1.25rem 3.5rem;
+      margin: 0;
+      counter-reset: line;
+      overflow-x: auto;
+    }
+    pre.code-mini .ln { display: block; position: relative; white-space: pre; }
+    pre.code-mini .ln::before {
+      counter-increment: line;
+      content: counter(line, decimal-leading-zero);
+      position: absolute;
+      left: -2.25rem;
+      width: 1.75rem;
+      text-align: right;
+      color: oklch(0.45 0.012 60);
+    }
+    pre.code-mini .k  { color: oklch(0.78 0.10 30); }
+    pre.code-mini .s  { color: oklch(0.85 0.06 90); }
+    pre.code-mini .c  { color: oklch(0.55 0.012 60); font-style: italic; }
+    pre.code-mini .v  { color: oklch(0.85 0.012 80); }
+
+    /* Marginalia mini */
+    .margin-mini {
+      max-width: 22rem;
+      padding: 1rem 1.25rem;
+      border-left: var(--hairline) solid var(--rule);
+    }
+    .margin-mini .lab {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--rubric); margin-bottom: 0.4rem;
+    }
+    .margin-mini .text {
+      font-family: var(--serif); font-size: 0.95rem;
+      line-height: 1.5; color: var(--ink-soft);
+    }
+    .margin-mini .ref {
+      display: block;
+      margin-top: 0.85rem;
+      padding-top: 0.4rem;
+      border-top: 1px dotted var(--rule);
+      font-family: var(--mono); font-size: 0.7rem;
+      letter-spacing: 0.04em; color: var(--ink-faint);
+    }
+
+    /* Pin label demo bar */
+    .pin-label {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .pin-label::before {
+      content: "";
+      width: 7px; height: 7px;
+      background: var(--rubric);
+      display: inline-block;
+      transform: translateY(-1px) rotate(45deg);
+    }
+
+    /* Layer-list mini */
+    .layer-list-mini { list-style: none; padding: 0; margin: 0; border-top: var(--hairline) solid var(--rule); }
+    .layer-list-mini li {
+      display: grid;
+      grid-template-columns: 2.5rem 1fr auto;
+      gap: 1rem;
+      padding: 0.85rem 0;
+      border-bottom: var(--hairline) solid var(--rule);
+      align-items: baseline;
+    }
+    .layer-list-mini .n { font-family: var(--mono); font-size: var(--t-micro); color: var(--rubric); letter-spacing: 0.16em; }
+    .layer-list-mini .h { font-family: var(--serif); font-size: 1.05rem; }
+    .layer-list-mini .meta { font-family: var(--mono); font-size: var(--t-micro); color: var(--ink-faint); letter-spacing: 0.12em; text-transform: uppercase; }
+
+    /* Section head demo */
+    .sec-head-demo {
+      display: grid;
+      grid-template-columns: 8rem 1fr;
+      gap: 2rem;
+      align-items: baseline;
+      padding-bottom: 1.25rem;
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .sec-head-demo .num { font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.18em; text-transform: uppercase; color: var(--rubric); }
+    .sec-head-demo .title { font-family: var(--serif); font-size: 2rem; line-height: 1.1; letter-spacing: -0.01em; }
+    .sec-head-demo .lede { display: block; margin-top: 0.4rem; font-family: var(--serif); font-style: italic; font-size: 1.05rem; color: var(--ink-faint); }
+  </style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <header class="colophon">
+    <div class="frame colophon-inner">
+      <a href="../index.html" class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Mnemon</span>
+        <span class="dim" style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.14em;text-transform:uppercase;align-self:center;">design system · vol. i</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html">Overview</a>
+        <a href="../wiki.html">Wiki</a>
+        <a href="../palace.html">Palace</a>
+        <a href="design_system.html" class="is-active">Design system</a>
+      </nav>
+      <div class="nav-meta">
+        <span>v 0.4 · spec</span>
+        <a class="btn-bare" href="../docs/design_system.md">/docs/design_system.md</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="frame">
+
+    <!-- Frontispiece -->
+    <section style="padding: 3.5rem 0 2.5rem; border-bottom: var(--hairline) solid var(--rule-strong);">
+      <div style="display: flex; align-items:center; gap:1rem; font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 1.5rem;">
+        <span style="flex:1;height:1px;background:var(--rule-strong);max-width:5rem;"></span>
+        <span>Treatise No. 001 — On the Furnishing of Memory</span>
+        <span style="flex:1;height:1px;background:var(--rule-strong);max-width:5rem;"></span>
+      </div>
+      <h1 class="serif" style="font-size: clamp(3rem, 7vw, 5.5rem); letter-spacing:-0.025em; line-height:0.95; margin:0;">
+        The <em class="italic" style="color:var(--rubric);font-weight:400;">design</em> system.
+      </h1>
+      <p style="font-family: var(--serif); font-size: 1.2rem; color: var(--ink-soft); max-width: 38rem; margin: 1.5rem 0 0; line-height: 1.55;">
+        Every token, primitive, and pattern in the Mnemon visual language, with a live
+        rendering and a usage note for each. The narrative spec is in
+        <code><a href="../docs/design_system.md" style="color:var(--rubric);border-bottom:1px dotted var(--rubric);">/docs/design_system.md</a></code>;
+        the canonical implementation lives in <code>/styles/mnemon.css</code>.
+      </p>
+    </section>
+
+    <div class="ds-shell">
+
+      <!-- ============ ToC ============ -->
+      <aside class="ds-toc" aria-label="Section index">
+        <h6>Sections</h6>
+        <ul>
+          <li><a href="#principles"><span class="num">§ 1</span><span>Principles</span></a></li>
+          <li><a href="#color"><span class="num">§ 2</span><span>Color</span></a></li>
+          <li><a href="#type"><span class="num">§ 3</span><span>Typography</span></a></li>
+          <li><a href="#spacing"><span class="num">§ 4</span><span>Spacing &amp; rhythm</span></a></li>
+          <li><a href="#brand"><span class="num">§ 5</span><span>Brand mark</span></a></li>
+        </ul>
+        <h6>Components</h6>
+        <ul>
+          <li><a href="#colophon"><span class="num">6.01</span><span>Colophon / nav</span></a></li>
+          <li><a href="#buttons"><span class="num">6.02</span><span>Buttons</span></a></li>
+          <li><a href="#tags"><span class="num">6.03</span><span>Tags &amp; pin labels</span></a></li>
+          <li><a href="#sec-heads"><span class="num">6.04</span><span>Section header</span></a></li>
+          <li><a href="#axioms"><span class="num">6.05</span><span>Axiom row</span></a></li>
+          <li><a href="#layer-list"><span class="num">6.06</span><span>Layer list</span></a></li>
+          <li><a href="#pull"><span class="num">6.07</span><span>Pull quote</span></a></li>
+          <li><a href="#glossary"><span class="num">6.08</span><span>Glossary</span></a></li>
+          <li><a href="#figure"><span class="num">6.09</span><span>Figure / kv</span></a></li>
+          <li><a href="#code"><span class="num">6.10</span><span>Code block</span></a></li>
+          <li><a href="#spec-cards"><span class="num">6.11</span><span>Spec cards</span></a></li>
+          <li><a href="#marginalia"><span class="num">6.12</span><span>Marginalia</span></a></li>
+          <li><a href="#stamp"><span class="num">6.13</span><span>Stamp</span></a></li>
+          <li><a href="#locus"><span class="num">6.14</span><span>Locus pin</span></a></li>
+          <li><a href="#floor"><span class="num">6.15</span><span>Floor plan</span></a></li>
+          <li><a href="#compass"><span class="num">6.16</span><span>Compass + scale</span></a></li>
+        </ul>
+        <h6>Reference</h6>
+        <ul>
+          <li><a href="sample_landing.html"><span class="num">A.</span><span>Landing sample</span></a></li>
+          <li><a href="sample_wiki.html"><span class="num">B.</span><span>Wiki sample</span></a></li>
+          <li><a href="sample_palace.html"><span class="num">C.</span><span>Palace sample</span></a></li>
+        </ul>
+      </aside>
+
+      <!-- ============ Content ============ -->
+      <div class="ds-content">
+
+        <!-- 1. Principles -->
+        <section class="ds-section" id="principles">
+          <div class="head">
+            <span class="num">§ 1 — Principles</span>
+            <div>
+              <div class="title">Five rules that govern everything else.</div>
+              <span class="lede">When in doubt, return to these.</span>
+            </div>
+          </div>
+
+          <ul class="layer-list-mini">
+            <li><span class="n">i.</span><span class="h">Treatise, not a SaaS landing page.</span><span class="meta">type leads</span></li>
+            <li><span class="n">ii.</span><span class="h">One accent, used like rubric.</span><span class="meta">vermilion only</span></li>
+            <li><span class="n">iii.</span><span class="h">Hairlines, not boxes.</span><span class="meta">no shadows</span></li>
+            <li><span class="n">iv.</span><span class="h">Mono is for measurements.</span><span class="meta">never decorative</span></li>
+            <li><span class="n">v.</span><span class="h">Italics carry weight.</span><span class="meta">over bold &amp; color</span></li>
+          </ul>
+        </section>
+
+        <!-- 2. Color -->
+        <section class="ds-section" id="color">
+          <div class="head">
+            <span class="num">§ 2 — Color</span>
+            <div>
+              <div class="title">Monochrome on parchment, with a single rubric.</div>
+              <span class="lede">All values in oklch. The accent is vermilion.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">2.1 — Palette</span><span>fig. ds·a</span></div>
+            <div class="ex-body flush">
+              <div class="swatch-grid">
+                <div class="swatch">
+                  <div class="chip" style="background: var(--paper); border-bottom: 1px solid var(--rule);"></div>
+                  <div class="meta"><span class="tok">--paper</span><span class="val">oklch(0.965 0.012 85)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--paper-deep);"></div>
+                  <div class="meta"><span class="tok">--paper-deep</span><span class="val">oklch(0.945 0.014 82)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--paper-edge);"></div>
+                  <div class="meta"><span class="tok">--paper-edge</span><span class="val">oklch(0.92 0.018 80)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--ink);"></div>
+                  <div class="meta"><span class="tok">--ink</span><span class="val">oklch(0.20 0.012 50)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--ink-soft);"></div>
+                  <div class="meta"><span class="tok">--ink-soft</span><span class="val">oklch(0.34 0.012 50)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--ink-faint);"></div>
+                  <div class="meta"><span class="tok">--ink-faint</span><span class="val">oklch(0.52 0.010 60)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--ink-ghost);"></div>
+                  <div class="meta"><span class="tok">--ink-ghost</span><span class="val">oklch(0.72 0.008 70)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--rubric);"></div>
+                  <div class="meta"><span class="tok">--rubric</span><span class="val">oklch(0.55 0.17 30)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--rubric-deep);"></div>
+                  <div class="meta"><span class="tok">--rubric-deep</span><span class="val">oklch(0.42 0.16 30)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--rubric-wash);"></div>
+                  <div class="meta"><span class="tok">--rubric-wash</span><span class="val">rubric / 0.10</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: var(--gilt);"></div>
+                  <div class="meta"><span class="tok">--gilt</span><span class="val">oklch(0.66 0.10 75)</span></div>
+                </div>
+                <div class="swatch">
+                  <div class="chip" style="background: repeating-linear-gradient(45deg, var(--rule) 0 1px, transparent 1px 6px);"></div>
+                  <div class="meta"><span class="tok">--rule</span><span class="val">ink / 0.18</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="ex-note">
+              Body text is always <code>--ink</code> on <code>--paper</code>. Use
+              <code>--rubric</code> only for: section numbers, sealed status, drop caps,
+              pinned-locus glyphs, and CTA hover states. <em>One job at a time.</em>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Type -->
+        <section class="ds-section" id="type">
+          <div class="head">
+            <span class="num">§ 3 — Typography</span>
+            <div>
+              <div class="title">Three families. EB Garamond leads.</div>
+              <span class="lede">Display in serif, body in Inter, measurements in mono.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">3.1 — Display &amp; headings</span><span>EB Garamond · 500</span></div>
+            <div class="ex-body">
+              <div class="spec-grid">
+                <div class="spec-row">
+                  <span class="lab">--t-display</span>
+                  <span class="v serif" style="font-size: 4.5rem; letter-spacing:-0.025em;">The memory <em class="italic" style="color:var(--rubric);font-weight:400;">your</em> AI deserves.</span>
+                </div>
+                <div class="spec-row">
+                  <span class="lab">h1 · 4.5rem</span>
+                  <span class="v serif" style="font-size: 3.25rem; letter-spacing:-0.02em;">The Method of <em class="italic" style="color:var(--rubric);font-weight:400;">Loci.</em></span>
+                </div>
+                <div class="spec-row">
+                  <span class="lab">h2 · 2.75rem</span>
+                  <span class="v serif" style="font-size: 2.5rem; letter-spacing:-0.015em;">Raw storage at the base.</span>
+                </div>
+                <div class="spec-row">
+                  <span class="lab">h3 · 1.875rem</span>
+                  <span class="v serif" style="font-size: 1.875rem;">The two operations: sealing &amp; placing</span>
+                </div>
+                <div class="spec-row">
+                  <span class="lab">h4 · 1.375rem</span>
+                  <span class="v serif" style="font-size: 1.375rem; font-weight: 600;">Vocabulary</span>
+                </div>
+              </div>
+            </div>
+            <div class="ex-note">
+              Headlines may include <em>one</em> italic vermilion word. Never two.
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">3.2 — Body &amp; lede</span><span>EB Garamond + Inter</span></div>
+            <div class="ex-body">
+              <p class="serif" style="font-size: 1.3rem; line-height: 1.5; margin: 0 0 1.5rem;">
+                <span class="dropcap" style="display: inline;">M</span><span style="color:var(--rubric);font-family:var(--serif);font-weight:600;font-size:5rem;line-height:0.86;float:left;padding:0.06em 0.08em 0 0;margin-right:0.04em;">M</span>
+                Drop caps mark the lede paragraph in long-form articles. Garamond, weight 600,
+                vermilion, floated 5.4em tall. <em>Used once per article.</em>
+              </p>
+              <p class="serif" style="font-size: 1.125rem; line-height: 1.65; margin: 0 0 1rem;">
+                Body prose in long-form runs at 1.125rem in Garamond regular. Lines breathe
+                at 1.65 line-height. Italics carry the marginal voice — <em>memoria
+                artificiosa</em> — without resorting to bold.
+              </p>
+              <p style="margin: 0; font-size: 1rem; line-height: 1.55; color: var(--ink-soft);">
+                UI body, including this paragraph, is set in Inter at 1rem on 1.55. It carries
+                supplementary information, navigation, and shorter copy that does not warrant
+                Garamond's authority.
+              </p>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">3.3 — Mono captions</span><span>JetBrains Mono</span></div>
+            <div class="ex-body demo-row" style="gap: 2.5rem;">
+              <span class="allcaps" style="color: var(--ink-faint);">Treatise No. 001</span>
+              <span class="mono" style="font-size: var(--t-micro); letter-spacing: 0.14em; color: var(--rubric);">● sealed · 2026-04-26</span>
+              <span class="mono" style="font-size: var(--t-micro); letter-spacing: 0.16em; color: var(--ink-soft); text-transform: uppercase;">l_8a4f29b1</span>
+              <code>composer require mnemon/laravel</code>
+            </div>
+            <div class="ex-note">
+              Mono is reserved for things that <em>are</em> technical: identifiers, dimensions,
+              timestamps, code, captions on figures. <em>Never</em> for headlines.
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Spacing & rhythm -->
+        <section class="ds-section" id="spacing">
+          <div class="head">
+            <span class="num">§ 4 — Spacing</span>
+            <div>
+              <div class="title">Editorial rhythm, not 8pt rigor.</div>
+              <span class="lede">Sections breathe with <code>clamp()</code>; rules group what whitespace would not.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">4.1 — Tokens</span><span>fig. ds·b</span></div>
+            <div class="ex-body flush">
+              <table class="token-table">
+                <thead>
+                  <tr><th>Token</th><th>Value</th><th>Use</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>--gutter</td><td>2rem</td><td>Default column gap.</td></tr>
+                  <tr><td>--measure</td><td>64rem</td><td>Comfortable measure for prose.</td></tr>
+                  <tr><td>--hairline</td><td>1px</td><td>Every rule. Never thicker.</td></tr>
+                  <tr><td>section v-pad</td><td>clamp(4rem, 8vw, 6rem)</td><td>Major section vertical rhythm.</td></tr>
+                  <tr><td>frame</td><td>max-width 1440px · clamp(1.25rem, 4vw, 3.5rem)</td><td>Page frame.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Brand mark -->
+        <section class="ds-section" id="brand">
+          <div class="head">
+            <span class="num">§ 5 — Brand mark</span>
+            <div>
+              <div class="title">A square within a square.</div>
+              <span class="lede">Outer ink, inner vermilion, both rotated 45°.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">5.1 — Wordmark</span><span>brand</span></div>
+            <div class="ex-body demo-row" style="gap: 3rem;">
+              <a href="#" class="brand" style="font-size: 1.35rem;">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span>Mnemon</span>
+              </a>
+              <a href="#" class="brand" style="font-size: 2rem;">
+                <span class="brand-mark" aria-hidden="true" style="width: 30px; height: 30px;"></span>
+                <span>Mnemon</span>
+              </a>
+              <a href="#" class="brand" style="font-size: 3rem;">
+                <span class="brand-mark" aria-hidden="true" style="width: 44px; height: 44px;"></span>
+                <span>Mnemon</span>
+              </a>
+            </div>
+            <div class="ex-note">
+              The mark scales without redrawing — outer + inner rotated squares only.
+              Do not introduce a second color or remove the rotation.
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.01 Colophon -->
+        <section class="ds-section" id="colophon">
+          <div class="head">
+            <span class="num">6.01 — Colophon</span>
+            <div>
+              <div class="title">Sticky top bar, paper-blurred.</div>
+              <span class="lede">Three regions: brand, primary nav, meta.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Top bar</span><span>.colophon</span></div>
+            <div class="ex-body flush">
+              <div style="border-bottom: var(--hairline) solid var(--rule); padding: 0.85rem 1.25rem; display: flex; justify-content: space-between; align-items: center; gap: 2rem;">
+                <a href="#" class="brand">
+                  <span class="brand-mark" aria-hidden="true"></span>
+                  <span>Mnemon</span>
+                  <span class="dim" style="font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; align-self: center;">v0.4 · primer</span>
+                </a>
+                <nav class="nav" style="display: flex; gap: 2rem; font-size: var(--t-small); color: var(--ink-soft);">
+                  <a href="#" class="is-active">Overview</a>
+                  <a href="#">Wiki</a>
+                  <a href="#">Palace</a>
+                  <a href="#">Spec sheet</a>
+                </nav>
+                <div class="nav-meta">
+                  <span>MIT · self-hosted</span>
+                  <a class="btn-bare" href="#">github / mnemon-hq</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.02 Buttons -->
+        <section class="ds-section" id="buttons">
+          <div class="head">
+            <span class="num">6.02 — Buttons</span>
+            <div>
+              <div class="title">Three variants. All rectilinear.</div>
+              <span class="lede">Solid, ghost, bare. Hover swaps to vermilion.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Variants</span><span>.btn / .btn-ghost / .btn-bare</span></div>
+            <div class="ex-body demo-row">
+              <button class="btn"><span>Read the install rite</span><span class="arrow">→</span></button>
+              <button class="btn btn-ghost"><span>Tour the palace</span><span class="arrow">→</span></button>
+              <a class="btn-bare" href="#">github / mnemon-hq</a>
+            </div>
+            <div class="ex-note">
+              The trailing <code>.arrow</code> translates 3px right on hover. Buttons
+              never round.
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.03 Tags & pin labels -->
+        <section class="ds-section" id="tags">
+          <div class="head">
+            <span class="num">6.03 — Tags &amp; pin labels</span>
+            <div>
+              <div class="title">Mono uppercase, hairline border, vermilion glyph.</div>
+              <span class="lede">Status pills (.tag) and diagram callouts (.pin-label).</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Status &amp; pins</span><span>.tag · .pin-label</span></div>
+            <div class="ex-body demo-row" style="gap: 1.25rem;">
+              <span class="tag"><span class="dot"></span>live</span>
+              <span class="tag"><span class="dot"></span>sealed</span>
+              <span class="tag"><span class="dot"></span>compiled</span>
+              <span class="pin-label">verbatim</span>
+              <span class="pin-label">recollect</span>
+              <span class="pin-label">trusted boundary</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.04 Section header -->
+        <section class="ds-section" id="sec-heads">
+          <div class="head">
+            <span class="num">6.04 — Section header</span>
+            <div>
+              <div class="title">Numbered, hairline-closed.</div>
+              <span class="lede">Roman label left, Garamond title + italic lede right.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Section header</span><span>.sec-head</span></div>
+            <div class="ex-body">
+              <div class="sec-head-demo">
+                <span class="num">§ I — Architecture</span>
+                <div>
+                  <div class="title">Raw storage at the base. Compiled knowledge on top.</div>
+                  <span class="lede">Two layers, one substrate.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.05 Axiom row -->
+        <section class="ds-section" id="axioms">
+          <div class="head">
+            <span class="num">6.05 — Axiom row</span>
+            <div>
+              <div class="title">Numbered statements of position.</div>
+              <span class="lede">One italic vermilion word per heading.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Axioms</span><span>.axioms / .axiom</span></div>
+            <div class="ex-body flush">
+              <div class="axioms" style="border-bottom: 0;">
+                <div class="axiom">
+                  <span class="num">i.</span>
+                  <h4 class="h serif">Store <em class="italic rubric">verbatim</em>.</h4>
+                  <p class="b">Every message, byte-perfect. Extraction is a derivative.</p>
+                </div>
+                <div class="axiom">
+                  <span class="num">ii.</span>
+                  <h4 class="h serif">Retrieve <em class="italic rubric">hybrid</em>.</h4>
+                  <p class="b">BM25 over tsvector, joined to pgvector cosine.</p>
+                </div>
+                <div class="axiom">
+                  <span class="num">iii.</span>
+                  <h4 class="h serif">Compile <em class="italic rubric">upward</em>.</h4>
+                  <p class="b">Raw notes condense into entries. The wiki lives.</p>
+                </div>
+                <div class="axiom">
+                  <span class="num">iv.</span>
+                  <h4 class="h serif">Own <em class="italic rubric">your house</em>.</h4>
+                  <p class="b">A Laravel package and a Postgres schema.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.06 Layer list -->
+        <section class="ds-section" id="layer-list">
+          <div class="head">
+            <span class="num">6.06 — Layer list</span>
+            <div>
+              <div class="title">A numbered, hairline-divided sequence.</div>
+              <span class="lede">Vermilion number, Garamond label, mono meta tag.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Sequential list</span><span>.layer-list</span></div>
+            <div class="ex-body">
+              <ul class="layer-list-mini">
+                <li><span class="n">01</span><span class="h">Capture</span><span class="meta">verbatim · sealed</span></li>
+                <li><span class="n">02</span><span class="h">Index</span><span class="meta">tsvector + pgvector</span></li>
+                <li><span class="n">03</span><span class="h">Compile</span><span class="meta">jobs · queued</span></li>
+                <li><span class="n">04</span><span class="h">Recall</span><span class="meta">MCP · hybrid</span></li>
+                <li><span class="n">05</span><span class="h">Reason</span><span class="meta">in your model</span></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.07 Pull -->
+        <section class="ds-section" id="pull">
+          <div class="head">
+            <span class="num">6.07 — Pull quote</span>
+            <div>
+              <div class="title">Italic Garamond, vermilion bar.</div>
+              <span class="lede">Used sparingly; once per article.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Pull quote</span><span>.pull</span></div>
+            <div class="ex-body">
+              <div class="pull">
+                A trained mind walks its own rooms the way a librarian walks the
+                stacks — knowing not what is on each shelf, but knowing exactly
+                where to look.
+                <cite>Field manual, Vol. I, §1</cite>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.08 Glossary -->
+        <section class="ds-section" id="glossary">
+          <div class="head">
+            <span class="num">6.08 — Glossary</span>
+            <div>
+              <div class="title">Term left, definition right.</div>
+              <span class="lede">Mono term in vermilion, Garamond definition.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Glossary</span><span>.glossary</span></div>
+            <div class="ex-body flush" style="padding: 1rem 1.25rem;">
+              <ul class="glossary">
+                <li><dt>Verbatim</dt><dd>The sealed, content-addressed original.</dd></li>
+                <li><dt>Entry</dt><dd>A compiled summary that cites one or more verbatims.</dd></li>
+                <li><dt>Locus</dt><dd>The pinned position of an entry inside a room.</dd></li>
+                <li><dt>Room</dt><dd>A coherent context — a project, a client, a thread.</dd></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.09 Figure -->
+        <section class="ds-section" id="figure">
+          <div class="head">
+            <span class="num">6.09 — Figure</span>
+            <div>
+              <div class="title">Hairline frame, mono caption, key/value body.</div>
+              <span class="lede">For schemas, configs, audit excerpts.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Figure with kv body</span><span>.figure / pre.kv</span></div>
+            <div class="ex-body">
+              <div style="border: var(--hairline) solid var(--rule-strong); background: var(--paper-deep);">
+                <div style="padding: 0.75rem 1rem; border-bottom: var(--hairline) solid var(--rule); display: flex; justify-content: space-between; gap: 1rem; font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);">
+                  <span style="color: var(--ink);">Fig. ds·c — A locus, expanded</span>
+                  <span>schema · v0.4</span>
+                </div>
+                <div style="padding: 1.5rem 1.25rem;">
+<pre style="margin:0;display:grid;gap:0.4rem 1rem;grid-template-columns:9rem 1fr;font-family:var(--mono);font-size:0.85rem;color:var(--ink);"><span style="color:var(--rubric);">id</span><span>l_8a4f29b1</span><span style="color:var(--rubric);">room</span><span>client/aurelia · desk</span><span style="color:var(--rubric);">verbatim</span><span>v_8821, v_8843, v_9010</span><span style="color:var(--rubric);">sealed_at</span><span>2026-04-17T14:08:21Z</span><span style="color:var(--rubric);">checksum</span><span>blake3:c14f…0e2a</span></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.10 Code -->
+        <section class="ds-section" id="code">
+          <div class="head">
+            <span class="num">6.10 — Code block</span>
+            <div>
+              <div class="title">Inverted ink surface. Line-numbered.</div>
+              <span class="lede">Vermilion keywords, gilt strings, italic comments.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Code · MCP recall</span><span>pre.code-mini</span></div>
+            <div class="ex-body flush">
+<pre class="code-mini"><span class="ln"><span class="c"># request — your agent</span></span><span class="ln"><span class="k">POST</span> /mcp/recall</span><span class="ln">{</span><span class="ln">  <span class="v">"room"</span>: <span class="s">"client/aurelia"</span>,</span><span class="ln">  <span class="v">"query"</span>: <span class="s">"webhook retries?"</span>,</span><span class="ln">  <span class="v">"k"</span>: <span class="v">8</span>, <span class="v">"hybrid"</span>: <span class="v">true</span></span><span class="ln">}</span></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.11 Spec cards -->
+        <section class="ds-section" id="spec-cards">
+          <div class="head">
+            <span class="num">6.11 — Spec cards</span>
+            <div>
+              <div class="title">Three-up, hairline-grid, corner-marked.</div>
+              <span class="lede">Mono label, Garamond value, plain description.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Spec sheet</span><span>.specs-grid / .spec</span></div>
+            <div class="ex-body flush">
+              <div class="spec-mini-grid">
+                <div class="spec-mini">
+                  <div class="corner">a.</div>
+                  <div class="lab">Substrate</div>
+                  <div class="v">Postgres ≥ 15</div>
+                  <div class="desc"><code>pgvector</code> + <code>tsvector</code>. One dependency.</div>
+                </div>
+                <div class="spec-mini">
+                  <div class="corner">b.</div>
+                  <div class="lab">Host</div>
+                  <div class="v">Laravel 11.x</div>
+                  <div class="desc">Composer-installable package.</div>
+                </div>
+                <div class="spec-mini">
+                  <div class="corner">c.</div>
+                  <div class="lab">Protocol</div>
+                  <div class="v">MCP · stdio + sse</div>
+                  <div class="desc">Twelve tools out of the box.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.12 Marginalia -->
+        <section class="ds-section" id="marginalia">
+          <div class="head">
+            <span class="num">6.12 — Marginalia</span>
+            <div>
+              <div class="title">Marginal voice for long-form pages.</div>
+              <span class="lede">Vermilion label, italic Garamond body, mono ref.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Marginalia block</span><span>.margin-block</span></div>
+            <div class="ex-body flush" style="padding: 1.5rem 0 1.5rem 1.5rem;">
+              <div class="margin-mini">
+                <div class="lab">Editor's note</div>
+                <div class="text">
+                  This entry is the canonical primer. If a later entry contradicts it, the
+                  later entry is wrong. <em>The base layer does not lie.</em>
+                </div>
+                <span class="ref">— mnemon-hq · 2026-04-12</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.13 Stamp -->
+        <section class="ds-section" id="stamp">
+          <div class="head">
+            <span class="num">6.13 — Stamp</span>
+            <div>
+              <div class="title">Sealed entry mark.</div>
+              <span class="lede">Vermilion bordered, slightly rotated.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Stamp</span><span>.stamp</span></div>
+            <div class="ex-body demo-row" style="gap: 2rem;">
+              <span class="stamp">Sealed · 2026-04-26</span>
+              <span class="stamp">Compiled · vol. I</span>
+              <span class="stamp">v_8821 · audited</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.14 Locus pin -->
+        <section class="ds-section" id="locus">
+          <div class="head">
+            <span class="num">6.14 — Locus pin</span>
+            <div>
+              <div class="title">A pinned memory on the floor plan.</div>
+              <span class="lede">Hover inverts; active is solid vermilion.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Loci on a grid</span><span>.locus</span></div>
+            <div class="ex-body flush">
+              <div class="pin-stage">
+                <div class="locus is-active" style="left:18%; top:30%;">readme.mnemon</div>
+                <div class="locus" style="left:42%; top:42%;">webhook-retries.md</div>
+                <div class="locus" style="left:68%; top:30%;">loci-paper.draft</div>
+                <div class="locus" style="left:32%; top:72%;">stripe-incident.log</div>
+                <div class="locus" style="left:75%; top:68%;">readme.mnemon</div>
+              </div>
+            </div>
+            <div class="ex-note">
+              Pins are positioned by percentage so they remain anchored to room geometry
+              when the floor plan rescales.
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.15 Floor plan -->
+        <section class="ds-section" id="floor">
+          <div class="head">
+            <span class="num">6.15 — Floor plan</span>
+            <div>
+              <div class="title">Architectural blueprint conventions.</div>
+              <span class="lede">Outer wall 3.5px, inner walls 2px, door arcs 1px.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Mini floor plan</span><span>svg.floorplan</span></div>
+            <div class="ex-body flush">
+              <div class="floor-demo">
+                <svg viewBox="0 0 400 300" preserveAspectRatio="none">
+                  <rect x="20" y="20" width="360" height="260" style="fill: var(--paper); stroke: var(--ink); stroke-width: 3.5;" />
+                  <g style="stroke: var(--ink); stroke-width: 2; fill: none;">
+                    <line x1="160" y1="20" x2="160" y2="140" />
+                    <line x1="160" y1="180" x2="160" y2="280" />
+                    <line x1="280" y1="20" x2="280" y2="280" />
+                    <line x1="20" y1="160" x2="120" y2="160" />
+                    <line x1="200" y1="160" x2="280" y2="160" />
+                  </g>
+                  <g style="stroke: var(--ink-faint); stroke-width: 1; fill: none;">
+                    <path d="M120 160 A 18 18 0 0 1 138 178" />
+                    <path d="M160 140 A 18 18 0 0 0 178 158" />
+                  </g>
+                  <g style="fill: var(--ink); stroke: none;">
+                    <circle cx="20" cy="20" r="3" />
+                    <circle cx="380" cy="20" r="3" />
+                    <circle cx="20" cy="280" r="3" />
+                    <circle cx="380" cy="280" r="3" />
+                  </g>
+                </svg>
+                <div style="position:absolute;left:25%;top:30%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">
+                  <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.2em;color:var(--ink-faint);">ROOM · I</div>
+                  <div style="font-family:var(--serif);font-style:italic;color:var(--ink-soft);">Atrium</div>
+                </div>
+                <div style="position:absolute;left:55%;top:30%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">
+                  <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.2em;color:var(--ink-faint);">ROOM · II</div>
+                  <div style="font-family:var(--serif);font-style:italic;color:var(--ink-soft);">Aurelia</div>
+                </div>
+                <div style="position:absolute;left:83%;top:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">
+                  <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.2em;color:var(--ink-faint);">ROOM · III</div>
+                  <div style="font-family:var(--serif);font-style:italic;color:var(--ink-soft);">Codex</div>
+                </div>
+              </div>
+            </div>
+            <div class="ex-note">
+              <strong style="color:var(--rubric);">Important:</strong> SVG presentation
+              attributes do <em>not</em> resolve <code>var(--*)</code>. Always use
+              <code>style="stroke: var(--ink);"</code> on SVG nodes, not
+              <code>stroke="var(--ink)"</code>.
+            </div>
+          </div>
+        </section>
+
+        <!-- 6.16 Compass + scale -->
+        <section class="ds-section" id="compass">
+          <div class="head">
+            <span class="num">6.16 — Compass &amp; scale</span>
+            <div>
+              <div class="title">Orientation furniture for the palace.</div>
+              <span class="lede">Vermilion north arrow, half-and-half scale bar.</span>
+            </div>
+          </div>
+
+          <div class="ex">
+            <div class="ex-cap"><span class="name">Compass + scale bar</span><span>.compass / .scale-bar</span></div>
+            <div class="ex-body demo-row" style="gap: 4rem;">
+              <div style="width: 5rem; height: 5rem; color: var(--ink-faint);">
+                <svg viewBox="0 0 80 80" stroke="currentColor" fill="none" stroke-width="0.75">
+                  <circle cx="40" cy="40" r="36" />
+                  <circle cx="40" cy="40" r="32" stroke-dasharray="1 4" />
+                  <line x1="40" y1="6"  x2="40" y2="74" />
+                  <line x1="6"  y1="40" x2="74" y2="40" />
+                  <line x1="16" y1="16" x2="64" y2="64" />
+                  <line x1="64" y1="16" x2="16" y2="64" />
+                  <path d="M40 8 L46 38 L40 32 L34 38 Z" style="fill: var(--rubric); stroke: none;" />
+                  <text x="40" y="5" text-anchor="middle" style="fill: var(--rubric); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 7px; letter-spacing: 1.2px;">N</text>
+                </svg>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 0.4rem; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);">
+                <span>0 ↔ 1m</span>
+                <div style="width: 6rem; height: 8px; background: linear-gradient(90deg, var(--ink) 0 50%, var(--paper) 50% 100%); border: 1px solid var(--ink);"></div>
+                <span>scale 1:50</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- closing ornament -->
+        <div class="ornament">❦ · ❦ · ❦</div>
+
+        <p class="serif" style="text-align: center; font-style: italic; color: var(--ink-faint); max-width: 38rem; margin: 0 auto;">
+          The full specification, including voice and copy guidance, lives in
+          <a href="../docs/design_system.md" style="color: var(--rubric); border-bottom: 1px dotted var(--rubric);"><code>/docs/design_system.md</code></a>.
+          Reference implementations:
+          <a href="sample_landing.html" style="color: var(--rubric); border-bottom: 1px dotted var(--rubric);">landing</a>,
+          <a href="sample_wiki.html" style="color: var(--rubric); border-bottom: 1px dotted var(--rubric);">wiki</a>,
+          <a href="sample_palace.html" style="color: var(--rubric); border-bottom: 1px dotted var(--rubric);">palace</a>.
+        </p>
+
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="frame flex between" style="flex-wrap:wrap;gap:1rem;">
+      <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">© Mnemon HQ · MIT License · Design system v0.4</span>
+      <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">Hand-set in EB Garamond &amp; JetBrains Mono</span>
+    </div>
+  </footer>
+</body>
+</html>

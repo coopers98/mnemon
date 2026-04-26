@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Palace — Mnemon</title>
+  <link rel="stylesheet" href="styles/mnemon.css" />
+  <style>
+    /* ---------- Palace shell ---------- */
+    body { overflow: hidden; height: 100vh; }
+    .palace-app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+    .palace-main {
+      display: grid;
+      grid-template-columns: 16rem minmax(0, 1fr) 19rem;
+      min-height: 0;
+    }
+    @media (max-width: 1180px) {
+      .palace-main { grid-template-columns: 14rem 1fr; }
+      .inspector-rail { display: none; }
+    }
+
+    /* ---------- Left rail: rooms ---------- */
+    .rooms-rail {
+      border-right: var(--hairline) solid var(--rule-strong);
+      background: var(--paper);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .rail-head {
+      padding: 1.25rem 1.25rem 0.85rem;
+      border-bottom: var(--hairline) solid var(--rule);
+    }
+    .rail-head h2 {
+      font-family: var(--serif);
+      font-size: 1.55rem;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.25rem;
+    }
+    .rail-head h2 em { color: var(--rubric); font-style: italic; font-weight: 400; }
+    .rail-head .sub {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+    }
+
+    .rail-search {
+      margin: 0.85rem 1.25rem 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.7rem;
+      border: var(--hairline) solid var(--rule-strong);
+      background: var(--paper-deep);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--ink-faint);
+    }
+    .rail-search input {
+      border: 0; background: transparent; outline: none; flex: 1;
+      font: inherit; color: var(--ink);
+    }
+    .rail-search .kbd {
+      font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.1em;
+      padding: 0.1rem 0.35rem; border: 1px solid var(--rule-strong);
+      color: var(--ink-faint);
+    }
+
+    .rail-section {
+      padding: 1.25rem 1.25rem 0.5rem;
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+      display: flex; justify-content: space-between; align-items: baseline;
+    }
+    .room-list { list-style: none; padding: 0 0.6rem; margin: 0; }
+    .room-item {
+      display: grid;
+      grid-template-columns: 1.4rem 1fr auto;
+      gap: 0.5rem;
+      padding: 0.55rem 0.65rem;
+      border-bottom: var(--hairline) solid transparent;
+      align-items: center;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-radius: 0;
+    }
+    .room-item:hover { background: var(--paper-deep); }
+    .room-item.is-active { background: var(--paper-deep); }
+    .room-item.is-active .glyph { background: var(--rubric); border-color: var(--rubric); }
+    .room-item.is-active .name { color: var(--rubric); }
+    .room-item .glyph {
+      width: 12px; height: 12px;
+      border: 1.25px solid var(--ink);
+      transform: rotate(45deg);
+    }
+    .room-item .name {
+      font-family: var(--serif); font-size: 1rem; line-height: 1.15;
+    }
+    .room-item .name .meta {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--ink-faint);
+      letter-spacing: 0.1em;
+      margin-top: 0.1rem;
+      text-transform: uppercase;
+    }
+    .room-item .count {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--ink-faint);
+      letter-spacing: 0.05em;
+    }
+
+    .rail-foot {
+      margin-top: auto;
+      padding: 1rem 1.25rem;
+      border-top: var(--hairline) solid var(--rule);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.06em;
+      color: var(--ink-faint);
+      line-height: 1.6;
+    }
+    .rail-foot a { color: var(--ink); border-bottom: 1px dotted var(--ink-faint); }
+    .rail-foot a:hover { color: var(--rubric); border-color: var(--rubric); }
+
+    /* ---------- Center stage: floor plan canvas ---------- */
+    .stage {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 32px 32px,
+        var(--paper-deep);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    /* Stage toolbar */
+    .stage-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      border-bottom: var(--hairline) solid var(--rule);
+      background: color-mix(in oklch, var(--paper) 92%, transparent);
+      backdrop-filter: blur(6px);
+      gap: 1rem;
+    }
+    .stage-bar .breadcrumb {
+      display: flex; align-items: baseline; gap: 0.6rem;
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+    }
+    .stage-bar .breadcrumb .here {
+      font-family: var(--serif); text-transform: none; letter-spacing: 0;
+      font-size: 1.05rem; color: var(--ink); font-style: italic;
+    }
+    .stage-bar .stage-tools {
+      display: flex; align-items: stretch; gap: 0;
+      border: var(--hairline) solid var(--rule-strong);
+    }
+    .tool {
+      padding: 0.4rem 0.75rem;
+      border-right: var(--hairline) solid var(--rule);
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-soft);
+      background: var(--paper);
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    .tool:last-child { border-right: 0; }
+    .tool:hover { color: var(--ink); }
+    .tool.is-active { color: var(--paper); background: var(--ink); }
+
+    /* Canvas (the actual blueprint) */
+    .blueprint {
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .blueprint-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 480px;
+    }
+    .blueprint svg.floorplan {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* loci pinned to floor plan */
+    .locus {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.55rem;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.06em;
+      color: var(--ink);
+      cursor: pointer;
+      transition: transform 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      max-width: 18rem;
+    }
+    .locus::before {
+      content: "";
+      width: 6px; height: 6px;
+      background: var(--rubric);
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+    .locus:hover {
+      background: var(--ink);
+      color: var(--paper);
+      border-color: var(--ink);
+      transform: translate(-50%, -50%) scale(1.04);
+      z-index: 5;
+    }
+    .locus.is-active {
+      background: var(--rubric);
+      color: var(--paper);
+      border-color: var(--rubric);
+      z-index: 6;
+    }
+    .locus.is-active::before { background: var(--paper); }
+
+    /* room labels (architectural) */
+    .room-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      text-align: center;
+    }
+    .room-label .num {
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.2em;
+      color: var(--ink-faint);
+    }
+    .room-label .nm {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 1.1rem;
+      color: var(--ink-soft);
+      letter-spacing: 0;
+    }
+
+    /* status footer */
+    .stage-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.6rem 1.25rem;
+      border-top: var(--hairline) solid var(--rule);
+      background: color-mix(in oklch, var(--paper) 92%, transparent);
+      font-family: var(--mono);
+      font-size: var(--t-micro);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .stage-foot .group { display: flex; gap: 1.5rem; }
+    .stage-foot b { color: var(--ink); font-weight: 500; }
+    .stage-foot .rubric { color: var(--rubric); }
+
+    /* ---------- Right rail: inspector ---------- */
+    .inspector-rail {
+      border-left: var(--hairline) solid var(--rule-strong);
+      background: var(--paper);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .insp-head {
+      padding: 1.25rem 1.5rem 1rem;
+      border-bottom: var(--hairline) solid var(--rule-strong);
+    }
+    .insp-head .crumb {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);
+      margin-bottom: 0.5rem;
+    }
+    .insp-head .crumb .rubric { color: var(--rubric); }
+    .insp-head h3 {
+      font-family: var(--serif); font-size: 1.6rem; line-height: 1.15;
+      letter-spacing: -0.01em; margin-bottom: 0.5rem;
+    }
+    .insp-head .id {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--ink-faint);
+      letter-spacing: 0.04em;
+    }
+
+    .insp-section { padding: 1.25rem 1.5rem; border-bottom: var(--hairline) solid var(--rule); }
+    .insp-section h4 {
+      font-family: var(--mono); font-size: var(--t-micro);
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+      margin-bottom: 0.75rem; font-weight: 500;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 5.5rem 1fr;
+      gap: 0.5rem 1rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+    .meta-grid .k { color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.7rem; padding-top: 0.15rem; }
+    .meta-grid .v { color: var(--ink); }
+    .meta-grid .v .dim { color: var(--ink-faint); }
+
+    .verbatim-list {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; gap: 0.6rem;
+    }
+    .verbatim-list li {
+      display: grid;
+      grid-template-columns: 4rem 1fr;
+      gap: 0.75rem;
+      align-items: baseline;
+      padding: 0.5rem 0;
+      border-bottom: var(--hairline) solid var(--rule);
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .verbatim-list li:hover .ttl { color: var(--rubric); }
+    .verbatim-list .id {
+      font-family: var(--mono); font-size: 0.7rem; color: var(--rubric);
+      letter-spacing: 0.06em;
+    }
+    .verbatim-list .ttl {
+      font-family: var(--serif); font-size: 0.95rem; line-height: 1.3; transition: color 0.15s;
+    }
+    .verbatim-list .meta {
+      font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint);
+      margin-top: 0.15rem; letter-spacing: 0.04em;
+    }
+
+    .excerpt {
+      font-family: var(--serif); font-size: 0.95rem; line-height: 1.55;
+      color: var(--ink); padding-left: 0.75rem;
+      border-left: 2px solid var(--rubric);
+      font-style: italic;
+    }
+    .excerpt .speaker {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin-bottom: 0.4rem;
+      font-style: normal;
+    }
+
+    .neighbours {
+      display: grid; gap: 0.4rem;
+    }
+    .nb {
+      display: grid;
+      grid-template-columns: 1.1rem 1fr auto;
+      gap: 0.5rem;
+      padding: 0.4rem 0;
+      border-bottom: var(--hairline) solid var(--rule);
+      font-family: var(--serif);
+      font-size: 0.95rem;
+      align-items: baseline;
+      cursor: pointer;
+    }
+    .nb:hover .label { color: var(--rubric); }
+    .nb .glyph {
+      width: 6px; height: 6px;
+      background: var(--ink-faint);
+      transform: rotate(45deg) translateY(0.25rem);
+    }
+    .nb .label { transition: color 0.15s; }
+    .nb .dist { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint); }
+
+    .insp-cta {
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .insp-cta .btn { font-size: 0.8rem; padding: 0.55rem 0.9rem; }
+
+    /* ---------- Mini-map (inside stage corner) ---------- */
+    .mini-map {
+      position: absolute;
+      right: 1rem;
+      bottom: 3.6rem;
+      width: 11rem;
+      height: 7.5rem;
+      border: var(--hairline) solid var(--rule-strong);
+      background: color-mix(in oklch, var(--paper) 92%, transparent);
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+      z-index: 5;
+    }
+    .mini-map .cap {
+      position: absolute; top: 0.35rem; left: 0.5rem;
+      font-family: var(--mono); font-size: 0.6rem;
+      letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);
+    }
+    .mini-map svg { width: 100%; height: 100%; }
+    .mini-map .vp {
+      position: absolute;
+      border: 1px solid var(--rubric);
+      left: 18%; top: 30%; width: 50%; height: 45%;
+    }
+
+    /* ---------- Compass ornament on stage ---------- */
+    .compass {
+      position: absolute;
+      left: 1.25rem; top: 4.5rem;
+      width: 4.5rem; height: 4.5rem;
+      pointer-events: none;
+      color: var(--ink-faint);
+      z-index: 4;
+    }
+    .compass svg { width: 100%; height: 100%; }
+
+    /* tiny scale bar */
+    .scale-bar {
+      position: absolute;
+      left: 1.25rem; bottom: 3.6rem;
+      display: flex; flex-direction: column; gap: 0.25rem;
+      font-family: var(--mono);
+      font-size: 0.6rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      pointer-events: none;
+      z-index: 4;
+    }
+    .scale-bar .bar {
+      width: 6rem; height: 8px;
+      background: linear-gradient(90deg, var(--ink) 0 50%, var(--paper) 50% 100%);
+      border: 1px solid var(--ink);
+    }
+
+    /* slim header for palace */
+    .palace-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 1.25rem;
+      align-items: center;
+      padding: 0.85rem clamp(1.25rem, 2vw, 2rem);
+      border-bottom: var(--hairline) solid var(--rule);
+      background: color-mix(in oklch, var(--paper) 90%, transparent);
+      backdrop-filter: blur(8px);
+    }
+    .palace-head .nav { justify-self: center; }
+    .palace-head .brand,
+    .palace-head .brand .dim,
+    .palace-head .nav-meta,
+    .palace-head .nav-meta span,
+    .palace-head .nav-meta a { white-space: nowrap !important; }
+  </style>
+</head>
+<body>
+  <div class="palace-app">
+
+    <!-- ============== Header ============== -->
+    <header class="palace-head">
+      <a href="index.html" class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Mnemon</span>
+        <span class="dim" style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.14em;text-transform:uppercase;align-self:center;">palace · ground floor</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html">Overview</a>
+        <a href="wiki.html">Wiki</a>
+        <a href="palace.html" class="is-active">Palace</a>
+        <a href="index.html#specs">Spec sheet</a>
+        <a href="index.html#install">Self-host</a>
+      </nav>
+      <div class="nav-meta">
+        <span><span class="rubric">●</span> sealed · 142 loci</span>
+        <a class="btn-bare" href="#">⌘K · search palace</a>
+      </div>
+    </header>
+
+    <!-- ============== Main 3-column ============== -->
+    <div class="palace-main">
+
+      <!-- ============== Rooms rail ============== -->
+      <aside class="rooms-rail" aria-label="Rooms">
+        <div class="rail-head">
+          <h2 class="serif">The <em>palace</em>.</h2>
+          <span class="sub">7 rooms · 142 loci · 4 floors</span>
+        </div>
+
+        <div class="rail-search">
+          <span aria-hidden="true">⌕</span>
+          <input type="text" placeholder="walk to…" />
+          <span class="kbd">⌘K</span>
+        </div>
+
+        <div class="rail-section"><span>Ground floor</span><span>vii</span></div>
+        <ul class="room-list">
+          <li class="room-item is-active" data-room="i">
+            <span class="glyph"></span>
+            <span class="name">The Atrium <span class="meta">i · entrance · 4 loci</span></span>
+            <span class="count">04</span>
+          </li>
+          <li class="room-item" data-room="ii">
+            <span class="glyph"></span>
+            <span class="name">Aurelia <span class="meta">ii · client · 28 loci</span></span>
+            <span class="count">28</span>
+          </li>
+          <li class="room-item" data-room="iii">
+            <span class="glyph"></span>
+            <span class="name">Research desk <span class="meta">iii · personal · 41 loci</span></span>
+            <span class="count">41</span>
+          </li>
+          <li class="room-item" data-room="iv">
+            <span class="glyph"></span>
+            <span class="name">Stripe incidents <span class="meta">iv · ops · 12 loci</span></span>
+            <span class="count">12</span>
+          </li>
+          <li class="room-item" data-room="v">
+            <span class="glyph"></span>
+            <span class="name">Apprentice's notes <span class="meta">v · agents · 19 loci</span></span>
+            <span class="count">19</span>
+          </li>
+          <li class="room-item" data-room="vi">
+            <span class="glyph"></span>
+            <span class="name">The Codex <span class="meta">vi · long-form · 8 loci</span></span>
+            <span class="count">08</span>
+          </li>
+          <li class="room-item" data-room="vii">
+            <span class="glyph"></span>
+            <span class="name">Cellar <span class="meta">vii · archive · 30 loci</span></span>
+            <span class="count">30</span>
+          </li>
+        </ul>
+
+        <div class="rail-section"><span>Upper floors</span><span>—</span></div>
+        <ul class="room-list">
+          <li class="room-item">
+            <span class="glyph" style="opacity:0.4;"></span>
+            <span class="name dim">Mezzanine <span class="meta">— locked</span></span>
+            <span class="count">—</span>
+          </li>
+          <li class="room-item">
+            <span class="glyph" style="opacity:0.4;"></span>
+            <span class="name dim">Loft <span class="meta">— empty</span></span>
+            <span class="count">00</span>
+          </li>
+        </ul>
+
+        <div class="rail-foot">
+          <strong style="color:var(--ink);font-family:var(--serif);font-style:italic;font-size:1rem;">Walk this palace</strong><br/>
+          Click a locus to inspect.<br/>
+          Press <a href="#">⇧ + W</a> to walk.<br/>
+          Press <a href="#">⌥ + S</a> to seal new memory.
+        </div>
+      </aside>
+
+      <!-- ============== Stage ============== -->
+      <section class="stage" aria-label="Floor plan">
+        <!-- Toolbar -->
+        <div class="stage-bar">
+          <div class="breadcrumb">
+            <span>Palace /</span>
+            <span>Ground /</span>
+            <span class="here">The Atrium</span>
+            <span class="rubric" style="margin-left:0.75rem;">●</span>
+            <span>sealed · 2026-04-26</span>
+          </div>
+          <div class="stage-tools" role="toolbar">
+            <button class="tool is-active">Floor plan</button>
+            <button class="tool">Wheel</button>
+            <button class="tool">Graph</button>
+            <button class="tool">List</button>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center;">
+            <span class="tag"><span class="dot"></span>live</span>
+            <button class="btn" style="font-size:0.75rem;padding:0.5rem 0.85rem;">
+              <span>Walk this room</span><span class="arrow">→</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Blueprint -->
+        <div class="blueprint">
+          <div class="blueprint-inner">
+
+            <!-- Compass ornament -->
+            <div class="compass">
+              <svg viewBox="0 0 80 80" stroke="currentColor" fill="none" stroke-width="0.75">
+                <circle cx="40" cy="40" r="36" />
+                <circle cx="40" cy="40" r="32" stroke-dasharray="1 4" />
+                <line x1="40" y1="6"  x2="40" y2="74" />
+                <line x1="6"  y1="40" x2="74" y2="40" />
+                <line x1="16" y1="16" x2="64" y2="64" />
+                <line x1="64" y1="16" x2="16" y2="64" />
+                <path d="M40 8 L46 38 L40 32 L34 38 Z" style="fill: var(--rubric); stroke: none;" />
+                <text x="40" y="5" text-anchor="middle" style="fill: var(--rubric); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 7px; letter-spacing: 1.2px;">N</text>
+              </svg>
+            </div>
+
+            <!-- Floor plan SVG (uses style= for CSS-var resolution; presentation attrs don't resolve var()) -->
+            <svg class="floorplan" viewBox="0 0 1200 720" preserveAspectRatio="none">
+
+              <defs>
+                <pattern id="hatch" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)">
+                  <line x1="0" y1="0" x2="0" y2="10" style="stroke: var(--ink-ghost); stroke-width: 0.5;" />
+                </pattern>
+              </defs>
+
+              <!-- exterior fill (hatched) -->
+              <rect x="0" y="0" width="1200" height="720" fill="url(#hatch)" opacity="0.5"/>
+              <!-- interior fill -->
+              <rect x="60" y="60" width="1080" height="600" style="fill: var(--paper);" />
+
+              <!-- outer wall, thick -->
+              <g style="stroke: var(--ink); stroke-width: 3.5; fill: none;">
+                <rect x="60" y="60" width="1080" height="600" />
+              </g>
+
+              <!-- inner walls, thinner -->
+              <g style="stroke: var(--ink); stroke-width: 2; fill: none;">
+                <line x1="380" y1="60"  x2="380" y2="320" />
+                <line x1="380" y1="380" x2="380" y2="660" />
+                <line x1="700" y1="60"  x2="700" y2="200" />
+                <line x1="700" y1="260" x2="700" y2="660" />
+                <line x1="940" y1="60"  x2="940" y2="660" />
+                <line x1="60"  y1="360" x2="240" y2="360" />
+                <line x1="300" y1="360" x2="380" y2="360" />
+                <line x1="380" y1="360" x2="700" y2="360" />
+                <line x1="700" y1="430" x2="940" y2="430" />
+                <line x1="940" y1="280" x2="1140" y2="280" />
+                <line x1="940" y1="500" x2="1140" y2="500" />
+              </g>
+
+              <!-- door arcs -->
+              <g style="stroke: var(--ink-faint); stroke-width: 1; fill: none;">
+                <path d="M240 360 A 30 30 0 0 1 270 390" />
+                <path d="M380 320 A 28 28 0 0 0 408 348" />
+                <path d="M700 200 A 28 28 0 0 1 728 228" />
+                <path d="M700 430 A 28 28 0 0 0 728 458" />
+                <path d="M940 280 A 28 28 0 0 1 968 308" />
+                <path d="M940 500 A 28 28 0 0 0 968 528" />
+              </g>
+
+              <!-- column dots -->
+              <g style="fill: var(--ink); stroke: none;">
+                <circle cx="60"  cy="60"  r="5" />
+                <circle cx="1140" cy="60" r="5" />
+                <circle cx="60"  cy="660" r="5" />
+                <circle cx="1140" cy="660" r="5" />
+              </g>
+
+              <!-- dimension lines (top) -->
+              <g style="stroke: var(--ink-faint); stroke-width: 0.6; fill: none;">
+                <line x1="60"  y1="38" x2="1140" y2="38" />
+                <line x1="60"  y1="32" x2="60"   y2="44" />
+                <line x1="1140" y1="32" x2="1140" y2="44" />
+                <line x1="380" y1="32" x2="380"  y2="44" />
+                <line x1="700" y1="32" x2="700"  y2="44" />
+                <line x1="940" y1="32" x2="940"  y2="44" />
+              </g>
+
+              <!-- dimension labels -->
+              <g style="fill: var(--ink-faint); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 1.2px;">
+                <text x="220" y="28" text-anchor="middle">320 mm</text>
+                <text x="540" y="28" text-anchor="middle">320 mm</text>
+                <text x="820" y="28" text-anchor="middle">240 mm</text>
+                <text x="1040" y="28" text-anchor="middle">200 mm</text>
+              </g>
+
+              <!-- title block bottom-right -->
+              <g>
+                <rect x="940" y="600" width="200" height="60" style="stroke: var(--ink); stroke-width: 1.5; fill: var(--paper);" />
+                <line x1="940" y1="630" x2="1140" y2="630" style="stroke: var(--ink); stroke-width: 0.5;" />
+                <line x1="1040" y1="600" x2="1040" y2="660" style="stroke: var(--ink); stroke-width: 0.5;" />
+                <text x="950" y="618" style="fill: var(--ink); stroke: none; font-family: 'EB Garamond', serif; font-style: italic; font-size: 14px;">Mnemon · Plate ii</text>
+                <text x="950" y="648" style="fill: var(--ink-faint); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 1.2px;">SCALE 1:50</text>
+                <text x="1050" y="618" style="fill: var(--ink-faint); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 1.2px;">GROUND FLR</text>
+                <text x="1050" y="648" style="fill: var(--rubric); stroke: none; font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 1.2px;">A.M. MMXXVI</text>
+              </g>
+            </svg>
+
+            <!-- Room labels -->
+            <div class="room-label" style="left:18%; top:25%;">
+              <div class="num">ROOM · I</div>
+              <div class="nm">The Atrium</div>
+            </div>
+            <div class="room-label" style="left:45%; top:25%;">
+              <div class="num">ROOM · II</div>
+              <div class="nm">Aurelia</div>
+            </div>
+            <div class="room-label" style="left:68%; top:18%;">
+              <div class="num">ROOM · III</div>
+              <div class="nm">Research desk</div>
+            </div>
+            <div class="room-label" style="left:87%; top:24%;">
+              <div class="num">ROOM · VI</div>
+              <div class="nm">The Codex</div>
+            </div>
+            <div class="room-label" style="left:18%; top:71%;">
+              <div class="num">ROOM · IV</div>
+              <div class="nm">Stripe incidents</div>
+            </div>
+            <div class="room-label" style="left:45%; top:71%;">
+              <div class="num">ROOM · V</div>
+              <div class="nm">Apprentice's notes</div>
+            </div>
+            <div class="room-label" style="left:68%; top:78%;">
+              <div class="num">ROOM · VII</div>
+              <div class="nm">Cellar</div>
+            </div>
+
+            <!-- Loci pinned to rooms -->
+            <!-- Room I (Atrium) -->
+            <div class="locus is-active" style="left:13%; top:36%;">readme.mnemon</div>
+            <div class="locus" style="left:23%; top:42%;">install-rite.md</div>
+            <div class="locus" style="left:18%; top:48%;">first-walk.log</div>
+            <div class="locus" style="left:8%; top:32%;">visitor.tx</div>
+
+            <!-- Room II (Aurelia) -->
+            <div class="locus" style="left:38%; top:32%;">webhook-retries.md</div>
+            <div class="locus" style="left:48%; top:38%;">v_8821 · chat 04-17</div>
+            <div class="locus" style="left:55%; top:32%;">contract.pdf</div>
+            <div class="locus" style="left:40%; top:42%;">aurelia/glossary</div>
+            <div class="locus" style="left:52%; top:46%;">decision-log</div>
+
+            <!-- Room III (Research desk) -->
+            <div class="locus" style="left:62%; top:14%;">loci-paper.draft</div>
+            <div class="locus" style="left:73%; top:18%;">yates-1966.notes</div>
+            <div class="locus" style="left:65%; top:22%;">cicero/dialog</div>
+            <div class="locus" style="left:75%; top:26%;">bruno/wheels</div>
+
+            <!-- Room VI (Codex) -->
+            <div class="locus" style="left:84%; top:14%;">vol.i/§1.01</div>
+            <div class="locus" style="left:91%; top:18%;">vol.i/§2.03</div>
+            <div class="locus" style="left:84%; top:22%;">vol.i/§3.01</div>
+
+            <!-- Room IV (Stripe incidents) -->
+            <div class="locus" style="left:14%; top:62%;">2026-03-12 · 502s</div>
+            <div class="locus" style="left:24%; top:68%;">webhook-storm.log</div>
+            <div class="locus" style="left:18%; top:74%;">post-mortem.md</div>
+
+            <!-- Room V (Apprentice) -->
+            <div class="locus" style="left:42%; top:62%;">agent-7 · session</div>
+            <div class="locus" style="left:50%; top:66%;">agent-7 · system</div>
+            <div class="locus" style="left:44%; top:74%;">prompt-set.v3</div>
+            <div class="locus" style="left:55%; top:78%;">tool-traces.jsonl</div>
+
+            <!-- Room VII (Cellar) -->
+            <div class="locus" style="left:75%; top:62%;">2025-Q4.archive</div>
+            <div class="locus" style="left:84%; top:66%;">2025-Q3.archive</div>
+            <div class="locus" style="left:80%; top:74%;">2024.tarball</div>
+            <div class="locus" style="left:90%; top:78%;">old-loci.snapshot</div>
+
+            <!-- Mini-map -->
+            <div class="mini-map" aria-hidden="true">
+              <span class="cap">Plan · 1:200</span>
+              <svg viewBox="0 0 200 130">
+                <rect x="10" y="10" width="180" height="110" style="fill: none; stroke: var(--ink); stroke-width: 1;" />
+                <g style="stroke: var(--ink); stroke-width: 0.6; fill: none;">
+                  <line x1="65" y1="10" x2="65" y2="60" />
+                  <line x1="65" y1="70" x2="65" y2="120" />
+                  <line x1="120" y1="10" x2="120" y2="40" />
+                  <line x1="120" y1="50" x2="120" y2="120" />
+                  <line x1="160" y1="10" x2="160" y2="120" />
+                  <line x1="10" y1="65" x2="65" y2="65" />
+                  <line x1="120" y1="80" x2="160" y2="80" />
+                  <line x1="160" y1="55" x2="190" y2="55" />
+                  <line x1="160" y1="90" x2="190" y2="90" />
+                </g>
+              </svg>
+              <div class="vp"></div>
+            </div>
+
+            <!-- Scale bar -->
+            <div class="scale-bar" aria-hidden="true">
+              <span>0 ↔ 1m</span>
+              <div class="bar"></div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Stage footer -->
+        <div class="stage-foot">
+          <div class="group">
+            <span><b>142</b> loci</span>
+            <span><b>7</b> rooms</span>
+            <span><b>4</b> floors</span>
+          </div>
+          <div class="group">
+            <span class="rubric">●</span><span>sealed</span>
+            <span><b>blake3</b> · c14f…0e2a</span>
+          </div>
+          <div class="group">
+            <span>last walk · 09:14 utc</span>
+            <span>postgres · localhost:5432</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== Inspector ============== -->
+      <aside class="inspector-rail" aria-label="Locus inspector">
+        <div class="insp-head">
+          <div class="crumb">
+            <span class="rubric">●</span> Atrium · I / locus
+          </div>
+          <h3 class="serif"><em class="italic" style="color:var(--rubric);font-weight:400;">readme.</em>mnemon</h3>
+          <div class="id">l_8a4f0001 · pinned at (0.13, 0.36)</div>
+        </div>
+
+        <section class="insp-section">
+          <h4>Metadata</h4>
+          <div class="meta-grid">
+            <span class="k">room</span>          <span class="v">i · The Atrium</span>
+            <span class="k">entry</span>         <span class="v">e_017aa4 — "Welcome to your palace"</span>
+            <span class="k">verbatim</span>      <span class="v">3 sources <span class="dim">· v_0001, v_0002, v_0017</span></span>
+            <span class="k">sealed</span>        <span class="v">2026-04-26 09:14 UTC</span>
+            <span class="k">checksum</span>      <span class="v">blake3:<span class="dim">c14f…0e2a</span></span>
+            <span class="k">backlinks</span>     <span class="v">17</span>
+            <span class="k">walk</span>          <span class="v dim">mnemon walk e_017aa4</span>
+          </div>
+        </section>
+
+        <section class="insp-section">
+          <h4>Excerpt · verbatim v_0001</h4>
+          <div class="excerpt">
+            <span class="speaker">Operator · 2026-04-12 18:02</span>
+            "The first thing you put in the palace should be the instructions for the
+            palace. Everything after that is easier."
+          </div>
+        </section>
+
+        <section class="insp-section">
+          <h4>Verbatim sources · 3</h4>
+          <ul class="verbatim-list">
+            <li>
+              <span class="id">v_0001</span>
+              <div>
+                <div class="ttl">Welcome message · operator note</div>
+                <div class="meta">2026-04-12 · 184 tokens · sealed</div>
+              </div>
+            </li>
+            <li>
+              <span class="id">v_0002</span>
+              <div>
+                <div class="ttl">install.log · first run</div>
+                <div class="meta">2026-04-12 · 1.2 kB · sealed</div>
+              </div>
+            </li>
+            <li>
+              <span class="id">v_0017</span>
+              <div>
+                <div class="ttl">RFC-001 · the atrium contract</div>
+                <div class="meta">2026-04-15 · 4.4 kB · sealed</div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="insp-section">
+          <h4>Neighbours · same room</h4>
+          <div class="neighbours">
+            <div class="nb">
+              <span class="glyph"></span>
+              <span class="label serif">install-rite.md</span>
+              <span class="dist">+0.11</span>
+            </div>
+            <div class="nb">
+              <span class="glyph"></span>
+              <span class="label serif">first-walk.log</span>
+              <span class="dist">+0.14</span>
+            </div>
+            <div class="nb">
+              <span class="glyph"></span>
+              <span class="label serif">visitor.tx</span>
+              <span class="dist">+0.08</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="insp-cta">
+          <a class="btn" href="wiki.html"><span>Open in wiki</span><span class="arrow">→</span></a>
+          <a class="btn btn-ghost" href="#"><span>Walk from here</span></a>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    // Tiny interactive sugar — click a locus to mark it active and update the
+    // inspector header. Click a room to highlight it.
+    (function(){
+      const loci = document.querySelectorAll('.locus');
+      const headTitle = document.querySelector('.insp-head h3');
+      const headId = document.querySelector('.insp-head .id');
+      const headCrumb = document.querySelector('.insp-head .crumb');
+      const breadHere = document.querySelector('.stage-bar .breadcrumb .here');
+
+      loci.forEach((el, i) => {
+        el.addEventListener('click', () => {
+          loci.forEach(l => l.classList.remove('is-active'));
+          el.classList.add('is-active');
+          const t = el.textContent.trim();
+          // split into pretty title
+          const head = t.replace(/^([^/.]+)([/.])/, '<em class="italic" style="color:var(--rubric);font-weight:400;">$1$2</em>');
+          headTitle.innerHTML = head;
+          headId.textContent = 'l_' + (0x8a4f0001 + i).toString(16) + ' · pinned at locus';
+          // peek the room label closest to this locus' x position
+          const xpct = parseFloat(el.style.left);
+          const ypct = parseFloat(el.style.top);
+          const roomMap = [
+            { x:18, y:25, name:'The Atrium',          num:'I' },
+            { x:45, y:25, name:'Aurelia',             num:'II' },
+            { x:68, y:18, name:'Research desk',       num:'III' },
+            { x:87, y:24, name:'The Codex',           num:'VI' },
+            { x:18, y:71, name:'Stripe incidents',    num:'IV' },
+            { x:45, y:71, name:'Apprentice\u2019s notes', num:'V' },
+            { x:68, y:78, name:'Cellar',              num:'VII' }
+          ];
+          let best = roomMap[0], bestD = Infinity;
+          for (const r of roomMap) {
+            const d = (r.x - xpct)**2 + (r.y - ypct)**2;
+            if (d < bestD) { bestD = d; best = r; }
+          }
+          headCrumb.innerHTML = '<span class="rubric">●</span> ' + best.name + ' · ' + best.num + ' / locus';
+          breadHere.textContent = best.name;
+        });
+      });
+
+      // Room rail click -> set active and pan a tiny bit (just style change)
+      document.querySelectorAll('.room-item').forEach(item => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.room-item').forEach(i => i.classList.remove('is-active'));
+          item.classList.add('is-active');
+        });
+      });
+
+      // Tool buttons (visual only)
+      document.querySelectorAll('.stage-tools .tool').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.stage-tools .tool').forEach(b => b.classList.remove('is-active'));
+          btn.classList.add('is-active');
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -4,10 +4,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
 class WikiPage extends Model
 {
+    use SoftDeletes;
+
     public const TYPES = [
         'person' => 'person',
         'project' => 'project',
@@ -36,6 +40,7 @@ class WikiPage extends Model
         'description',
         'confidence',
         'confidence_score',
+        'quality_score',
         'source_count',
         'sources',
         'related',
@@ -50,6 +55,7 @@ class WikiPage extends Model
     protected $casts = [
         'type' => 'string',
         'confidence_score' => 'float',
+        'quality_score' => 'float',
         'source_count' => 'integer',
         'sources' => 'array',
         'related' => 'array',
@@ -131,6 +137,29 @@ class WikiPage extends Model
         }
 
         return round($baseScore * $recencyFactor, 4);
+    }
+
+    public function outgoingRelationships(): HasMany
+    {
+        return $this->hasMany(EntityRelationship::class, 'from_page', 'name');
+    }
+
+    public function incomingRelationships(): HasMany
+    {
+        return $this->hasMany(EntityRelationship::class, 'to_page', 'name');
+    }
+
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(WikiPageRevision::class, 'page_name', 'name')->orderByDesc('revision');
+    }
+
+    /**
+     * Pages that can decay slower — architecture and decision pages have long half-lives.
+     */
+    public function isLongLived(): bool
+    {
+        return in_array($this->type, ['decision', 'concept'], true);
     }
 
     /**

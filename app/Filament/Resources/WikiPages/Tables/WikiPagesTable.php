@@ -51,6 +51,19 @@ class WikiPagesTable
                     })
                     ->placeholder('—')
                     ->sortable(),
+                TextColumn::make('quality_score')
+                    ->label('Quality')
+                    ->numeric(2)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.4 => 'danger',
+                        $state < 0.7 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('pending_drawers_since_compile')
                     ->label('Pending')
                     ->numeric()

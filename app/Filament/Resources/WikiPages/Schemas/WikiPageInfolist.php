@@ -46,6 +46,17 @@ class WikiPageInfolist
                         default => 'success',
                     })
                     ->placeholder('—'),
+                TextEntry::make('quality_score')
+                    ->label('Quality Score')
+                    ->numeric(4)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.4 => 'danger',
+                        $state < 0.7 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—'),
                 TextEntry::make('source_count')
                     ->label('Source count')
                     ->numeric()
@@ -93,6 +104,28 @@ class WikiPageInfolist
                         }
 
                         return collect($record->related)->join(', ');
+                    }),
+                TextEntry::make('graph_connections')
+                    ->label('Graph Connections')
+                    ->placeholder('None')
+                    ->columnSpanFull()
+                    ->formatStateUsing(function ($state, $record) {
+                        $outgoing = $record->outgoingRelationships()->get();
+                        $incoming = $record->incomingRelationships()->get();
+
+                        if ($outgoing->isEmpty() && $incoming->isEmpty()) {
+                            return '—';
+                        }
+
+                        $lines = [];
+                        foreach ($outgoing as $rel) {
+                            $lines[] = "→ [{$rel->edge_type}] {$rel->to_page}";
+                        }
+                        foreach ($incoming as $rel) {
+                            $lines[] = "← [{$rel->edge_type}] {$rel->from_page}";
+                        }
+
+                        return implode("\n", $lines);
                     }),
                 TextEntry::make('content')
                     ->label('Content')

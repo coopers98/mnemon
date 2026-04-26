@@ -228,7 +228,8 @@ class WikiPageResourceTest extends TestCase
         Livewire::test(EditWikiPage::class, ['record' => $page->getRouteKey()])
             ->callAction('delete');
 
-        $this->assertDatabaseMissing('wiki_pages', ['id' => $page->id]);
+        // WikiPage uses SoftDeletes — record still exists but is soft-deleted
+        $this->assertSoftDeleted('wiki_pages', ['id' => $page->id]);
     }
 
     public function test_default_sort_is_last_compiled_at_descending(): void

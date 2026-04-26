@@ -6,6 +6,7 @@ use App\Mcp\BaseTool;
 use App\Mcp\McpException;
 use App\Models\ApiKey;
 use App\Models\WikiPage;
+use App\Models\WikiPageRevision;
 
 class WikiHistoryTool extends BaseTool
 {
@@ -35,6 +36,20 @@ class WikiHistoryTool extends BaseTool
             ];
         }
 
+        $limit = max(1, min(50, (int) ($params['limit'] ?? 10)));
+
+        $revisions = WikiPageRevision::where('page_name', $name)
+            ->orderByDesc('revision')
+            ->limit($limit)
+            ->get()
+            ->map(fn (WikiPageRevision $r) => [
+                'revision' => $r->revision,
+                'content_hash' => $r->content_hash,
+                'agent_id' => $r->agent_id,
+                'written_at' => $r->written_at?->toIso8601String(),
+            ])
+            ->all();
+
         $result = [
             'name' => $page->name,
             'revision_count' => $page->revision_count ?? 1,
@@ -42,7 +57,9 @@ class WikiHistoryTool extends BaseTool
             'last_compiled_at' => $page->last_compiled_at?->toIso8601String(),
             'last_accessed_at' => $page->last_accessed_at?->toIso8601String(),
             'confidence_score' => $page->confidence_score,
+            'quality_score' => $page->quality_score,
             'source_count' => $page->source_count,
+            'revisions' => $revisions,
         ];
 
         $this->logSession('wiki_history', $apiKey, ['name' => $name], 1);

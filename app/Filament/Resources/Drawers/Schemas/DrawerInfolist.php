@@ -23,6 +23,33 @@ class DrawerInfolist
                     ->label('Room'),
                 TextEntry::make('source')
                     ->placeholder('—'),
+                TextEntry::make('tier')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'consolidated' => 'success',
+                        'reviewed' => 'warning',
+                        default => 'gray',
+                    })
+                    ->placeholder('raw'),
+                TextEntry::make('retention_score')
+                    ->label('Retention')
+                    ->numeric(4)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.2 => 'danger',
+                        $state < 0.6 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—'),
+                TextEntry::make('access_count')
+                    ->label('Accessed')
+                    ->numeric()
+                    ->placeholder('0'),
+                TextEntry::make('last_accessed_at')
+                    ->label('Last accessed')
+                    ->dateTime()
+                    ->placeholder('—'),
                 TextEntry::make('created_at')
                     ->label('Created')
                     ->dateTime(),

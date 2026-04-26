@@ -84,6 +84,7 @@ class PalaceSearchService
                 drawers.source,
                 drawers.metadata,
                 drawers.tier,
+                drawers.retention_score,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -156,9 +157,12 @@ class PalaceSearchService
 
                 $temporal = $this->temporalBoost($base->created_at, $boostDays);
 
-                $finalScore = ($semScore * $semanticWeight)
+                $combinedScore = ($semScore * $semanticWeight)
                     + ($ftScore * $fulltextWeight)
                     + ($temporal * $temporalWeight);
+
+                $retention = isset($base->retention_score) ? max(0.0, min(1.0, (float) $base->retention_score)) : 1.0;
+                $finalScore = $this->applyRetentionBoost($combinedScore, $retention);
 
                 return (object) [
                     'id' => $base->id,
@@ -170,6 +174,7 @@ class PalaceSearchService
                     'source' => $base->source,
                     'metadata' => $base->metadata,
                     'tier' => $base->tier ?? 'raw',
+                    'retention_score' => $retention,
                     'created_at' => $base->created_at,
                     'score' => round($finalScore, 6),
                 ];
@@ -184,7 +189,10 @@ class PalaceSearchService
                 $ftScore = (float) $row->score;
                 $temporal = $this->temporalBoost($row->created_at, $boostDays);
 
-                $finalScore = ($ftScore * $fulltextWeight) + ($temporal * $temporalWeight);
+                $combinedScore = ($ftScore * $fulltextWeight) + ($temporal * $temporalWeight);
+
+                $retention = isset($row->retention_score) ? max(0.0, min(1.0, (float) $row->retention_score)) : 1.0;
+                $finalScore = $this->applyRetentionBoost($combinedScore, $retention);
 
                 return (object) [
                     'id' => $row->id,
@@ -196,6 +204,7 @@ class PalaceSearchService
                     'source' => $row->source,
                     'metadata' => $row->metadata,
                     'tier' => $row->tier ?? 'raw',
+                    'retention_score' => $retention,
                     'created_at' => $row->created_at,
                     'score' => round($finalScore, 6),
                 ];
@@ -223,6 +232,7 @@ class PalaceSearchService
                 drawers.source,
                 drawers.metadata,
                 drawers.tier,
+                drawers.retention_score,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -278,6 +288,7 @@ class PalaceSearchService
                 drawers.source,
                 drawers.metadata,
                 drawers.tier,
+                drawers.retention_score,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -345,6 +356,7 @@ class PalaceSearchService
                 'source' => $row->source,
                 'metadata' => $row->metadata,
                 'tier' => $row->tier ?? 'raw',
+                'retention_score' => isset($row->retention_score) ? (float) $row->retention_score : 1.0,
                 'created_at' => $row->created_at,
                 'score' => round($normalized, 6),
             ];
@@ -369,5 +381,19 @@ class PalaceSearchService
     protected function isPostgres(): bool
     {
         return DB::connection()->getDriverName() === 'pgsql';
+    }
+
+    /**
+     * Item 14: Retention boost — multiply combined relevance by a retention factor.
+     *
+     * retention_score is on [0, 1]. We linearly blend with 1 so that fully decayed items
+     * are deprioritized but not zeroed out (50% floor by default).
+     */
+    protected function applyRetentionBoost(float $combinedScore, float $retentionScore): float
+    {
+        $floor = 0.5;
+        $multiplier = $floor + ((1.0 - $floor) * $retentionScore);
+
+        return $combinedScore * $multiplier;
     }
 }

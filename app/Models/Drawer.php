@@ -12,16 +12,24 @@ class Drawer extends Model
 {
     use SoftDeletes;
 
+    public const TIERS = ['raw', 'reviewed', 'consolidated'];
+
+    protected $attributes = [
+        'tier' => 'raw',
+    ];
+
     protected $fillable = [
         'content',
         'room_id',
         'source',
         'metadata',
         'embedding',
+        'tier',
     ];
 
     protected $casts = [
         'metadata' => 'array',
+        'tier' => 'string',
     ];
 
     /**

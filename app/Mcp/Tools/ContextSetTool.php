@@ -91,15 +91,30 @@ class ContextSetTool extends BaseTool
         }
         if ($sources !== null) {
             $attributes['sources'] = $sources;
+            $attributes['source_count'] = count($sources);
         }
         if ($related !== null) {
             $attributes['related'] = $related;
+        }
+
+        // Item 2: Supersession — track content hash and revision count
+        if ($existing !== null) {
+            $attributes['previous_content_hash'] = hash('sha256', $existing->content ?? '');
+            $attributes['revision_count'] = ($existing->revision_count ?? 1) + 1;
         }
 
         $page = WikiPage::updateOrCreate(
             ['name' => $name],
             $attributes
         );
+
+        // Recalculate confidence score
+        $page->update(['confidence_score' => $page->calculateConfidenceScore()]);
+
+        // Item 3: Mark source drawers as consolidated
+        if (! empty($sources)) {
+            Drawer::whereIn('id', $sources)->update(['tier' => 'consolidated']);
+        }
 
         $this->updateWikiIndex($apiKey);
         $this->appendToWikiLog($name, $type, $createdOrUpdated, $apiKey);
@@ -109,6 +124,8 @@ class ContextSetTool extends BaseTool
             'created_or_updated' => $createdOrUpdated,
             'name' => $page->name,
             'type' => $page->type,
+            'confidence_score' => $page->confidence_score,
+            'revision_count' => $page->revision_count,
         ];
 
         $this->logSession('context_set', $apiKey, [

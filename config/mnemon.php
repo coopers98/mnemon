@@ -28,5 +28,6 @@ return [
     ],
     'wiki' => [
         'stale_days' => 30,
+        'confidence_decay_days' => 90,
     ],
 ];

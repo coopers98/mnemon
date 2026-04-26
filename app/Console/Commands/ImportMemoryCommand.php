@@ -14,13 +14,15 @@ class ImportMemoryCommand extends Command
     protected $signature = 'mnemon:import-memory
         {path : Path to the memory directory or MEMORY.md file}
         {--dry-run : Report what would be imported without writing}
-        {--wing= : Only import specific wing type (daily, project, person, decision, memory-index)}';
+        {--wing= : Only import specific wing type (daily, project, person, decision, memory-index)}
+        {--no-sanitize : Skip content sanitization (store raw content)}';
 
     protected $description = 'Import markdown memory files as palace drawers';
 
     public function handle(): int
     {
         $this->resetCounters();
+        $this->sanitizeContent = ! $this->option('no-sanitize');
 
         $path = $this->argument('path');
         $dryRun = $this->option('dry-run');

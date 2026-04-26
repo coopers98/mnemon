@@ -39,6 +39,18 @@ class WikiPagesTable
                     ->limit(60)
                     ->wrap()
                     ->placeholder('—'),
+                TextColumn::make('confidence_score')
+                    ->label('Score')
+                    ->numeric(2)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.3 => 'danger',
+                        $state < 0.6 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—')
+                    ->sortable(),
                 TextColumn::make('pending_drawers_since_compile')
                     ->label('Pending')
                     ->numeric()

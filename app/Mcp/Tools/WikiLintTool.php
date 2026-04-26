@@ -166,16 +166,33 @@ class WikiLintTool extends BaseTool
      */
     private function detectLowConfidence(array &$findings, $allPages): void
     {
-        $pages = $allPages->where('confidence', 'low');
+        // Use numeric confidence_score when available (threshold: < 0.3)
+        foreach ($allPages as $page) {
+            if ($page->confidence_score !== null && $page->confidence_score < 0.3) {
+                $findings[] = [
+                    'type' => 'low_confidence',
+                    'severity' => 'warning',
+                    'page' => $page->name,
+                    'description' => sprintf(
+                        'Page has low confidence score: %.2f (threshold: 0.30)',
+                        $page->confidence_score
+                    ),
+                    'suggestion' => 'Gather more sources or re-compile to strengthen confidence',
+                ];
 
-        foreach ($pages as $page) {
-            $findings[] = [
-                'type' => 'low_confidence',
-                'severity' => 'info',
-                'page' => $page->name,
-                'description' => 'Page has low confidence rating',
-                'suggestion' => 'Gather more sources or review content accuracy',
-            ];
+                continue;
+            }
+
+            // Fallback to categorical confidence for pages without a numeric score
+            if ($page->confidence === 'low') {
+                $findings[] = [
+                    'type' => 'low_confidence',
+                    'severity' => 'info',
+                    'page' => $page->name,
+                    'description' => 'Page has low confidence rating',
+                    'suggestion' => 'Gather more sources or review content accuracy',
+                ];
+            }
         }
     }
 }

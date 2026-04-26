@@ -47,6 +47,15 @@ class DrawersTable
                     ->searchable()
                     ->placeholder('—')
                     ->toggleable(),
+                TextColumn::make('tier')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'consolidated' => 'success',
+                        'reviewed' => 'warning',
+                        default => 'gray',
+                    })
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('created_at')
                     ->label('Created')
                     ->dateTime()

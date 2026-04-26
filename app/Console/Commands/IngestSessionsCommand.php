@@ -11,13 +11,15 @@ class IngestSessionsCommand extends Command
 
     protected $signature = 'mnemon:ingest-sessions
         {path : Path to the directory containing session transcript files}
-        {--dry-run : Report what would be ingested without writing}';
+        {--dry-run : Report what would be ingested without writing}
+        {--no-sanitize : Skip content sanitization (store raw content)}';
 
     protected $description = 'Ingest OpenClaw session transcript files as palace drawers';
 
     public function handle(): int
     {
         $this->resetCounters();
+        $this->sanitizeContent = ! $this->option('no-sanitize');
 
         $path = $this->argument('path');
         $dryRun = $this->option('dry-run');

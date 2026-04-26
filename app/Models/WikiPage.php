@@ -26,6 +26,8 @@ class WikiPage extends Model
 
     public const CONFIDENCE_LEVELS = ['high', 'medium', 'low'];
 
+    public const DRAWER_TIERS = ['raw', 'reviewed', 'consolidated'];
+
     protected $fillable = [
         'name',
         'type',
@@ -33,19 +35,28 @@ class WikiPage extends Model
         'content',
         'description',
         'confidence',
+        'confidence_score',
+        'source_count',
         'sources',
         'related',
         'pending_drawers_since_compile',
         'embedding',
         'last_compiled_at',
+        'last_accessed_at',
+        'revision_count',
+        'previous_content_hash',
     ];
 
     protected $casts = [
         'type' => 'string',
+        'confidence_score' => 'float',
+        'source_count' => 'integer',
         'sources' => 'array',
         'related' => 'array',
         'pending_drawers_since_compile' => 'integer',
         'last_compiled_at' => 'datetime',
+        'last_accessed_at' => 'datetime',
+        'revision_count' => 'integer',
     ];
 
     public static function typeOptions(): array
@@ -94,6 +105,32 @@ class WikiPage extends Model
                     ->toString() ?: $page->name;
             }
         });
+    }
+
+    /**
+     * Calculate confidence score based on source count and recency.
+     *
+     * Formula: base score from source_count (capped at 1.0 with 5+ sources),
+     * multiplied by a recency factor that decays over time since last_compiled_at.
+     */
+    public function calculateConfidenceScore(): float
+    {
+        // Base score: more sources = higher confidence, caps at 1.0 with 5+ sources
+        $sourceCount = $this->source_count ?? 0;
+        $baseScore = min(1.0, $sourceCount / 5.0);
+
+        // Recency factor: decays over time since last compilation
+        $decayDays = (int) config('mnemon.wiki.confidence_decay_days', 90);
+        $compiledAt = $this->last_compiled_at;
+
+        if ($compiledAt === null) {
+            $recencyFactor = 0.1; // Minimal confidence for never-compiled pages
+        } else {
+            $daysSinceCompile = (float) abs(now()->diffInDays($compiledAt));
+            $recencyFactor = max(0.1, 1.0 - ($daysSinceCompile / $decayDays));
+        }
+
+        return round($baseScore * $recencyFactor, 4);
     }
 
     /**

@@ -22,22 +22,24 @@ class PalaceSearchService
      * @param  string|null  $room  Room slug to scope the search to
      * @param  int  $limit  Maximum number of results
      * @param  string  $mode  Search mode: 'hybrid', 'fulltext', or 'semantic'
+     * @param  string|null  $tier  Drawer tier filter: 'raw', 'reviewed', or 'consolidated'
      */
     public function search(
         string $query,
         ?string $wing = null,
         ?string $room = null,
         int $limit = 5,
-        string $mode = 'hybrid'
+        string $mode = 'hybrid',
+        ?string $tier = null,
     ): Collection {
         if (trim($query) === '') {
             return collect();
         }
 
         return match ($mode) {
-            'semantic' => $this->semanticSearch($query, $wing, $room, $limit),
-            'fulltext' => $this->fulltextSearch($query, $wing, $room, $limit),
-            default => $this->hybridSearch($query, $wing, $room, $limit),
+            'semantic' => $this->semanticSearch($query, $wing, $room, $limit, $tier),
+            'fulltext' => $this->fulltextSearch($query, $wing, $room, $limit, $tier),
+            default => $this->hybridSearch($query, $wing, $room, $limit, $tier),
         };
     }
 
@@ -49,7 +51,8 @@ class PalaceSearchService
         string $query,
         ?string $wing,
         ?string $room,
-        int $limit
+        int $limit,
+        ?string $tier = null,
     ): Collection {
         if (! $this->isPostgres()) {
             Log::warning('PalaceSearchService: semantic search requires PostgreSQL with pgvector; returning empty results.');
@@ -73,13 +76,14 @@ class PalaceSearchService
 
         $vectorLiteral = '['.implode(',', $vector).']';
 
-        $base = $this->baseQuery($wing, $room);
+        $base = $this->baseQuery($wing, $room, $tier);
         $rows = $base
             ->selectRaw('
                 drawers.id,
                 drawers.content,
                 drawers.source,
                 drawers.metadata,
+                drawers.tier,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -101,13 +105,14 @@ class PalaceSearchService
         string $query,
         ?string $wing,
         ?string $room,
-        int $limit
+        int $limit,
+        ?string $tier = null,
     ): Collection {
         if ($this->isPostgres()) {
-            return $this->postgresFulltext($query, $wing, $room, $limit);
+            return $this->postgresFulltext($query, $wing, $room, $limit, $tier);
         }
 
-        return $this->sqliteFulltext($query, $wing, $room, $limit);
+        return $this->sqliteFulltext($query, $wing, $room, $limit, $tier);
     }
 
     /**
@@ -117,7 +122,8 @@ class PalaceSearchService
         string $query,
         ?string $wing,
         ?string $room,
-        int $limit
+        int $limit,
+        ?string $tier = null,
     ): Collection {
         $weights = config('mnemon.retrieval.weights');
         $temporalWeight = (float) ($weights['temporal'] ?? 0.1);
@@ -128,11 +134,11 @@ class PalaceSearchService
             $semanticWeight = (float) ($weights['semantic'] ?? 0.6);
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->postgresFulltext($query, $wing, $room, $limit * 3);
+            $fulltextResults = $this->postgresFulltext($query, $wing, $room, $limit * 3, $tier);
             $ftById = $fulltextResults->keyBy('id');
 
             if (! ($driver instanceof NullDriver)) {
-                $semanticResults = $this->semanticSearch($query, $wing, $room, $limit * 3);
+                $semanticResults = $this->semanticSearch($query, $wing, $room, $limit * 3, $tier);
                 $semById = $semanticResults->keyBy('id');
             } else {
                 $semById = collect();
@@ -163,6 +169,7 @@ class PalaceSearchService
                     'room_slug' => $base->room_slug,
                     'source' => $base->source,
                     'metadata' => $base->metadata,
+                    'tier' => $base->tier ?? 'raw',
                     'created_at' => $base->created_at,
                     'score' => round($finalScore, 6),
                 ];
@@ -171,7 +178,7 @@ class PalaceSearchService
             // SQLite: fulltext + temporal only
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->sqliteFulltext($query, $wing, $room, $limit * 3);
+            $fulltextResults = $this->sqliteFulltext($query, $wing, $room, $limit * 3, $tier);
 
             $combined = $fulltextResults->map(function ($row) use ($fulltextWeight, $temporalWeight, $boostDays) {
                 $ftScore = (float) $row->score;
@@ -188,6 +195,7 @@ class PalaceSearchService
                     'room_slug' => $row->room_slug,
                     'source' => $row->source,
                     'metadata' => $row->metadata,
+                    'tier' => $row->tier ?? 'raw',
                     'created_at' => $row->created_at,
                     'score' => round($finalScore, 6),
                 ];
@@ -204,15 +212,17 @@ class PalaceSearchService
         string $query,
         ?string $wing,
         ?string $room,
-        int $limit
+        int $limit,
+        ?string $tier = null,
     ): Collection {
-        $base = $this->baseQuery($wing, $room);
+        $base = $this->baseQuery($wing, $room, $tier);
         $rows = $base
             ->selectRaw("
                 drawers.id,
                 drawers.content,
                 drawers.source,
                 drawers.metadata,
+                drawers.tier,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -232,7 +242,8 @@ class PalaceSearchService
         string $query,
         ?string $wing,
         ?string $room,
-        int $limit
+        int $limit,
+        ?string $tier = null,
     ): Collection {
         $words = array_values(array_filter(
             array_unique(explode(' ', preg_replace('/\s+/', ' ', strtolower(trim($query))))),
@@ -243,7 +254,7 @@ class PalaceSearchService
             return collect();
         }
 
-        $base = $this->baseQuery($wing, $room);
+        $base = $this->baseQuery($wing, $room, $tier);
 
         // Build LIKE conditions for each word and count matches per word
         $conditions = [];
@@ -266,6 +277,7 @@ class PalaceSearchService
                 drawers.content,
                 drawers.source,
                 drawers.metadata,
+                drawers.tier,
                 drawers.created_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
@@ -282,9 +294,9 @@ class PalaceSearchService
     }
 
     /**
-     * Build the base query with joins and optional wing/room scoping.
+     * Build the base query with joins and optional wing/room/tier scoping.
      */
-    protected function baseQuery(?string $wing, ?string $room): Builder
+    protected function baseQuery(?string $wing, ?string $room, ?string $tier = null): Builder
     {
         $query = DB::table('drawers')
             ->join('rooms', 'drawers.room_id', '=', 'rooms.id')
@@ -297,6 +309,10 @@ class PalaceSearchService
 
         if ($room !== null) {
             $query->where('rooms.slug', $room);
+        }
+
+        if ($tier !== null) {
+            $query->where('drawers.tier', $tier);
         }
 
         return $query;
@@ -328,6 +344,7 @@ class PalaceSearchService
                 'room_slug' => $row->room_slug,
                 'source' => $row->source,
                 'metadata' => $row->metadata,
+                'tier' => $row->tier ?? 'raw',
                 'created_at' => $row->created_at,
                 'score' => round($normalized, 6),
             ];

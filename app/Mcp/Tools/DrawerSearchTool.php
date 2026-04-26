@@ -5,6 +5,7 @@ namespace App\Mcp\Tools;
 use App\Mcp\BaseTool;
 use App\Mcp\McpException;
 use App\Models\ApiKey;
+use App\Models\Drawer;
 use App\Services\PalaceSearchService;
 
 class DrawerSearchTool extends BaseTool
@@ -32,6 +33,7 @@ class DrawerSearchTool extends BaseTool
         $room = $params['room'] ?? null;
         $limit = isset($params['limit']) ? (int) $params['limit'] : 5;
         $mode = $params['mode'] ?? 'hybrid';
+        $tier = $params['tier'] ?? null;
 
         $limit = max(1, min($limit, (int) config('mnemon.retrieval.max_limit', 20)));
 
@@ -40,11 +42,15 @@ class DrawerSearchTool extends BaseTool
             throw McpException::invalidParams('Parameter "mode" must be one of: semantic, fulltext, hybrid.');
         }
 
+        if ($tier !== null && ! in_array($tier, Drawer::TIERS, true)) {
+            throw McpException::invalidParams('Parameter "tier" must be one of: '.implode(', ', Drawer::TIERS).'.');
+        }
+
         if ($wing !== null) {
             $this->requireWingAccess($apiKey, $wing);
         }
 
-        $results = $this->searchService->search($query, $wing, $room, $limit, $mode);
+        $results = $this->searchService->search($query, $wing, $room, $limit, $mode, $tier);
 
         $mapped = $results->map(fn ($r) => [
             'id' => $r->id,
@@ -55,6 +61,7 @@ class DrawerSearchTool extends BaseTool
             'room_slug' => $r->room_slug,
             'source' => $r->source,
             'metadata' => $r->metadata,
+            'tier' => $r->tier ?? 'raw',
             'created_at' => $r->created_at,
             'score' => $r->score,
         ])->values()->all();
@@ -65,6 +72,7 @@ class DrawerSearchTool extends BaseTool
             'room' => $room,
             'limit' => $limit,
             'mode' => $mode,
+            'tier' => $tier,
         ], count($mapped));
 
         return ['results' => $mapped];

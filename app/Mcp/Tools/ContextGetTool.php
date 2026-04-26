@@ -36,6 +36,9 @@ class ContextGetTool extends BaseTool
             ];
         }
 
+        // Update last_accessed_at on read
+        $page->update(['last_accessed_at' => now()]);
+
         $wordCount = $page->content ? str_word_count($page->content) : 0;
 
         $result = [
@@ -64,9 +67,13 @@ class ContextGetTool extends BaseTool
         }
 
         $result += [
+            'confidence_score' => $page->confidence_score,
+            'source_count' => $page->source_count,
             'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
+            'revision_count' => $page->revision_count,
             'content' => $page->content,
             'last_compiled_at' => $page->last_compiled_at?->toIso8601String(),
+            'last_accessed_at' => $page->last_accessed_at?->toIso8601String(),
             'word_count' => $wordCount,
         ];
 

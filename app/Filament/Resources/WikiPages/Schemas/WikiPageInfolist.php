@@ -35,6 +35,25 @@ class WikiPageInfolist
                         default => 'gray',
                     })
                     ->placeholder('—'),
+                TextEntry::make('confidence_score')
+                    ->label('Confidence Score')
+                    ->numeric(4)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.3 => 'danger',
+                        $state < 0.6 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—'),
+                TextEntry::make('source_count')
+                    ->label('Source count')
+                    ->numeric()
+                    ->placeholder('0'),
+                TextEntry::make('revision_count')
+                    ->label('Revisions')
+                    ->numeric()
+                    ->placeholder('1'),
                 TextEntry::make('pending_drawers_since_compile')
                     ->label('Pending drawers')
                     ->numeric()
@@ -47,6 +66,10 @@ class WikiPageInfolist
                     ->label('Last compiled')
                     ->dateTime()
                     ->placeholder('Never compiled'),
+                TextEntry::make('last_accessed_at')
+                    ->label('Last accessed')
+                    ->dateTime()
+                    ->placeholder('Never accessed'),
                 TextEntry::make('sources')
                     ->label('Source Drawers')
                     ->placeholder('None')

@@ -11,6 +11,7 @@ use App\Mcp\Tools\DrawerGetTool;
 use App\Mcp\Tools\DrawerSearchTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Mcp\Tools\WikiCompileTool;
+use App\Mcp\Tools\WikiHistoryTool;
 use App\Mcp\Tools\WikiLintTool;
 
 class McpToolRegistry
@@ -27,6 +28,7 @@ class McpToolRegistry
         'context_list' => ContextListTool::class,
         'wiki_lint' => WikiLintTool::class,
         'wiki_compile' => WikiCompileTool::class,
+        'wiki_history' => WikiHistoryTool::class,
     ];
 
     /**

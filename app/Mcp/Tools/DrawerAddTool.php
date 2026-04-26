@@ -9,10 +9,15 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
+use App\Services\ContentSanitizer;
 use Illuminate\Support\Str;
 
 class DrawerAddTool extends BaseTool
 {
+    public function __construct(
+        private readonly ContentSanitizer $sanitizer,
+    ) {}
+
     public function requiredScope(): string
     {
         return 'palace:write';
@@ -55,8 +60,11 @@ class DrawerAddTool extends BaseTool
             ['name' => $roomName, 'wing_id' => $wing->id]
         );
 
+        // Sanitize content before storing
+        $sanitizedContent = $this->sanitizer->sanitize($content);
+
         $drawer = Drawer::create([
-            'content' => $content,
+            'content' => $sanitizedContent,
             'room_id' => $room->id,
             'source' => $source,
             'metadata' => $metadata,

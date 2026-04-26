@@ -5,6 +5,7 @@ namespace App\Console\Commands\Concerns;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\Wing;
+use App\Services\ContentSanitizer;
 use Illuminate\Support\Str;
 
 /**
@@ -22,6 +23,20 @@ trait ImportsToPalace
     private int $skipped = 0;
 
     private int $errors = 0;
+
+    private bool $sanitizeContent = true;
+
+    /**
+     * Sanitize content using ContentSanitizer if enabled.
+     */
+    private function maybeSanitize(string $content): string
+    {
+        if (! $this->sanitizeContent) {
+            return $content;
+        }
+
+        return app(ContentSanitizer::class)->sanitize($content);
+    }
 
     /**
      * Reset all counters to zero. Call at the top of handle().
@@ -132,7 +147,7 @@ trait ImportsToPalace
         );
 
         return Drawer::create([
-            'content' => $content,
+            'content' => $this->maybeSanitize($content),
             'room_id' => $room->id,
             'source' => $source,
             'metadata' => [

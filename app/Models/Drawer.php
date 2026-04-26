@@ -12,17 +12,54 @@ class Drawer extends Model
 {
     use SoftDeletes;
 
+    public const TIERS = ['raw', 'reviewed', 'consolidated'];
+
+    protected $attributes = [
+        'tier' => 'raw',
+    ];
+
     protected $fillable = [
         'content',
         'room_id',
         'source',
         'metadata',
         'embedding',
+        'tier',
+        'access_count',
+        'retention_score',
+        'last_accessed_at',
     ];
 
     protected $casts = [
         'metadata' => 'array',
+        'tier' => 'string',
+        'access_count' => 'integer',
+        'retention_score' => 'float',
+        'last_accessed_at' => 'datetime',
     ];
+
+    /**
+     * Compute retention score using exponential decay per tier.
+     *
+     * Half-life values (configurable): raw=30d, reviewed=90d, consolidated=365d
+     */
+    public function computeRetentionScore(): float
+    {
+        $halfLives = config('mnemon.retention.half_lives', [
+            'raw' => 30,
+            'reviewed' => 90,
+            'consolidated' => 365,
+        ]);
+
+        $halfLife = (float) ($halfLives[$this->tier] ?? 30);
+        $lastAccessed = $this->last_accessed_at ?? $this->created_at ?? now();
+        $daysSince = (float) abs(now()->diffInDays($lastAccessed));
+
+        // Exponential decay: score = e^(-ln(2) * days / half_life)
+        $score = exp(-M_LN2 * $daysSince / $halfLife);
+
+        return round(max(0.0, min(1.0, $score)), 6);
+    }
 
     /**
      * Mutator: convert array embeddings to pgvector literal string.
@@ -32,7 +69,7 @@ class Drawer extends Model
         return Attribute::make(
             set: function (mixed $value) {
                 if (is_array($value)) {
-                    return DB::raw("'[" . implode(",", $value) . "]'::vector");
+                    return DB::raw("'[".implode(',', $value)."]'::vector");
                 }
 
                 return $value;

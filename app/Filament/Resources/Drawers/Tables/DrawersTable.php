@@ -47,6 +47,28 @@ class DrawersTable
                     ->searchable()
                     ->placeholder('—')
                     ->toggleable(),
+                TextColumn::make('tier')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'consolidated' => 'success',
+                        'reviewed' => 'warning',
+                        default => 'gray',
+                    })
+                    ->sortable()
+                    ->toggleable(),
+                TextColumn::make('retention_score')
+                    ->label('Retention')
+                    ->numeric(2)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.2 => 'danger',
+                        $state < 0.6 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')
                     ->label('Created')
                     ->dateTime()

@@ -74,11 +74,21 @@ class PalaceWakeUpTool extends BaseTool
                 'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
             ])->values()->all();
 
+        $pendingUpdatePages = WikiPage::pendingUpdates()
+            ->get()
+            ->map(fn ($p) => [
+                'name' => $p->name,
+                'type' => $p->type,
+                'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
+                'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
+            ])->values()->all();
+
         $result = [
             'recent_drawers' => $recentDrawers,
             'active_wings' => $activeWings,
             'recent_wiki_updates' => $recentWikiUpdates,
             'stale_wiki_pages' => $staleWikiPages,
+            'pending_update_pages' => $pendingUpdatePages,
         ];
 
         $this->logSession('palace_wake_up', $apiKey, $params, count($recentDrawers));

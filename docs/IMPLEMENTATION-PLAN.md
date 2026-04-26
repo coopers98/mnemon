@@ -381,6 +381,11 @@ Filament v5.6.1; resources auto-discovered via `discoverResources` / `discoverPa
 - Import command handles daily files and project files
 - Duplicate content is skipped
 - Source field correctly set
+- Security guard tests: oversized file rejection, symlink/path-prefix traversal
+
+### Deferred to Later Phases
+- **Session context routing** (channel/project mention parsing) — deferred to Phase 2
+- **OpenClaw memory_search integration documentation** — deferred to post-dogfood
 
 ---
 

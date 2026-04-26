@@ -34,11 +34,20 @@ class DrawerGetTool extends BaseTool
 
         $this->requireWingAccess($apiKey, $wing->slug);
 
+        // Item 14: Retention — track access count + timestamp on read
+        $drawer->access_count = ($drawer->access_count ?? 0) + 1;
+        $drawer->last_accessed_at = now();
+        $drawer->save();
+
         $result = [
             'id' => $drawer->id,
             'content' => $drawer->content,
             'source' => $drawer->source,
             'metadata' => $drawer->metadata,
+            'tier' => $drawer->tier,
+            'access_count' => $drawer->access_count,
+            'retention_score' => $drawer->retention_score,
+            'last_accessed_at' => $drawer->last_accessed_at?->toIso8601String(),
             'wing' => $wing->name,
             'wing_slug' => $wing->slug,
             'room' => $drawer->room->name,

@@ -28,5 +28,28 @@ return [
     ],
     'wiki' => [
         'stale_days' => 30,
+        'confidence_decay_days' => 90,
+    ],
+
+    // Item 12: Quality Scoring
+    'quality' => [
+        'enabled' => env('MNEMON_QUALITY_LLM', false), // false = heuristics only
+        'low_threshold' => 0.4,
+        'min_length' => 100,
+        'vague_phrases' => [
+            'it depends', 'various factors', 'many things', 'could be', 'might be',
+            'in some cases', 'sometimes', 'generally speaking', 'it is important to note',
+            'as mentioned', 'basically', 'essentially', 'kind of', 'sort of',
+        ],
+    ],
+
+    // Item 14: Retention / Forgetting Curves
+    'retention' => [
+        'half_lives' => [
+            'raw' => 30,         // fast decay
+            'reviewed' => 90,    // medium decay
+            'consolidated' => 365, // slow decay
+        ],
+        'soft_delete_threshold' => 0.05, // delete drawers below this score
     ],
 ];

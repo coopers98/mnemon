@@ -26,10 +26,49 @@ class WikiPagesTable
                     ->badge()
                     ->color(fn (string $state): string => WikiPage::typeBadgeColor($state))
                     ->sortable(),
+                TextColumn::make('confidence')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'high' => 'success',
+                        'medium' => 'warning',
+                        'low' => 'danger',
+                        default => 'gray',
+                    })
+                    ->placeholder('—'),
                 TextColumn::make('description')
                     ->limit(60)
                     ->wrap()
                     ->placeholder('—'),
+                TextColumn::make('confidence_score')
+                    ->label('Score')
+                    ->numeric(2)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.3 => 'danger',
+                        $state < 0.6 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—')
+                    ->sortable(),
+                TextColumn::make('quality_score')
+                    ->label('Quality')
+                    ->numeric(2)
+                    ->badge()
+                    ->color(fn (?float $state): string => match (true) {
+                        $state === null => 'gray',
+                        $state < 0.4 => 'danger',
+                        $state < 0.7 => 'warning',
+                        default => 'success',
+                    })
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('pending_drawers_since_compile')
+                    ->label('Pending')
+                    ->numeric()
+                    ->alignRight()
+                    ->color(fn (int $state): string => $state > 0 ? 'warning' : 'gray'),
                 TextColumn::make('word_count')
                     ->label('Words')
                     ->numeric()

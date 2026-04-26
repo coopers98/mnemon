@@ -7,11 +7,17 @@ use App\Mcp\McpException;
 use App\Models\ApiKey;
 use App\Models\Drawer;
 use App\Models\Room;
+use App\Models\WikiPage;
 use App\Models\Wing;
+use App\Services\ContentSanitizer;
 use Illuminate\Support\Str;
 
 class DrawerAddTool extends BaseTool
 {
+    public function __construct(
+        private readonly ContentSanitizer $sanitizer,
+    ) {}
+
     public function requiredScope(): string
     {
         return 'palace:write';
@@ -38,7 +44,7 @@ class DrawerAddTool extends BaseTool
             ? $params['metadata']
             : null;
 
-        $wingSlug = Str::slug($wingName);
+        $wingSlug = Str::slug(str_replace(':', '-', $wingName));
 
         $this->requireWingAccess($apiKey, $wingSlug);
 
@@ -54,18 +60,25 @@ class DrawerAddTool extends BaseTool
             ['name' => $roomName, 'wing_id' => $wing->id]
         );
 
+        // Sanitize content before storing
+        $sanitizedContent = $this->sanitizer->sanitize($content);
+
         $drawer = Drawer::create([
-            'content' => $content,
+            'content' => $sanitizedContent,
             'room_id' => $room->id,
             'source' => $source,
             'metadata' => $metadata,
         ]);
+
+        // Cascade awareness: flag related wiki pages as having new content
+        $affectedPages = $this->incrementPendingWikiPages($wing);
 
         $result = [
             'drawer_id' => $drawer->id,
             'wing_slug' => $wing->slug,
             'room_slug' => $room->slug,
             'embedding_status' => 'pending',
+            'wiki_pages_flagged' => $affectedPages,
         ];
 
         $this->logSession('drawer_add', $apiKey, array_filter([
@@ -75,5 +88,26 @@ class DrawerAddTool extends BaseTool
         ]), 1);
 
         return $result;
+    }
+
+    /**
+     * Find wiki pages whose name matches the wing and increment their pending counter.
+     *
+     * Matches by: wing name (which often IS the wiki page name, e.g. `project:atlas`),
+     * wing slug, or slug-to-colon conversion for wings created with colon names.
+     *
+     * @return int Number of wiki pages flagged
+     */
+    private function incrementPendingWikiPages(Wing $wing): int
+    {
+        $candidates = collect([$wing->name, $wing->slug, str_replace('-', ':', $wing->slug)])->unique();
+
+        $pages = WikiPage::whereIn('name', $candidates)->get();
+
+        foreach ($pages as $page) {
+            $page->increment('pending_drawers_since_compile');
+        }
+
+        return $pages->count();
     }
 }

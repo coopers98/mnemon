@@ -3,66 +3,94 @@
 @section('title', $page->title . ' — Mnemon Wiki')
 
 @section('sidebar')
-    {{-- Page metadata --}}
-    <div class="mb-6">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Page Info</h3>
-        <div class="space-y-2 text-sm">
-            <div>
-                <x-type-badge :type="$page->type" />
-            </div>
-            <div>
-                <x-confidence-badge :confidence="$page->confidence ?? 'medium'" />
-            </div>
-            @if ($page->last_compiled_at)
-                <div class="text-slate-400">
-                    Compiled {{ $page->last_compiled_at->diffForHumans() }}
-                </div>
-            @endif
-            <div class="text-slate-400">
-                {{ $page->revision_count ?? 0 }} revision{{ ($page->revision_count ?? 0) !== 1 ? 's' : '' }}
-                · <a href="{{ route('wiki.history', $page->name) }}" class="text-indigo-400 hover:text-indigo-300">History</a>
-            </div>
-            @if ($page->pending_drawers_since_compile > 0)
-                <div class="rounded border border-amber-700 bg-amber-900/50 p-2 text-xs text-amber-300">
-                    {{ $page->pending_drawers_since_compile }} pending update{{ $page->pending_drawers_since_compile !== 1 ? 's' : '' }}
-                </div>
-            @endif
-            <div>
-                <a href="/admin" class="text-xs text-slate-500 hover:text-slate-300">Edit in Admin →</a>
-            </div>
-        </div>
-    </div>
+    <h6>Vol. I — Atlas</h6>
 
-    {{-- Related pages --}}
+    <a href="{{ route('wiki.index') }}" class="btn-bare" style="display:inline-block;margin-bottom:1rem;font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">← all entries</a>
+
+    <div class="toc-section"><span class="n">§ 1</span><span>This entry</span></div>
+    <ul class="toc-list">
+        <li><a href="#" class="is-active"><span class="num">1.01</span><span>{{ $page->title }}</span></a></li>
+        <li><a href="{{ route('wiki.history', $page->name) }}"><span class="num">1.02</span><span>Revision history</span></a></li>
+    </ul>
+
     @if ($relatedPages->isNotEmpty())
-        <div class="mb-6">
-            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Related Pages</h3>
-            <ul class="space-y-1">
-                @foreach ($relatedPages as $related)
-                    <li>
-                        <a href="{{ route('wiki.show', $related->name) }}"
-                           class="block truncate rounded px-2 py-1 text-sm text-slate-300 hover:bg-slate-700 hover:text-white">
-                            {{ $related->title }}
-                        </a>
-                    </li>
-                @endforeach
-            </ul>
-        </div>
+        <div class="toc-section"><span class="n">§ 2</span><span>Adjacent</span></div>
+        <ul class="toc-list">
+            @foreach ($relatedPages as $idx => $related)
+                <li>
+                    <a href="{{ route('wiki.show', $related->name) }}">
+                        <span class="num">2.{{ str_pad((string)($idx + 1), 2, '0', STR_PAD_LEFT) }}</span>
+                        <span>{{ $related->title }}</span>
+                    </a>
+                </li>
+            @endforeach
+        </ul>
     @endif
 
-    {{-- Source drawers --}}
-    @if ($sourceDrawers->isNotEmpty())
-        <div>
-            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Source Drawers ({{ $sourceDrawers->count() }})
-            </h3>
-            <ul class="space-y-2">
-                @foreach ($sourceDrawers->take(10) as $drawer)
-                    <li class="rounded border border-slate-700 bg-slate-750 p-2">
-                        <a href="{{ route('palace.drawer', $drawer) }}" class="block text-xs text-indigo-400 hover:text-indigo-300">
-                            {{ $drawer->room?->wing?->name }} / {{ $drawer->room?->name }}
+    <div class="toc-foot">
+        @if ($page->last_compiled_at)
+            Compiled {{ $page->last_compiled_at->format('Y-m-d H:i') }} UTC<br/>
+        @endif
+        From {{ $sourceDrawers->count() }} verbatim sources<br/>
+        @if ($page->last_compiled_at)
+            <span class="rubric">●</span> sealed
+        @else
+            <span class="rubric">○</span> unsealed
+        @endif
+    </div>
+@endsection
+
+@section('content')
+    <div class="article-meta">
+        <span class="crumb">
+            <a href="{{ route('wiki.index') }}">Wiki</a> /
+            <a href="{{ route('wiki.index') }}#{{ $page->type }}">§ {{ ucfirst($page->type) }}s</a> /
+            {{ $page->name }}
+        </span>
+        <span>{{ $page->word_count ?? 0 }} words</span>
+        <span>est. read {{ max(1, (int) round(($page->word_count ?? 0) / 220)) }} min</span>
+        @if ($page->last_compiled_at)
+            <span class="rubric">● sealed</span>
+        @else
+            <span class="rubric">○ unsealed</span>
+        @endif
+    </div>
+
+    <h1 class="doc-title">{{ $page->title }}</h1>
+    @if ($page->description)
+        <p class="doc-sub">{{ $page->description }}</p>
+    @endif
+
+    <div class="doc-byline">
+        <span><b>Compiled</b> from {{ $sourceDrawers->count() }} verbatim source{{ $sourceDrawers->count() !== 1 ? 's' : '' }}</span>
+        <span><b>Backlinks</b> {{ $page->backlinks_count ?? 0 }}</span>
+        <span><b>Type</b> {{ ucfirst($page->type) }}</span>
+        @if ($page->last_compiled_at)
+            <span><b>Last sealed</b> {{ $page->last_compiled_at->format('Y-m-d') }}</span>
+        @endif
+    </div>
+
+    {{-- Rendered markdown content --}}
+    {!! $renderedContent !!}
+
+    @if ($page->last_compiled_at)
+        <span class="stamp">Sealed · {{ $page->last_compiled_at->format('Y-m-d') }}</span>
+    @endif
+
+    {{-- See also --}}
+    @if ($relatedPages->isNotEmpty())
+        <div style="margin-top:4rem;padding-top:2rem;border-top:var(--hairline) solid var(--rule-strong);">
+            <h4 style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.18em;text-transform:uppercase;font-weight:500;color:var(--ink-faint);margin-bottom:1rem;border-top:0;padding-top:0;">See also — adjacent loci</h4>
+            <ul style="list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:var(--hairline) solid var(--rule);">
+                @foreach ($relatedPages as $idx => $related)
+                    <li style="padding:1rem 1rem 1rem 0;border-bottom:var(--hairline) solid var(--rule);{{ $idx % 2 === 0 ? 'border-right: var(--hairline) solid var(--rule); padding-right: 1.5rem;' : 'padding-left: 1.5rem;' }}">
+                        <a href="{{ route('wiki.show', $related->name) }}" style="display:grid;gap:0.25rem;border-bottom:0;color:var(--ink);">
+                            <span style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);">§ {{ ucfirst($related->type) }}</span>
+                            <span style="font-family:var(--serif);font-size:1.2rem;line-height:1.2;">{{ $related->title }} <span class="rubric" style="margin-left:0.25rem;">→</span></span>
+                            @if ($related->description)
+                                <span style="font-size:0.875rem;color:var(--ink-faint);font-family:var(--sans);">{{ Str::limit($related->description, 100) }}</span>
+                            @endif
                         </a>
-                        <p class="mt-1 text-xs text-slate-400">{{ Str::limit($drawer->content, 100) }}</p>
                     </li>
                 @endforeach
             </ul>
@@ -70,26 +98,48 @@
     @endif
 @endsection
 
-@section('content')
-    <div class="mx-auto max-w-4xl">
-        {{-- Breadcrumb --}}
-        <nav class="mb-4 text-sm text-slate-400">
-            <a href="{{ route('wiki.index') }}" class="hover:text-white">Wiki</a>
-            <span class="mx-1">›</span>
-            <span class="text-slate-500">{{ ucfirst($page->type) }}</span>
-            <span class="mx-1">›</span>
-            <span class="text-white">{{ $page->title }}</span>
-        </nav>
-
-        {{-- Title --}}
-        <div class="mb-6 flex items-center gap-3">
-            <h1 class="text-3xl font-bold text-white">{{ $page->title }}</h1>
+@section('marginalia')
+    <div class="margin-block">
+        <div class="lab">Provenance</div>
+        <div class="text">
+            <x-type-badge :type="$page->type" />
             <x-confidence-badge :confidence="$page->confidence ?? 'medium'" />
         </div>
+        <span class="ref">{{ ($page->revision_count ?? 0) }} revision{{ ($page->revision_count ?? 0) !== 1 ? 's' : '' }} · <a href="{{ route('wiki.history', $page->name) }}">history</a></span>
+    </div>
 
-        {{-- Rendered content --}}
-        <article class="wiki-content prose prose-invert max-w-none prose-headings:text-slate-100 prose-a:text-indigo-400 prose-a:no-underline hover:prose-a:text-indigo-300 prose-code:text-violet-300 prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-700">
-            {!! $renderedContent !!}
-        </article>
+    @if ($page->pending_drawers_since_compile > 0)
+        <div class="margin-block">
+            <div class="lab">Stale</div>
+            <div class="text">
+                <em>{{ $page->pending_drawers_since_compile }} new drawer{{ $page->pending_drawers_since_compile !== 1 ? 's' : '' }}</em>
+                added since this entry was last compiled. Re-seal in the admin to refresh.
+            </div>
+        </div>
+    @endif
+
+    @if ($sourceDrawers->isNotEmpty())
+        <div class="margin-block">
+            <div class="lab">Source drawers · {{ $sourceDrawers->count() }}</div>
+            <div class="text">
+                @foreach ($sourceDrawers->take(10) as $drawer)
+                    <a href="{{ route('palace.drawer', $drawer) }}">
+                        {{ $drawer->room?->wing?->name ?? '—' }} / {{ $drawer->room?->name ?? '—' }}
+                    </a><br/>
+                @endforeach
+                @if ($sourceDrawers->count() > 10)
+                    <span class="dim">+ {{ $sourceDrawers->count() - 10 }} more</span>
+                @endif
+            </div>
+            <span class="ref">walk lineage one step deeper</span>
+        </div>
+    @endif
+
+    <div class="margin-block">
+        <div class="lab">Glyph</div>
+        <div class="text">
+            The vermilion mark denotes a <em>sealed</em> entry. An <em>unsealed</em> entry is a draft —
+            no audit yet.
+        </div>
     </div>
 @endsection

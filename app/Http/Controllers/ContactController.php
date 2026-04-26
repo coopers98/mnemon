@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\ContactNotification;
 use App\Models\ContactSubmission;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,19 +20,8 @@ class ContactController extends Controller
 
         ContactSubmission::create($validated);
 
-        // Send notification email via Resend
         try {
-            Mail::raw(
-                "New contact form submission from Mnemon:\n\n"
-                ."Name: {$validated['name']}\n"
-                ."Email: {$validated['email']}\n\n"
-                ."Message:\n{$validated['message']}",
-                function ($mail) use ($validated) {
-                    $mail->to('coopersellers@gmail.com')
-                        ->replyTo($validated['email'], $validated['name'])
-                        ->subject('Mnemon Contact: '.$validated['name']);
-                }
-            );
+            Mail::to('coopersellers@gmail.com')->send(new ContactNotification($validated));
         } catch (\Throwable $e) {
             report($e);
         }

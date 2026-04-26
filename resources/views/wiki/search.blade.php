@@ -2,70 +2,95 @@
 
 @section('title', 'Search — Mnemon Wiki')
 
+@section('sidebar')
+    <h6>Recall — hybrid</h6>
+    <p style="font-family:var(--serif);font-size:0.95rem;line-height:1.5;color:var(--ink-soft);">
+        BM25 over <code>tsvector</code> joined to <code>pgvector</code> cosine. Wiki and palace are
+        searched together; results carry <em>provenance</em>.
+    </p>
+
+    <div class="toc-foot">
+        <a href="{{ route('wiki.index') }}">← back to atlas</a><br/>
+        <a href="{{ route('palace.index') }}">walk the palace</a>
+    </div>
+@endsection
+
 @section('content')
-    <div class="mx-auto max-w-4xl">
-        <h1 class="mb-6 text-2xl font-bold text-white">Search</h1>
-
-        <form action="{{ route('wiki.search') }}" method="GET" class="mb-8">
-            <div class="flex gap-2">
-                <input type="text" name="q" value="{{ $query }}" placeholder="Search wiki pages and drawers..."
-                       autofocus
-                       class="flex-1 rounded-md border border-slate-600 bg-slate-700 px-4 py-2 text-slate-200 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                <button type="submit"
-                        class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">
-                    Search
-                </button>
-            </div>
-        </form>
-
+    <div class="article-meta">
+        <span class="crumb"><a href="{{ route('wiki.index') }}">Wiki</a> / search</span>
         @if ($query !== '')
-            {{-- Wiki page results --}}
-            @if ($wikiResults->isNotEmpty())
-                <div class="mb-8">
-                    <h2 class="mb-3 text-lg font-semibold text-white">Wiki Pages ({{ $wikiResults->count() }})</h2>
-                    <div class="space-y-2">
-                        @foreach ($wikiResults as $result)
-                            <a href="{{ route('wiki.show', $result->name) }}"
-                               class="block rounded-lg border border-slate-700 bg-slate-800 p-4 transition hover:border-indigo-600">
-                                <div class="flex items-center gap-2">
-                                    <x-type-badge :type="$result->type" />
-                                    <span class="font-medium text-white">{{ $result->title }}</span>
-                                    <span class="text-xs text-slate-500">{{ round($result->score * 100) }}% match</span>
-                                </div>
-                                @if ($result->description)
-                                    <p class="mt-1 text-sm text-slate-400">{{ Str::limit($result->description, 200) }}</p>
-                                @endif
-                            </a>
-                        @endforeach
-                    </div>
-                </div>
-            @endif
-
-            {{-- Drawer results --}}
-            @if ($drawerResults->isNotEmpty())
-                <div class="mb-8">
-                    <h2 class="mb-3 text-lg font-semibold text-white">Palace Drawers ({{ $drawerResults->count() }})</h2>
-                    <div class="space-y-2">
-                        @foreach ($drawerResults as $result)
-                            <a href="{{ route('palace.drawer', $result->id) }}"
-                               class="block rounded-lg border border-slate-700 bg-slate-800 p-4 transition hover:border-indigo-600">
-                                <div class="flex items-center gap-2">
-                                    <x-tier-badge :tier="$result->tier" />
-                                    <span class="text-sm text-slate-400">{{ $result->wing }} / {{ $result->room }}</span>
-                                    <span class="text-xs text-slate-500">{{ round($result->score * 100) }}% match</span>
-                                </div>
-                                <p class="mt-1 text-sm text-slate-300">{{ Str::limit($result->content, 200) }}</p>
-                            </a>
-                        @endforeach
-                    </div>
-                </div>
-            @endif
-
-            @if ($wikiResults->isEmpty() && $drawerResults->isEmpty())
-                <div class="rounded-lg border border-slate-700 bg-slate-800 p-8 text-center">
-                    <p class="text-slate-400">No results found for "{{ $query }}".</p>
-                </div>
-            @endif
+            <span>q · {{ Str::limit($query, 60) }}</span>
         @endif
     </div>
+
+    <h1 class="doc-title">{{ $query !== '' ? 'Recall.' : 'Walk to' }} <em>{{ $query !== '' ? '' : 'something' }}</em></h1>
+    @if ($query === '')
+        <p class="doc-sub">A hybrid query against both compiled entries and verbatim drawers. Results are ranked, deduped, and lineage-attributed.</p>
+    @else
+        <p class="doc-sub">{{ ($wikiResults?->count() ?? 0) + ($drawerResults?->count() ?? 0) }} result{{ (($wikiResults?->count() ?? 0) + ($drawerResults?->count() ?? 0)) !== 1 ? 's' : '' }} for <em>{{ $query }}</em>.</p>
+    @endif
+
+    <form action="{{ route('wiki.search') }}" method="GET" style="display:flex;align-items:center;gap:0.6rem;padding:0.65rem 0.85rem;border:var(--hairline) solid var(--ink);background:var(--paper);margin-bottom:2.5rem;">
+        <span aria-hidden="true" style="color:var(--rubric);font-family:var(--mono);">⌕</span>
+        <input type="text" name="q" value="{{ $query }}" placeholder="walk to…" autofocus
+               style="flex:1;border:0;background:transparent;outline:none;font:inherit;font-family:var(--mono);font-size:0.95rem;color:var(--ink);" />
+        <button type="submit" class="btn" style="font-size:0.75rem;padding:0.45rem 0.75rem;">
+            <span>Recall</span><span class="arrow">→</span>
+        </button>
+    </form>
+
+    @if ($query !== '')
+        @if (($wikiResults?->isNotEmpty() ?? false))
+            <h2 style="margin-top:0;">Wiki entries <span style="font-family:var(--mono);font-size:0.45em;letter-spacing:0.18em;color:var(--ink-faint);text-transform:uppercase;margin-left:0.75rem;">— {{ $wikiResults->count() }}</span></h2>
+            <div style="display:grid;gap:0;border-top:var(--hairline) solid var(--rule);">
+                @foreach ($wikiResults as $result)
+                    <a href="{{ route('wiki.show', $result->name) }}"
+                       style="display:grid;grid-template-columns:1fr auto;gap:1.5rem;padding:1.25rem 0;border-bottom:var(--hairline) solid var(--rule);align-items:baseline;color:var(--ink);">
+                        <div>
+                            <div style="display:flex;align-items:baseline;gap:0.85rem;flex-wrap:wrap;">
+                                <span style="font-family:var(--serif);font-size:1.2rem;line-height:1.2;">{{ $result->title }}</span>
+                                <x-type-badge :type="$result->type" />
+                            </div>
+                            @if ($result->description)
+                                <p style="font-family:var(--serif);font-size:1rem;color:var(--ink-soft);line-height:1.55;margin:0.4rem 0 0;border:0;">{{ Str::limit($result->description, 200) }}</p>
+                            @endif
+                        </div>
+                        <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.1em;text-transform:uppercase;color:var(--rubric);text-align:right;white-space:nowrap;">
+                            score · {{ round($result->score * 100) }}
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+        @endif
+
+        @if (($drawerResults?->isNotEmpty() ?? false))
+            <h2>Verbatim drawers <span style="font-family:var(--mono);font-size:0.45em;letter-spacing:0.18em;color:var(--ink-faint);text-transform:uppercase;margin-left:0.75rem;">— {{ $drawerResults->count() }}</span></h2>
+            <div style="display:grid;gap:0;border-top:var(--hairline) solid var(--rule);">
+                @foreach ($drawerResults as $result)
+                    <a href="{{ route('palace.drawer', $result->id) }}"
+                       style="display:grid;grid-template-columns:1fr auto;gap:1.5rem;padding:1.25rem 0;border-bottom:var(--hairline) solid var(--rule);align-items:baseline;color:var(--ink);">
+                        <div>
+                            <div style="display:flex;align-items:baseline;gap:0.85rem;flex-wrap:wrap;">
+                                <x-tier-badge :tier="$result->tier" />
+                                <span style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-faint);">
+                                    {{ $result->wing }} / {{ $result->room }}
+                                </span>
+                            </div>
+                            <p style="font-family:var(--serif);font-size:1.05rem;color:var(--ink);line-height:1.55;margin:0.5rem 0 0;border:0;">{{ Str::limit($result->content, 220) }}</p>
+                        </div>
+                        <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.1em;text-transform:uppercase;color:var(--rubric);text-align:right;white-space:nowrap;">
+                            score · {{ round($result->score * 100) }}
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+        @endif
+
+        @if (($wikiResults?->isEmpty() ?? true) && ($drawerResults?->isEmpty() ?? true))
+            <div class="empty">
+                Nothing recalled for <em>{{ $query }}</em>. The query may be too narrow, or the archive
+                may not yet contain it.
+            </div>
+        @endif
+    @endif
 @endsection

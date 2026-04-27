@@ -29,6 +29,7 @@ class MnemonServer extends Server
     protected array $resources = [
         \App\Mcp\Resources\DrawerResource::class,
         \App\Mcp\Resources\WikiPageResource::class,
+        \App\Mcp\Resources\WingResource::class,
     ];
     protected array $prompts = [];
 }

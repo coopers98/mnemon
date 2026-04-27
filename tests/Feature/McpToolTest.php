@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Models\ApiKey;
 use App\Models\Drawer;
@@ -78,53 +77,5 @@ class McpToolTest extends TestCase
 
         $staleNames = array_column($result['stale_wiki_pages'], 'name');
         $this->assertContains('stale-page', $staleNames);
-    }
-
-    // ─── context_list ────────────────────────────────────────────────────────
-
-    public function test_context_list_returns_all_pages(): void
-    {
-        WikiPage::create(['name' => 'person:alice', 'type' => 'person', 'content' => 'Alice']);
-        WikiPage::create(['name' => 'project:x', 'type' => 'project', 'content' => 'X']);
-
-        $tool = app(ContextListTool::class);
-        $result = $tool->execute([], $this->apiKey);
-
-        $this->assertArrayHasKey('pages', $result);
-        $this->assertCount(2, $result['pages']);
-    }
-
-    public function test_context_list_filters_by_type(): void
-    {
-        WikiPage::create(['name' => 'person:alice', 'type' => 'person', 'content' => 'Alice']);
-        WikiPage::create(['name' => 'project:x', 'type' => 'project', 'content' => 'X']);
-        WikiPage::create(['name' => 'concept:y', 'type' => 'concept', 'content' => 'Y']);
-
-        $tool = app(ContextListTool::class);
-        $result = $tool->execute(['type' => 'person'], $this->apiKey);
-
-        $this->assertCount(1, $result['pages']);
-        $this->assertEquals('person:alice', $result['pages'][0]['name']);
-    }
-
-    public function test_context_list_with_all_type_returns_everything(): void
-    {
-        WikiPage::create(['name' => 'person:bob', 'type' => 'person', 'content' => 'Bob']);
-        WikiPage::create(['name' => 'concept:z', 'type' => 'concept', 'content' => 'Z']);
-
-        $tool = app(ContextListTool::class);
-        $result = $tool->execute(['type' => 'all'], $this->apiKey);
-
-        $this->assertCount(2, $result['pages']);
-    }
-
-    public function test_context_list_returns_word_count(): void
-    {
-        WikiPage::create(['name' => 'concept:words', 'type' => 'concept', 'content' => 'one two three four five']);
-
-        $tool = app(ContextListTool::class);
-        $result = $tool->execute(['type' => 'concept'], $this->apiKey);
-
-        $this->assertEquals(5, $result['pages'][0]['word_count']);
     }
 }

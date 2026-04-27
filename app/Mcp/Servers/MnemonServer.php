@@ -20,6 +20,7 @@ class MnemonServer extends Server
         \App\Mcp\Tools\PalaceWakeUpTool::class,
         \App\Mcp\Tools\ContextGetTool::class,
         \App\Mcp\Tools\ContextSetTool::class,
+        \App\Mcp\Tools\ContextListTool::class,
     ];
     protected array $resources = [];
     protected array $prompts = [];

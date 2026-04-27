@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\CaptureConsentWings;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,7 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Capture OAuth consent wing data before the approve controller runs.
+        $middleware->web(append: [
+            CaptureConsentWings::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

@@ -2,15 +2,19 @@
 
 namespace App\Providers;
 
+use App\Listeners\PersistMcpTokenRestrictions;
 use App\Models\Drawer;
 use App\Models\WikiPage;
+use App\Models\Wing;
 use App\Observers\DrawerObserver;
 use App\Observers\WikiPageObserver;
 use App\Services\EmbeddingManager;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
@@ -36,13 +40,20 @@ class AppServiceProvider extends ServiceProvider
         Passport::personalAccessTokensExpireIn(now()->addDays(90));
 
         Passport::tokensCan([
-            'palace.read'  => 'Read drawers and palace metadata',
+            'palace.read' => 'Read drawers and palace metadata',
             'palace.write' => 'Add drawers',
-            'wiki.read'    => 'Read wiki pages, history, graph',
-            'wiki.write'   => 'Compile, lint, and write wiki pages',
+            'wiki.read' => 'Read wiki pages, history, graph',
+            'wiki.write' => 'Compile, lint, and write wiki pages',
         ]);
 
-        Passport::authorizationView(fn ($p) => view('mcp.authorize', $p));
+        Passport::authorizationView(fn ($p) => view('mcp.authorize', array_merge($p, [
+            'wings' => Wing::orderBy('slug')->get(),
+        ])));
+
+        Event::listen(
+            AccessTokenCreated::class,
+            PersistMcpTokenRestrictions::class
+        );
 
         RateLimiter::for('mcp', function (Request $request) {
             return $request->user()

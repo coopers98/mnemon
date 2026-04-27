@@ -2,79 +2,66 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
-use App\Models\Drawer;
-use App\Services\PalaceSearchService;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
+use App\Mcp\Support\BrainSessionLogger;
+use App\Services\DrawerSearchService;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-class DrawerSearchTool extends BaseTool
+#[Description('Semantic + fulltext search across drawers in the palace.')]
+#[IsReadOnly]
+class DrawerSearchTool extends Tool
 {
-    public function __construct(
-        private readonly PalaceSearchService $searchService,
-    ) {}
+    use RequiresScope, RequiresWingAccess;
 
-    public function requiredScope(): string
+    protected string $name = 'drawer_search';
+
+    protected string $scope = 'palace.read';
+
+    public function __construct(protected DrawerSearchService $search) {}
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        return 'palace:read';
+        if ($err = $this->requireScope($request)) {
+            return $err;
+        }
+
+        $params = $request->validate([
+            'query' => 'required|string|max:500',
+            'limit' => 'integer|min:1|max:50',
+            'wing'  => 'nullable|string',
+        ]);
+
+        if (! empty($params['wing'])) {
+            if ($err = $this->requireWingAccess($request, $params['wing'])) {
+                return $err;
+            }
+        }
+
+        $results = $this->search->run(
+            query: $params['query'],
+            limit: $params['limit'] ?? 10,
+            wing: $params['wing'] ?? null,
+            allowedWingPatterns: $this->wingPatternsFor($request),
+        );
+
+        BrainSessionLogger::log($request, 'drawer_search', $params, count($results));
+
+        return Response::structured(['results' => $results]);
     }
 
-    public function execute(array $params, ApiKey $apiKey): array
+    public function schema(JsonSchema $schema): array
     {
-        $this->requireScope($apiKey, $this->requiredScope());
-
-        $query = $params['query'] ?? null;
-
-        if (empty($query)) {
-            throw McpException::invalidParams('Parameter "query" is required.');
-        }
-
-        $wing = $params['wing'] ?? null;
-        $room = $params['room'] ?? null;
-        $limit = isset($params['limit']) ? (int) $params['limit'] : 5;
-        $mode = $params['mode'] ?? 'hybrid';
-        $tier = $params['tier'] ?? null;
-
-        $limit = max(1, min($limit, (int) config('mnemon.retrieval.max_limit', 20)));
-
-        $validModes = ['semantic', 'fulltext', 'hybrid'];
-        if (! in_array($mode, $validModes, true)) {
-            throw McpException::invalidParams('Parameter "mode" must be one of: semantic, fulltext, hybrid.');
-        }
-
-        if ($tier !== null && ! in_array($tier, Drawer::TIERS, true)) {
-            throw McpException::invalidParams('Parameter "tier" must be one of: '.implode(', ', Drawer::TIERS).'.');
-        }
-
-        if ($wing !== null) {
-            $this->requireWingAccess($apiKey, $wing);
-        }
-
-        $results = $this->searchService->search($query, $wing, $room, $limit, $mode, $tier);
-
-        $mapped = $results->map(fn ($r) => [
-            'id' => $r->id,
-            'content' => $r->content,
-            'wing' => $r->wing,
-            'wing_slug' => $r->wing_slug,
-            'room' => $r->room,
-            'room_slug' => $r->room_slug,
-            'source' => $r->source,
-            'metadata' => $r->metadata,
-            'tier' => $r->tier ?? 'raw',
-            'created_at' => $r->created_at,
-            'score' => $r->score,
-        ])->values()->all();
-
-        $this->logSession('drawer_search', $apiKey, [
-            'query' => $query,
-            'wing' => $wing,
-            'room' => $room,
-            'limit' => $limit,
-            'mode' => $mode,
-            'tier' => $tier,
-        ], count($mapped));
-
-        return ['results' => $mapped];
+        return [
+            'query' => $schema->string()->description('Search query.')->required(),
+            'limit' => $schema->integer()->description('Max results (1-50).')->default(10),
+            'wing'  => $schema->string()->description('Optional wing slug to restrict search.'),
+        ];
     }
 }

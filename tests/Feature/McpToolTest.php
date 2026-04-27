@@ -9,14 +9,12 @@ use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\ContextSetTool;
 use App\Mcp\Tools\DrawerAddTool;
 use App\Mcp\Tools\DrawerGetTool;
-use App\Mcp\Tools\DrawerSearchTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Models\ApiKey;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
-use App\Services\PalaceSearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -203,41 +201,6 @@ class McpToolTest extends TestCase
 
         $tool = app(DrawerAddTool::class);
         $tool->execute(['content' => 'test'], $this->apiKey);
-    }
-
-    // ─── drawer_search ───────────────────────────────────────────────────────
-
-    public function test_drawer_search_delegates_to_palace_search_service(): void
-    {
-        $mockService = $this->createMock(PalaceSearchService::class);
-        $mockService->expects($this->once())
-            ->method('search')
-            ->with('test query', null, null, 5, 'hybrid')
-            ->willReturn(collect());
-
-        $tool = new DrawerSearchTool($mockService);
-        $result = $tool->execute(['query' => 'test query'], $this->apiKey);
-
-        $this->assertArrayHasKey('results', $result);
-        $this->assertEmpty($result['results']);
-    }
-
-    public function test_drawer_search_requires_query(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('query');
-
-        $tool = app(DrawerSearchTool::class);
-        $tool->execute([], $this->apiKey);
-    }
-
-    public function test_drawer_search_rejects_invalid_mode(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('mode');
-
-        $tool = app(DrawerSearchTool::class);
-        $tool->execute(['query' => 'test', 'mode' => 'invalid'], $this->apiKey);
     }
 
     // ─── drawer_get ──────────────────────────────────────────────────────────

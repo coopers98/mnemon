@@ -12,7 +12,9 @@ use Laravel\Mcp\Server\Attributes\Version;
 #[Instructions('Mnemon is a self-hosted second brain. Use palace tools for verbatim storage, wiki tools for synthesized knowledge.')]
 class MnemonServer extends Server
 {
-    protected array $tools = [];
+    protected array $tools = [
+        \App\Mcp\Tools\DrawerSearchTool::class,
+    ];
     protected array $resources = [];
     protected array $prompts = [];
 }

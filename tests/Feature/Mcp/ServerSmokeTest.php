@@ -28,7 +28,7 @@ class ServerSmokeTest extends TestCase
         $response->assertStatus(401);
     }
 
-    public function test_authenticated_tools_list_returns_empty_array(): void
+    public function test_authenticated_tools_list_returns_registered_tools(): void
     {
         $user = User::factory()->create();
         $token = $user->createToken('test')->accessToken;
@@ -42,6 +42,9 @@ class ServerSmokeTest extends TestCase
         ]);
 
         $response->assertStatus(200);
-        $this->assertEquals([], $response->json('result.tools'));
+        $tools = $response->json('result.tools');
+        $this->assertIsArray($tools);
+        $names = array_column($tools, 'name');
+        $this->assertContains('drawer_search', $names);
     }
 }

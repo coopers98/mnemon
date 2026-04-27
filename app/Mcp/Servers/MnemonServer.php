@@ -26,6 +26,8 @@ class MnemonServer extends Server
         \App\Mcp\Tools\WikiHistoryTool::class,
         \App\Mcp\Tools\WikiGraphTool::class,
     ];
-    protected array $resources = [];
+    protected array $resources = [
+        \App\Mcp\Resources\DrawerResource::class,
+    ];
     protected array $prompts = [];
 }

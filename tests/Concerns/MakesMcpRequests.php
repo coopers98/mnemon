@@ -27,7 +27,7 @@ trait MakesMcpRequests
         $this->passportClientCreated = true;
     }
 
-    protected function mcpCall(string $tool, array $arguments, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    private function mcpRequest(string $method, array $params, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
     {
         $this->ensurePassportClient();
 
@@ -45,13 +45,28 @@ trait MakesMcpRequests
         return $this->postJson('/mcp', [
             'jsonrpc' => '2.0',
             'id' => 1,
-            'method' => 'tools/call',
-            'params' => [
-                'name' => $tool,
-                'arguments' => $arguments,
-            ],
+            'method' => $method,
+            'params' => $params,
         ], [
             'Authorization' => 'Bearer '.$tokenResult->accessToken,
         ]);
+    }
+
+    protected function mcpCall(string $tool, array $arguments, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    {
+        return $this->mcpRequest('tools/call', [
+            'name' => $tool,
+            'arguments' => $arguments,
+        ], $scopes, $wingPatterns);
+    }
+
+    protected function mcpResourceList(array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    {
+        return $this->mcpRequest('resources/templates/list', [], $scopes, $wingPatterns);
+    }
+
+    protected function mcpResourceRead(string $uri, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    {
+        return $this->mcpRequest('resources/read', ['uri' => $uri], $scopes, $wingPatterns);
     }
 }

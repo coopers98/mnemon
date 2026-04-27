@@ -17,7 +17,7 @@
 | index.md + log.md auto-maintained | Special wiki files | ✅ Auto-updated by context_set |
 | Hybrid search (vector + BM25 + temporal) | qmd / search engine | ✅ Complete |
 | Orientation tools (brain_status, palace_wake_up) | — | ✅ Complete |
-| API key auth + audit trail | — | ✅ Complete |
+| OAuth 2.1 auth + audit trail | — | ✅ Complete |
 | Filament dashboard for browsing | Obsidian as frontend | ✅ Complete |
 | Staleness detection | Lint (stale claims) | ✅ Partial (stale_wiki_pages in brain_status) |
 | Import from files | Ingest workflow | ✅ Sprint 6 |

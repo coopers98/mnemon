@@ -66,7 +66,8 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 composer install
 cp .env.example .env
 php artisan key:generate
-php artisan migrate --seed   # creates an admin user + a `*` admin API key (printed once)
+php artisan migrate --seed   # creates an admin user
+php artisan passport:install # generates OAuth encryption keys + a personal access client
 php artisan serve
 ```
 

@@ -24,34 +24,38 @@ Primary consumer: OpenClaw (dogfood), then Laravel developers via Composer packa
 
 ## 2. Users & Access
 
-**Phase 1: Single user with scoped API keys.** Filament admin protected by a single admin user.
+**Phase 1: Single user with OAuth-scoped tokens.** Filament admin protected by a single admin user.
 
-**Agents** access Mnemon via MCP, authenticated with scoped API keys. Each key has a name (e.g., "openclaw-main", "claude-code", "cursor"), a set of permission scopes, and optional wing restrictions.
+**Agents** access Mnemon via MCP, authenticated with OAuth 2.1 bearer tokens issued via Laravel Passport. Each token carries coarse permission scopes and optional per-token wing restrictions captured at the consent screen.
 
-### 2.1 API Key Scopes
+### 2.1 OAuth Scopes
 
 | Scope | Allows |
 |---|---|
-| `palace:read` | `drawer_search`, `drawer_get`, `brain_status`, `palace_wake_up` |
-| `palace:write` | `drawer_add` |
-| `palace:delete` | Hard delete drawers |
-| `wiki:read` | `context_get`, `context_list` |
-| `wiki:write` | `context_set` |
-| `*` | Full access (admin key) |
+| `palace.read` | `drawer_search`, `drawer_get`, `brain_status`, `palace_wake_up`, `wiki_compile` |
+| `palace.write` | `drawer_add` |
+| `wiki.read` | `context_get`, `context_list`, `wiki_lint`, `wiki_graph`, `wiki_history` |
+| `wiki.write` | `context_set` |
 
-**Wing restrictions (optional):** A key can be limited to specific wings. Example: a Claude Code key scoped to `project:*` wings cannot read `person:*` content. Default: all wings accessible.
+**Wing restrictions (optional):** A token can be limited to specific wings at the OAuth consent screen. Patterns support wildcards (e.g. `project:*`). Null = unrestricted.
 
-**Key management:** via Filament UI. Create, revoke, edit scopes, view last-used timestamp.
+**Client management:** Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. Access tokens are revocable via the Filament admin panel.
 
 **Schema:**
 ```sql
-api_keys
-  id, name (varchar), key_hash (varchar unique), scopes (jsonb),
-  wing_restrictions (jsonb nullable), last_used_at, revoked_at,
-  created_at, updated_at
+-- Managed by laravel/passport
+oauth_clients (id, name, secret, redirect, ...)
+oauth_access_tokens (id, user_id, client_id, name, scopes, revoked, expires_at, ...)
+oauth_refresh_tokens (id, access_token_id, revoked, expires_at)
+
+-- Mnemon extension
+mcp_token_restrictions
+  access_token_id (varchar(100), PK, FK → oauth_access_tokens.id ON DELETE CASCADE)
+  wing_patterns   (jsonb nullable; null = unrestricted)
+  created_at
 ```
 
-Every MCP request must include a valid API key. Requests with revoked, missing, or insufficient-scope keys return an error. All MCP calls are logged to `brain_sessions` with the key name as `source`.
+Access tokens expire after 1 hour; refresh tokens after 90 days. Every MCP request must include a valid, non-revoked bearer token with the required scope. All MCP calls are logged to `brain_sessions`.
 
 **Phase 3:** Multi-user and tenant isolation.
 

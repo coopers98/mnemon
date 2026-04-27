@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. API key authentication with per-key scope and wing restrictions controls access.
+Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. OAuth 2.1 via Passport with coarse scopes and per-token wing restrictions controls access.
 
 ## Stack
 
@@ -48,16 +48,29 @@ Raw content lives in a three-level hierarchy:
 
 - **WikiPage** — synthesized articles compiled from palace drawers. Types: `person`, `project`, `concept`, `decision`, `synthesis`. Tracks `last_compiled_at` to detect staleness (default: 30 days).
 
-### MCP Tools
+### MCP Server
 
-Planned for Sprint 2. Tools will allow AI agents to store drawers, retrieve by semantic/fulltext search, and read/write wiki pages. Authenticated via API keys.
+Endpoint: `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Built on [`laravel/mcp`](https://github.com/laravel/mcp).
 
-### API Keys
+Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant scopes and optionally restrict which wings the token can access.
 
-`ApiKey` model handles bearer-token authentication:
-- **Scopes** — array of allowed operations (e.g., `['drawers.write', 'wiki.read']` or `['*']` for full access)
-- **Wing restrictions** — optional array of wing slugs the key can access. Supports wildcard patterns like `project:*`. Null = unrestricted.
-- Keys are stored as SHA-256 hashes; the plaintext is only shown once at creation.
+Scopes:
+- `palace.read` — `brain_status`, `palace_wake_up`, `drawer_search`, `drawer_get`, `wiki_compile`
+- `palace.write` — `drawer_add`
+- `wiki.read` — `context_get`, `context_list`, `wiki_lint`, `wiki_graph`, `wiki_history`
+- `wiki.write` — `context_set`
+
+Access tokens expire after 1 hour; refresh tokens after 90 days.
+
+See full spec at `docs/superpowers/specs/2026-04-26-mcp-rework-design.md`.
+
+### OAuth Clients & Tokens
+
+Authentication is handled by Laravel Passport (OAuth 2.1):
+- **OAuth clients** are registered via DCR (MCP clients like Claude Code do this automatically) or manually via `php artisan passport:client`.
+- **Access tokens** carry coarse scopes (`palace.read/write`, `wiki.read/write`).
+- **Per-token wing restrictions** are captured at the consent screen and stored in `mcp_token_restrictions` (FK → `oauth_access_tokens`).
+- Token revocation via the Filament admin panel under OAuth Access Tokens.
 
 ### Audit Trail
 
@@ -67,14 +80,21 @@ Planned for Sprint 2. Tools will allow AI agents to store drawers, retrieve by s
 
 ```
 app/
-  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, ApiKey)
+  Mcp/
+    Servers/       — MnemonServer (registers tools, resources, prompts)
+    Tools/         — Tool handlers (one class per tool)
+    Resources/     — MCP resource handlers (WingResource, DrawerResource, WikiPageResource)
+    Prompts/       — MCP prompt handlers
+    Concerns/      — Shared traits (RequiresScope, RequiresWingAccess, ResolvesAgentSource, etc.)
+    Support/       — BrainSessionLogger and other support classes
+  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, McpTokenRestriction)
   Providers/
     Filament/      — Filament panel providers
 config/
   mnemon.php       — Mnemon-specific config (embedding, retrieval, wiki)
 database/
   migrations/      — Prefixed 2026_04_24_1000XX_create_*_table.php for Mnemon tables
-  seeders/         — AdminUserSeeder, ApiKeySeeder, DatabaseSeeder
+  seeders/         — AdminUserSeeder, DatabaseSeeder
 tests/
   Unit/            — Model unit tests (no DB required where possible)
   Feature/         — Migration/integration tests (use RefreshDatabase)

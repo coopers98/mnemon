@@ -50,12 +50,23 @@ The command:
 
 ### 4. Verify
 
+Mnemon's MCP endpoint is `POST /mcp` (Streamable HTTP, JSON-RPC 2.0), authenticated with an OAuth 2.1 bearer token.
+
+**From Claude Code** — the easiest path. The MCP client handles the OAuth flow automatically:
+
 ```bash
-curl -s -X POST https://<domain>/api/mcp/call \
-  -H "Accept: application/json" \
+claude mcp add --transport http mnemon https://mnemon.example.com/mcp
+# Opens a browser window — log in, grant scopes (palace.read, wiki.read, etc.),
+# optionally restrict to specific wings. After consent, the token is stored.
+```
+
+**Direct curl** — obtain a Passport bearer token first (e.g. via `php artisan tinker` or the personal-access-token flow), then:
+
+```bash
+curl -s -X POST https://mnemon.example.com/mcp \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <key>" \
-  -d '{"tool":"brain_status","params":{}}' | jq .
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"brain_status","arguments":{}}}' | jq .
 ```
 
 ---
@@ -171,16 +182,16 @@ Content is hashed with SHA-256 and stored in `metadata.content_hash`. On re-impo
 
 | Tool | Scope | Description |
 |------|-------|-------------|
-| `brain_status` | palace:read | Drawer/wiki counts, wings, pending updates |
-| `palace_wake_up` | palace:read | Recent activity, pages needing compilation |
-| `drawer_add` | palace:write | Store verbatim content |
-| `drawer_search` | palace:read | Hybrid search (semantic + fulltext + temporal) |
-| `drawer_get` | palace:read | Fetch drawer by ID |
-| `context_get` | wiki:read | Fetch wiki page (+ source previews if palace:read) |
-| `context_set` | wiki:write | Create/update wiki page with metadata |
-| `context_list` | wiki:read | List all wiki pages |
-| `wiki_lint` | wiki:read | Health check (stale, orphan, empty, low-confidence) |
-| `wiki_compile` | palace:read | Gather drawers for wiki page compilation |
+| `brain_status` | palace.read | Drawer/wiki counts, wings, pending updates |
+| `palace_wake_up` | palace.read | Recent activity, pages needing compilation |
+| `drawer_add` | palace.write | Store verbatim content |
+| `drawer_search` | palace.read | Hybrid search (semantic + fulltext + temporal) |
+| `drawer_get` | palace.read | Fetch drawer by ID |
+| `context_get` | wiki.read | Fetch wiki page (+ source previews if palace.read) |
+| `context_set` | wiki.write | Create/update wiki page with metadata |
+| `context_list` | wiki.read | List all wiki pages |
+| `wiki_lint` | wiki.read | Health check (stale, orphan, empty, low-confidence) |
+| `wiki_compile` | palace.read | Gather drawers for wiki page compilation |
 
 ---
 

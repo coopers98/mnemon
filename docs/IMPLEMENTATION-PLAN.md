@@ -1,5 +1,10 @@
 # Mnemon — Implementation Plan
 
+> **Note (2026-04-26):** Sections covering API-key auth and `/api/mcp/call` are
+> superseded by the MCP rework — see
+> [`docs/superpowers/specs/2026-04-26-mcp-rework-design.md`](superpowers/specs/2026-04-26-mcp-rework-design.md)
+> and [`docs/superpowers/plans/2026-04-26-mcp-rework.md`](superpowers/plans/2026-04-26-mcp-rework.md).
+
 **FRD:** `docs/FRD.md`
 **Stack:** Laravel, Postgres + pgvector, Filament, Laravel MCP Server
 **Repo:** `coopers98/mnemon`
@@ -21,6 +26,8 @@
 | 7 | Deploy & Polish | Forge setup, domain, SSL, smoke tests, CLAUDE.md | 1 session | ⏳ Not started |
 
 **Current state:** Sprints 1–5 complete on `main`. The admin panel ships six resources (Wing, Room, Drawer, WikiPage, ApiKey, BrainSession), a stats overview widget, and a custom palace+wiki Search page. 225 tests passing. Sprint 6 (OpenClaw integration) is next.
+>
+> **Superseded by MCP rework.** The `ApiKey` resource has been replaced by OAuth Clients + OAuth Access Tokens (Passport). See the note at the top of this file.
 
 ---
 
@@ -69,6 +76,9 @@ result_count (int nullable), created_at
 ```
 
 **`create_api_keys_table`**
+
+> **Superseded by MCP rework.** This migration and the `ApiKey` model are deleted. Auth is now OAuth 2.1 via Passport (`oauth_access_tokens`) with per-token wing restrictions in `mcp_token_restrictions`.
+
 ```
 id (bigint PK), name (varchar), key_hash (varchar unique),
 scopes (jsonb), wing_restrictions (jsonb nullable),
@@ -82,7 +92,7 @@ created_at, updated_at
 - `Drawer` — belongsTo Room, soft deletes, casts metadata to array
 - `WikiPage` — casts type as enum, embedding nullable
 - `BrainSession` — read-only audit model
-- `ApiKey` — scopes cast to array, `hasScope(string)` and `canAccessWing(string)` methods
+- `ApiKey` — scopes cast to array, `hasScope(string)` and `canAccessWing(string)` methods — **Superseded by MCP rework** (model deleted; replaced by Passport `oauth_access_tokens` + `McpTokenRestriction`)
 
 ### Config (`config/mnemon.php`)
 ```php
@@ -124,7 +134,7 @@ return [
 
 ### Tests
 - Model relationship tests (wing → rooms → drawers)
-- ApiKey scope checking (`hasScope`, `canAccessWing`)
+- ApiKey scope checking (`hasScope`, `canAccessWing`) — **Superseded by MCP rework.** Replaced by `tokenCan()` (Passport) + `RequiresWingAccess` trait.
 - Slug auto-generation on Wing and Room
 - Soft delete on Drawer
 
@@ -203,6 +213,9 @@ return [
 - Serve via `php artisan mcp:serve`
 
 ### API Key Middleware
+
+> **Superseded by MCP rework.** API-key middleware replaced by `auth:api` (Passport OAuth bearer). Scope enforcement via `RequiresScope` trait; wing restriction enforcement via `RequiresWingAccess` trait reading `mcp_token_restrictions`.
+
 - Extract key from MCP request metadata (or header for HTTP transport)
 - Hash and look up in `api_keys` table
 - Check `revoked_at` is null
@@ -308,6 +321,9 @@ return [
 - Click through to drawer or wiki page detail
 
 ### API Key Management
+
+> **Superseded by MCP rework.** `ApiKeyResource` replaced by `OauthClientResource` + `OauthAccessTokenResource` (Passport). Wing restrictions are captured at the OAuth consent screen and stored in `mcp_token_restrictions`.
+
 **ApiKeyResource**
 - List: name, scopes display, wing restrictions, last_used_at, status (active/revoked)
 - Create: name, scope checkboxes, wing restriction multi-select, generates key (shown once)
@@ -338,7 +354,7 @@ Filament v5.6.1; resources auto-discovered via `discoverResources` / `discoverPa
 - **RoomResource** — flat under Wing for now (true nested routing deferred); SelectFilter narrows by wing; same slug-on-edit pattern.
 - **DrawerResource** — adds soft-delete handling: TrashedFilter, ViewAction, EditAction, DeleteAction (soft), ForceDeleteAction (hard, with confirmation modal), RestoreAction. `source` SelectFilter is cached 60s to avoid `SELECT DISTINCT` on every render. The form deliberately omits `embedding` so the EmbeddingManager observer remains the single source of truth.
 - **WikiPageResource** — markdown rendering on the View page; type badges colored per type (`person/project/concept/decision/synthesis`) sourced from `WikiPage::TYPE_COLORS`; word count via a `getWordCountAttribute()` accessor; Create/Edit bump `last_compiled_at` only when `name`/`type`/`content` actually changed (description-only edits don't reset staleness).
-- **ApiKeyResource** — Create flow calls `ApiKey::generate(...)` and fires a persistent Filament Notification with the plaintext key (warning that it won't be shown again, plus a Copy button). No key/key_hash field anywhere on the form. Revoke is the only mutation — there is no DeleteAction on this resource.
+- **ApiKeyResource** — Create flow calls `ApiKey::generate(...)` and fires a persistent Filament Notification with the plaintext key (warning that it won't be shown again, plus a Copy button). No key/key_hash field anywhere on the form. Revoke is the only mutation — there is no DeleteAction on this resource. **Superseded by MCP rework** — replaced by `OauthClientResource` + `OauthAccessTokenResource`.
 - **BrainSessionResource** — strictly read-only: only List + View pages; `canCreate`/`canEdit`/`canDelete`/`canDeleteAny` all return false; `GET /admin/brain-sessions/{id}/edit` returns 404. Pretty-prints the input JSON in the infolist.
 
 **Dashboard widget:**

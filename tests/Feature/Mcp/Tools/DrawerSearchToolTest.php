@@ -7,19 +7,12 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\Wing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\Concerns\CreatesPassportClient;
 use Tests\Concerns\MakesMcpRequests;
 use Tests\TestCase;
 
 class DrawerSearchToolTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient, MakesMcpRequests;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->setUpPassportClient();
-    }
+    use RefreshDatabase, MakesMcpRequests;
 
     public function test_returns_drawer_results_for_query(): void
     {

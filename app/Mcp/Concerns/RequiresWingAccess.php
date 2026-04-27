@@ -27,12 +27,21 @@ trait RequiresWingAccess
         return $this->resolveRestriction($request)?->wing_patterns;
     }
 
+    private ?string $resolvedTokenId = null;
+    private ?McpTokenRestriction $resolvedRestriction = null;
+
     private function resolveRestriction(Request $request): ?McpTokenRestriction
     {
         $tokenId = $request->user()?->currentAccessToken()?->id;
         if ($tokenId === null) {
             return null;
         }
-        return McpTokenRestriction::find($tokenId);
+
+        if ($this->resolvedTokenId !== $tokenId) {
+            $this->resolvedTokenId = $tokenId;
+            $this->resolvedRestriction = McpTokenRestriction::find($tokenId);
+        }
+
+        return $this->resolvedRestriction;
     }
 }

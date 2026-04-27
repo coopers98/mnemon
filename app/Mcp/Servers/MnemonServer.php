@@ -14,6 +14,7 @@ class MnemonServer extends Server
 {
     protected array $tools = [
         \App\Mcp\Tools\DrawerSearchTool::class,
+        \App\Mcp\Tools\DrawerGetTool::class,
     ];
     protected array $resources = [];
     protected array $prompts = [];

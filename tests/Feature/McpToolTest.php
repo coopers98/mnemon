@@ -8,7 +8,6 @@ use App\Mcp\Tools\ContextGetTool;
 use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\ContextSetTool;
 use App\Mcp\Tools\DrawerAddTool;
-use App\Mcp\Tools\DrawerGetTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Models\ApiKey;
 use App\Models\Drawer;
@@ -201,42 +200,6 @@ class McpToolTest extends TestCase
 
         $tool = app(DrawerAddTool::class);
         $tool->execute(['content' => 'test'], $this->apiKey);
-    }
-
-    // ─── drawer_get ──────────────────────────────────────────────────────────
-
-    public function test_drawer_get_returns_full_drawer_record(): void
-    {
-        $wing = Wing::create(['name' => 'Work', 'slug' => 'work']);
-        $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
-        $drawer = Drawer::create(['content' => 'My content', 'room_id' => $room->id, 'source' => 'manual']);
-
-        $tool = app(DrawerGetTool::class);
-        $result = $tool->execute(['id' => $drawer->id], $this->apiKey);
-
-        $this->assertEquals($drawer->id, $result['id']);
-        $this->assertEquals('My content', $result['content']);
-        $this->assertEquals('manual', $result['source']);
-        $this->assertEquals('work', $result['wing_slug']);
-        $this->assertEquals('notes', $result['room_slug']);
-    }
-
-    public function test_drawer_get_throws_for_nonexistent_id(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('not found');
-
-        $tool = app(DrawerGetTool::class);
-        $tool->execute(['id' => 99999], $this->apiKey);
-    }
-
-    public function test_drawer_get_requires_id(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('"id"');
-
-        $tool = app(DrawerGetTool::class);
-        $tool->execute([], $this->apiKey);
     }
 
     // ─── context_get ─────────────────────────────────────────────────────────

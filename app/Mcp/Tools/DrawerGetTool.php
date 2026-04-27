@@ -2,62 +2,63 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
+use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-class DrawerGetTool extends BaseTool
+#[Description('Fetch a single drawer by id.')]
+#[IsReadOnly]
+class DrawerGetTool extends Tool
 {
-    public function requiredScope(): string
+    use RequiresScope, RequiresWingAccess;
+
+    protected string $name = 'drawer_get';
+
+    protected string $scope = 'palace.read';
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        return 'palace:read';
-    }
-
-    public function execute(array $params, ApiKey $apiKey): array
-    {
-        $this->requireScope($apiKey, $this->requiredScope());
-
-        $id = $params['id'] ?? null;
-
-        if (empty($id)) {
-            throw McpException::invalidParams('Parameter "id" is required.');
+        if ($err = $this->requireScope($request)) {
+            return $err;
         }
 
-        $drawer = Drawer::with(['room.wing'])->find((int) $id);
+        $params = $request->validate(['id' => 'required|integer']);
 
-        if ($drawer === null) {
-            throw McpException::notFound("Drawer with id {$id} not found.");
+        $drawer = Drawer::with('room.wing')->find($params['id']);
+        if (! $drawer) {
+            return Response::error("Drawer not found: {$params['id']}");
         }
 
-        $wing = $drawer->room->wing;
+        if ($err = $this->requireWingAccess($request, $drawer->room->wing->slug)) {
+            return $err;
+        }
 
-        $this->requireWingAccess($apiKey, $wing->slug);
-
-        // Item 14: Retention — track access count + timestamp on read
-        $drawer->access_count = ($drawer->access_count ?? 0) + 1;
-        $drawer->last_accessed_at = now();
-        $drawer->save();
-
-        $result = [
-            'id' => $drawer->id,
-            'content' => $drawer->content,
-            'source' => $drawer->source,
-            'metadata' => $drawer->metadata,
-            'tier' => $drawer->tier,
-            'access_count' => $drawer->access_count,
-            'retention_score' => $drawer->retention_score,
-            'last_accessed_at' => $drawer->last_accessed_at?->toIso8601String(),
-            'wing' => $wing->name,
-            'wing_slug' => $wing->slug,
-            'room' => $drawer->room->name,
-            'room_slug' => $drawer->room->slug,
-            'created_at' => $drawer->created_at->toIso8601String(),
-            'updated_at' => $drawer->updated_at->toIso8601String(),
+        $payload = [
+            'id'         => $drawer->id,
+            'content'    => $drawer->content,
+            'wing'       => $drawer->room->wing->slug,
+            'room'       => $drawer->room->slug,
+            'source'     => $drawer->source,
+            'metadata'   => $drawer->metadata,
+            'tier'       => $drawer->tier,
+            'created_at' => $drawer->created_at?->toIso8601String(),
         ];
 
-        $this->logSession('drawer_get', $apiKey, ['id' => $id], 1);
+        BrainSessionLogger::log($request, 'drawer_get', $params, 1);
 
-        return $result;
+        return Response::structured($payload);
+    }
+
+    public function schema(JsonSchema $s): array
+    {
+        return ['id' => $s->integer()->description('Drawer ID.')->required()];
     }
 }

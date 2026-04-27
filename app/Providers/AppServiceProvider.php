@@ -8,6 +8,7 @@ use App\Observers\DrawerObserver;
 use App\Observers\WikiPageObserver;
 use App\Services\EmbeddingManager;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -26,5 +27,18 @@ class AppServiceProvider extends ServiceProvider
     {
         Drawer::observe(DrawerObserver::class);
         WikiPage::observe(WikiPageObserver::class);
+
+        Passport::tokensExpireIn(now()->addHour());
+        Passport::refreshTokensExpireIn(now()->addDays(90));
+        Passport::personalAccessTokensExpireIn(now()->addDays(90));
+
+        Passport::tokensCan([
+            'palace.read'  => 'Read drawers and palace metadata',
+            'palace.write' => 'Add drawers',
+            'wiki.read'    => 'Read wiki pages, history, graph',
+            'wiki.write'   => 'Compile, lint, and write wiki pages',
+        ]);
+
+        Passport::authorizationView(fn ($p) => view('mcp.authorize', $p));
     }
 }

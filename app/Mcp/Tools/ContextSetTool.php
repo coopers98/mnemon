@@ -34,16 +34,16 @@ class ContextSetTool extends Tool
         }
 
         $params = $request->validate([
-            'name'              => 'required|string|max:255',
-            'content'           => 'required|string',
-            'description'       => 'nullable|string',
-            'confidence'        => 'nullable|string',
-            'sources'           => 'nullable|array',
-            'sources.*'         => 'integer',
-            'related'           => 'nullable|array',
-            'related.*'         => 'string',
+            'name' => 'required|string|max:255',
+            'content' => 'required|string',
+            'description' => 'nullable|string',
+            'confidence' => 'nullable|string',
+            'sources' => 'nullable|array',
+            'sources.*' => 'integer',
+            'related' => 'nullable|array',
+            'related.*' => 'string',
             'expected_revision' => 'nullable|integer',
-            'agent_id'          => 'nullable|string',
+            'agent_id' => 'nullable|string',
         ]);
 
         $name = $params['name'];
@@ -104,11 +104,11 @@ class ContextSetTool extends Tool
         }
 
         $attributes = [
-            'title'                         => $existing?->title ?? $name,
-            'content'                       => $content,
-            'type'                          => $type,
-            'description'                   => $description ?? ($existing?->description),
-            'last_compiled_at'              => now(),
+            'title' => $existing?->title ?? $name,
+            'content' => $content,
+            'type' => $type,
+            'description' => $description ?? ($existing?->description),
+            'last_compiled_at' => now(),
             'pending_drawers_since_compile' => 0,
         ];
 
@@ -170,12 +170,12 @@ class ContextSetTool extends Tool
 
             // Store revision in audit log
             WikiPageRevision::create([
-                'page_name'    => $page->name,
-                'revision'     => $page->revision_count ?? 1,
-                'content'      => $content,
+                'page_name' => $page->name,
+                'revision' => $page->revision_count ?? 1,
+                'content' => $content,
                 'content_hash' => hash('sha256', $content),
-                'agent_id'     => $resolvedAgent,
-                'written_at'   => now(),
+                'agent_id' => $resolvedAgent,
+                'written_at' => now(),
             ]);
 
             return $page;
@@ -194,13 +194,13 @@ class ContextSetTool extends Tool
         $this->appendToWikiLog($name, $type, $createdOrUpdated, $resolvedAgent);
 
         $result = [
-            'page_id'            => $page->id,
+            'page_id' => $page->id,
             'created_or_updated' => $createdOrUpdated,
-            'name'               => $page->name,
-            'type'               => $page->type,
-            'confidence_score'   => $page->confidence_score,
-            'quality_score'      => $page->quality_score,
-            'revision_count'     => $page->revision_count,
+            'name' => $page->name,
+            'type' => $page->type,
+            'confidence_score' => $page->confidence_score,
+            'quality_score' => $page->quality_score,
+            'revision_count' => $page->revision_count,
         ];
 
         BrainSessionLogger::log($request, 'context_set', [
@@ -214,23 +214,23 @@ class ContextSetTool extends Tool
     public function schema(JsonSchema $s): array
     {
         return [
-            'name'              => $s->string()->required()->description('Wiki page name. Use a prefix for type inference (e.g. "person:alice", "project:beta", "concept:flow", "decision:arch"). No prefix defaults to "synthesis".'),
-            'content'           => $s->string()->required()->description('Full page content (Markdown).'),
-            'description'       => $s->string()->description('Short one-line summary of the page.'),
-            'confidence'        => $s->string()->description('Confidence level: high, medium, or low.'),
-            'sources'           => $s->array()->description('Array of palace drawer IDs this page was compiled from.'),
-            'related'           => $s->array()->description('Array of related wiki page names (graph edges).'),
+            'name' => $s->string()->required()->description('Wiki page name. Use a prefix for type inference (e.g. "person:alice", "project:beta", "concept:flow", "decision:arch"). No prefix defaults to "synthesis".'),
+            'content' => $s->string()->required()->description('Full page content (Markdown).'),
+            'description' => $s->string()->description('Short one-line summary of the page.'),
+            'confidence' => $s->string()->description('Confidence level: high, medium, or low.'),
+            'sources' => $s->array()->description('Array of palace drawer IDs this page was compiled from.'),
+            'related' => $s->array()->description('Array of related wiki page names (graph edges).'),
             'expected_revision' => $s->integer()->description('Optimistic locking: current revision_count. Provide to detect concurrent modifications.'),
-            'agent_id'          => $s->string()->description('Agent identifier override for the revision audit log. Defaults to OAuth client name.'),
+            'agent_id' => $s->string()->description('Agent identifier override for the revision audit log. Defaults to OAuth client name.'),
         ];
     }
 
     private function inferType(string $name): string
     {
         $prefixes = [
-            'person:'   => 'person',
-            'project:'  => 'project',
-            'concept:'  => 'concept',
+            'person:' => 'person',
+            'project:' => 'project',
+            'concept:' => 'concept',
             'decision:' => 'decision',
         ];
 
@@ -262,9 +262,9 @@ class ContextSetTool extends Tool
         WikiPage::updateOrCreate(
             ['name' => 'wiki/index'],
             [
-                'title'            => 'Wiki Index',
-                'content'          => $indexContent,
-                'type'             => 'synthesis',
+                'title' => 'Wiki Index',
+                'content' => $indexContent,
+                'type' => 'synthesis',
                 'last_compiled_at' => now(),
             ]
         );
@@ -278,10 +278,10 @@ class ContextSetTool extends Tool
 
         if ($logPage === null) {
             WikiPage::create([
-                'name'             => 'wiki/log',
-                'title'            => 'Wiki Log',
-                'type'             => 'synthesis',
-                'content'          => "# Wiki Log\n\n{$entry}",
+                'name' => 'wiki/log',
+                'title' => 'Wiki Log',
+                'type' => 'synthesis',
+                'content' => "# Wiki Log\n\n{$entry}",
                 'last_compiled_at' => now(),
             ]);
         } else {

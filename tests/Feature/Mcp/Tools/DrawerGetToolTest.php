@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class DrawerGetToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_returns_drawer_by_id(): void
     {

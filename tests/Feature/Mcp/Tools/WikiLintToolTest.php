@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class WikiLintToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     // -----------------------------------------------------------------------
     // Scope enforcement
@@ -67,9 +67,9 @@ class WikiLintToolTest extends TestCase
     public function test_detects_stale_page_never_compiled(): void
     {
         WikiPage::factory()->create([
-            'name'            => 'concept:old',
+            'name' => 'concept:old',
             'last_compiled_at' => null,
-            'content'         => str_repeat('x', 200),
+            'content' => str_repeat('x', 200),
         ]);
 
         $r = $this->mcpCall('wiki_lint', ['focus' => 'stale'], ['wiki.write']);
@@ -87,9 +87,9 @@ class WikiLintToolTest extends TestCase
     public function test_detects_low_confidence_numeric(): void
     {
         WikiPage::factory()->create([
-            'name'             => 'concept:uncertain',
+            'name' => 'concept:uncertain',
             'confidence_score' => 0.1,
-            'content'          => str_repeat('x', 200),
+            'content' => str_repeat('x', 200),
             'last_compiled_at' => now(),
         ]);
 
@@ -126,7 +126,7 @@ class WikiLintToolTest extends TestCase
     {
         // Create a short-content page that will be flagged as empty
         WikiPage::factory()->create([
-            'name'    => 'concept:empty-stub',
+            'name' => 'concept:empty-stub',
             'content' => 'stub',
             'last_compiled_at' => now(),
             'confidence_score' => 0.9,

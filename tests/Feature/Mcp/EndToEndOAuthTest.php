@@ -6,6 +6,7 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\User;
 use App\Models\Wing;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Client;
 use Tests\TestCase;
@@ -19,7 +20,7 @@ class EndToEndOAuthTest extends TestCase
         parent::setUp();
 
         // Exempt the OAuth consent and token endpoints from CSRF so POSTs work in tests.
-        \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::except([
+        VerifyCsrfToken::except([
             'oauth/authorize',
             'oauth/token',
         ]);
@@ -43,12 +44,12 @@ class EndToEndOAuthTest extends TestCase
         $this->actingAs($user);
 
         // Step 1: Initiate consent — get authToken
-        $authResp = $this->get('/oauth/authorize?' . http_build_query([
-            'client_id'     => $client->id,
-            'redirect_uri'  => 'http://localhost/cb',
+        $authResp = $this->get('/oauth/authorize?'.http_build_query([
+            'client_id' => $client->id,
+            'redirect_uri' => 'http://localhost/cb',
             'response_type' => 'code',
-            'scope'         => 'palace.read',
-            'state'         => 'st',
+            'scope' => 'palace.read',
+            'state' => 'st',
         ]));
         $authResp->assertStatus(200);
 
@@ -60,9 +61,9 @@ class EndToEndOAuthTest extends TestCase
         // Step 2: Approve consent with wing restriction to 'work' only
         $approve = $this->post('/oauth/authorize', [
             'auth_token' => $authToken,
-            'client_id'  => $client->id,
-            'scopes'     => ['palace.read'],
-            'wings'      => ['work'],
+            'client_id' => $client->id,
+            'scopes' => ['palace.read'],
+            'wings' => ['work'],
         ]);
         $approve->assertRedirect();
 
@@ -75,11 +76,11 @@ class EndToEndOAuthTest extends TestCase
 
         // Step 4: Exchange code for access token
         $tokenResp = $this->post('/oauth/token', [
-            'grant_type'    => 'authorization_code',
-            'client_id'     => $client->id,
+            'grant_type' => 'authorization_code',
+            'client_id' => $client->id,
             'client_secret' => $client->plainSecret,
-            'redirect_uri'  => 'http://localhost/cb',
-            'code'          => $code,
+            'redirect_uri' => 'http://localhost/cb',
+            'code' => $code,
         ]);
         $tokenResp->assertStatus(200);
         $accessToken = $tokenResp->json('access_token');
@@ -88,10 +89,10 @@ class EndToEndOAuthTest extends TestCase
         // Step 5: Call drawer_search — should only see work drawer (wing restriction enforced)
         $r = $this->postJson('/mcp', [
             'jsonrpc' => '2.0',
-            'id'      => 1,
-            'method'  => 'tools/call',
-            'params'  => [
-                'name'      => 'drawer_search',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'drawer_search',
                 'arguments' => ['query' => 'secret'],
             ],
         ], ['Authorization' => "Bearer {$accessToken}"]);
@@ -102,7 +103,7 @@ class EndToEndOAuthTest extends TestCase
         $contents = collect($results)->pluck('content')->all();
 
         $this->assertContains('work-secret', $contents,
-            'Expected work-secret in results, got: ' . json_encode($contents));
+            'Expected work-secret in results, got: '.json_encode($contents));
         $this->assertNotContains('personal-secret', $contents,
             'personal-secret should be filtered out by wing restriction');
     }

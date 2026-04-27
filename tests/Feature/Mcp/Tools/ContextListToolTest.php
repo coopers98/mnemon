@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class ContextListToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_lists_wiki_pages(): void
     {
@@ -40,12 +40,12 @@ class ContextListToolTest extends TestCase
     public function test_returns_expected_fields(): void
     {
         WikiPage::factory()->create([
-            'name'        => 'concept:test',
-            'type'        => 'concept',
-            'title'       => 'Test Concept',
+            'name' => 'concept:test',
+            'type' => 'concept',
+            'title' => 'Test Concept',
             'description' => 'A test concept',
-            'confidence'  => 'high',
-            'content'     => 'one two three',
+            'confidence' => 'high',
+            'content' => 'one two three',
         ]);
 
         $r = $this->mcpCall('context_list', [], ['wiki.read']);

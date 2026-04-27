@@ -35,7 +35,7 @@ class DrawerSearchTool extends Tool
         $params = $request->validate([
             'query' => 'required|string|max:500',
             'limit' => 'integer|min:1|max:50',
-            'wing'  => 'nullable|string',
+            'wing' => 'nullable|string',
         ]);
 
         if (! empty($params['wing'])) {
@@ -61,7 +61,7 @@ class DrawerSearchTool extends Tool
         return [
             'query' => $schema->string()->description('Search query.')->required(),
             'limit' => $schema->integer()->description('Max results (1-50).')->default(10),
-            'wing'  => $schema->string()->description('Optional wing slug to restrict search.'),
+            'wing' => $schema->string()->description('Optional wing slug to restrict search.'),
         ];
     }
 }

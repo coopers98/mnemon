@@ -30,7 +30,7 @@ class ContextListTool extends Tool
         }
 
         $params = $request->validate([
-            'type'  => 'nullable|in:person,project,concept,decision,synthesis',
+            'type' => 'nullable|in:person,project,concept,decision,synthesis',
             'limit' => 'integer|min:1|max:200',
         ]);
 
@@ -42,15 +42,15 @@ class ContextListTool extends Tool
         $pages = $query->limit($params['limit'] ?? 100)
             ->get(['id', 'name', 'title', 'type', 'description', 'confidence', 'pending_drawers_since_compile', 'last_compiled_at', 'content'])
             ->map(fn ($p) => [
-                'id'                            => $p->id,
-                'name'                          => $p->name,
-                'type'                          => $p->type,
-                'title'                         => $p->title,
-                'description'                   => $p->description,
-                'confidence'                    => $p->confidence,
+                'id' => $p->id,
+                'name' => $p->name,
+                'type' => $p->type,
+                'title' => $p->title,
+                'description' => $p->description,
+                'confidence' => $p->confidence,
                 'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
-                'last_compiled_at'              => $p->last_compiled_at?->toIso8601String(),
-                'word_count'                    => $p->content ? str_word_count($p->content) : 0,
+                'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
+                'word_count' => $p->content ? str_word_count($p->content) : 0,
             ])->all();
 
         BrainSessionLogger::log($request, 'context_list', $params, count($pages));
@@ -61,7 +61,7 @@ class ContextListTool extends Tool
     public function schema(JsonSchema $s): array
     {
         return [
-            'type'  => $s->string()->enum(['person', 'project', 'concept', 'decision', 'synthesis'])->description('Filter by page type.'),
+            'type' => $s->string()->enum(['person', 'project', 'concept', 'decision', 'synthesis'])->description('Filter by page type.'),
             'limit' => $s->integer()->description('Max pages (1-200, default 100).')->default(100),
         ];
     }

@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class WikiHistoryToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -25,7 +25,7 @@ class WikiHistoryToolTest extends TestCase
     {
         return WikiPageRevision::factory()->create(array_merge([
             'page_name' => $pageName,
-            'revision'  => $revision,
+            'revision' => $revision,
         ], $attrs));
     }
 
@@ -101,10 +101,10 @@ class WikiHistoryToolTest extends TestCase
     public function test_returns_page_metadata_fields(): void
     {
         $this->makePage('concept:flow', [
-            'revision_count'  => 5,
+            'revision_count' => 5,
             'confidence_score' => 0.85,
-            'quality_score'   => 0.72,
-            'source_count'    => 4,
+            'quality_score' => 0.72,
+            'source_count' => 4,
         ]);
         $this->makeRevision('concept:flow', 1);
 
@@ -125,8 +125,8 @@ class WikiHistoryToolTest extends TestCase
         $hash = hash('sha256', 'content-v1');
         $this->makeRevision('person:alice', 1, [
             'content_hash' => $hash,
-            'agent_id'     => 'my-agent',
-            'written_at'   => '2026-04-01 12:00:00',
+            'agent_id' => 'my-agent',
+            'written_at' => '2026-04-01 12:00:00',
         ]);
 
         $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['wiki.read']);

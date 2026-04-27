@@ -15,9 +15,7 @@ class ContactNotification extends Mailable
     /**
      * @param  array{name: string, email: string, message: string}  $submission
      */
-    public function __construct(public array $submission)
-    {
-    }
+    public function __construct(public array $submission) {}
 
     public function envelope(): Envelope
     {

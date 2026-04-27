@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class BrainSessionOauthColumnsTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient;
+    use CreatesPassportClient, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -24,13 +24,13 @@ class BrainSessionOauthColumnsTest extends TestCase
         $token = $user->createToken('test')->token;
 
         $session = BrainSession::create([
-            'tool_name'        => 'drawer_search',
-            'source'           => 'Test Client as user@... (token …abc1)',
-            'oauth_client_id'  => $token->client_id,
-            'user_id'          => $user->id,
-            'access_token_id'  => $token->id,
-            'input'            => ['query' => 'foo'],
-            'result_count'     => 3,
+            'tool_name' => 'drawer_search',
+            'source' => 'Test Client as user@... (token …abc1)',
+            'oauth_client_id' => $token->client_id,
+            'user_id' => $user->id,
+            'access_token_id' => $token->id,
+            'input' => ['query' => 'foo'],
+            'result_count' => 3,
         ]);
 
         $fresh = $session->fresh();

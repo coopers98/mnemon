@@ -8,7 +8,7 @@ use Tests\TestCase;
 
 class FindStaleWikiPagesPromptTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_prompt_appears_in_list(): void
     {

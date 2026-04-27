@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class WikiPageResourceTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_resource_lists_for_wiki_read_token(): void
     {
@@ -32,7 +32,7 @@ class WikiPageResourceTest extends TestCase
         // The URI template slot {slug} is passed URL-encoded (%3A) to avoid
         // ambiguity with URI scheme separators; handle() calls urldecode() to recover it.
         $page = WikiPage::factory()->create([
-            'name'    => 'person:cooper',
+            'name' => 'person:cooper',
             'content' => '# Cooper\n\nA synthesized wiki page.',
         ]);
 

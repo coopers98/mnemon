@@ -34,7 +34,7 @@ class WikiLintTool extends Tool
         }
 
         $params = $request->validate([
-            'focus'    => 'nullable|string|in:'.implode(',', self::VALID_FOCUS),
+            'focus' => 'nullable|string|in:'.implode(',', self::VALID_FOCUS),
             'auto_fix' => 'nullable|boolean',
         ]);
 
@@ -71,11 +71,11 @@ class WikiLintTool extends Tool
 
         $result = [
             'findings' => $findings,
-            'summary'  => [
-                'total'    => count($findings),
+            'summary' => [
+                'total' => count($findings),
                 'warnings' => $warnings,
-                'info'     => $info,
-                'focus'    => $focus,
+                'info' => $info,
+                'focus' => $focus,
             ],
         ];
 
@@ -111,12 +111,12 @@ class WikiLintTool extends Tool
         $pendingPages = $allPages->filter(fn ($p) => $p->pending_drawers_since_compile > 0);
         foreach ($pendingPages as $page) {
             $findings[] = [
-                'type'        => 'stale',
-                'severity'    => 'warning',
-                'page'        => $page->name,
-                'page_id'     => $page->id,
+                'type' => 'stale',
+                'severity' => 'warning',
+                'page' => $page->name,
+                'page_id' => $page->id,
                 'description' => "Page has {$page->pending_drawers_since_compile} new drawer(s) since last compile",
-                'suggestion'  => 'Re-compile this wiki page with recent drawer content',
+                'suggestion' => 'Re-compile this wiki page with recent drawer content',
             ];
         }
 
@@ -134,12 +134,12 @@ class WikiLintTool extends Tool
         foreach ($stalePages as $page) {
             $compiled = $page->last_compiled_at?->toIso8601String() ?? 'never';
             $findings[] = [
-                'type'        => 'stale',
-                'severity'    => 'warning',
-                'page'        => $page->name,
-                'page_id'     => $page->id,
+                'type' => 'stale',
+                'severity' => 'warning',
+                'page' => $page->name,
+                'page_id' => $page->id,
                 'description' => "Page last compiled: {$compiled} (threshold: {$staleDays} days)",
-                'suggestion'  => 'Review and re-compile this wiki page',
+                'suggestion' => 'Review and re-compile this wiki page',
             ];
         }
     }
@@ -165,12 +165,12 @@ class WikiLintTool extends Tool
         foreach ($filteredPages as $page) {
             if (! $referencedNames->contains($page->name)) {
                 $findings[] = [
-                    'type'        => 'orphan',
-                    'severity'    => 'info',
-                    'page'        => $page->name,
-                    'page_id'     => $page->id,
+                    'type' => 'orphan',
+                    'severity' => 'info',
+                    'page' => $page->name,
+                    'page_id' => $page->id,
                     'description' => "Page is not referenced by any other wiki page's related array",
-                    'suggestion'  => 'Add this page to related arrays of relevant pages, or review if still needed',
+                    'suggestion' => 'Add this page to related arrays of relevant pages, or review if still needed',
                 ];
             }
         }
@@ -185,12 +185,12 @@ class WikiLintTool extends Tool
             $contentLength = mb_strlen(trim($page->content ?? ''));
             if ($contentLength < 50) {
                 $findings[] = [
-                    'type'        => 'empty',
-                    'severity'    => 'warning',
-                    'page'        => $page->name,
-                    'page_id'     => $page->id,
+                    'type' => 'empty',
+                    'severity' => 'warning',
+                    'page' => $page->name,
+                    'page_id' => $page->id,
                     'description' => "Page content is very short ({$contentLength} chars)",
-                    'suggestion'  => 'Add more content or remove this stub page',
+                    'suggestion' => 'Add more content or remove this stub page',
                 ];
             }
         }
@@ -205,15 +205,15 @@ class WikiLintTool extends Tool
         foreach ($allPages as $page) {
             if ($page->confidence_score !== null && $page->confidence_score < 0.3) {
                 $findings[] = [
-                    'type'        => 'low_confidence',
-                    'severity'    => 'warning',
-                    'page'        => $page->name,
-                    'page_id'     => $page->id,
+                    'type' => 'low_confidence',
+                    'severity' => 'warning',
+                    'page' => $page->name,
+                    'page_id' => $page->id,
                     'description' => sprintf(
                         'Page has low confidence score: %.2f (threshold: 0.30)',
                         $page->confidence_score
                     ),
-                    'suggestion'  => 'Gather more sources or re-compile to strengthen confidence',
+                    'suggestion' => 'Gather more sources or re-compile to strengthen confidence',
                 ];
 
                 continue;
@@ -222,12 +222,12 @@ class WikiLintTool extends Tool
             // Fallback to categorical confidence for pages without a numeric score
             if ($page->confidence === 'low') {
                 $findings[] = [
-                    'type'        => 'low_confidence',
-                    'severity'    => 'info',
-                    'page'        => $page->name,
-                    'page_id'     => $page->id,
+                    'type' => 'low_confidence',
+                    'severity' => 'info',
+                    'page' => $page->name,
+                    'page_id' => $page->id,
                     'description' => 'Page has low confidence rating',
-                    'suggestion'  => 'Gather more sources or review content accuracy',
+                    'suggestion' => 'Gather more sources or review content accuracy',
                 ];
             }
         }
@@ -251,16 +251,16 @@ class WikiLintTool extends Tool
             }
 
             $findings[] = [
-                'type'        => 'low_quality',
-                'severity'    => 'warning',
-                'page'        => $page->name,
-                'page_id'     => $page->id,
+                'type' => 'low_quality',
+                'severity' => 'warning',
+                'page' => $page->name,
+                'page_id' => $page->id,
                 'description' => sprintf(
                     'Page has low quality score: %.2f (threshold: %.2f)',
                     $page->quality_score,
                     $threshold
                 ),
-                'suggestion'  => 'Add structure (headings, citations, examples) or re-write with more specifics',
+                'suggestion' => 'Add structure (headings, citations, examples) or re-write with more specifics',
             ];
         }
     }

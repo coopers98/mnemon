@@ -34,14 +34,14 @@ class WikiGraphTool extends Tool
         }
 
         $params = $request->validate([
-            'start_page'   => 'required|string|max:255',
-            'max_depth'    => 'nullable|integer|min:1|max:5',
-            'edge_types'   => 'nullable|array',
+            'start_page' => 'required|string|max:255',
+            'max_depth' => 'nullable|integer|min:1|max:5',
+            'edge_types' => 'nullable|array',
             'edge_types.*' => 'string|in:'.implode(',', EntityRelationship::EDGE_TYPES),
         ]);
 
         $startPage = $params['start_page'];
-        $maxDepth  = (int) ($params['max_depth'] ?? 2);
+        $maxDepth = (int) ($params['max_depth'] ?? 2);
         $edgeTypes = $params['edge_types'] ?? null;
 
         $page = WikiPage::where('name', $startPage)->first();
@@ -65,7 +65,7 @@ class WikiGraphTool extends Tool
 
         return [
             'start_page' => $s->string()->required()->description('Name of the starting wiki page (e.g. "person:alice").'),
-            'max_depth'  => $s->integer()->description('Maximum traversal depth (1-5). Default 2.')->default(2),
+            'max_depth' => $s->integer()->description('Maximum traversal depth (1-5). Default 2.')->default(2),
             'edge_types' => $s->array($s->string())->description("Filter edges by type. Valid: {$validTypes}. Omit for all types."),
         ];
     }

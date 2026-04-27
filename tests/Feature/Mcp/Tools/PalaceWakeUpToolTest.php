@@ -12,7 +12,7 @@ use Tests\TestCase;
 
 class PalaceWakeUpToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_returns_recent_activity_summary(): void
     {

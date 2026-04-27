@@ -79,5 +79,4 @@ class MigrationTest extends TestCase
             'created_at',
         ]));
     }
-
 }

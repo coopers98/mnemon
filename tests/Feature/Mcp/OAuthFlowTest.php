@@ -5,6 +5,7 @@ namespace Tests\Feature\Mcp;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use App\Models\Wing;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Client;
 use Tests\TestCase;
@@ -18,7 +19,7 @@ class OAuthFlowTest extends TestCase
         parent::setUp();
 
         // Exempt the OAuth consent and token endpoints from CSRF so POSTs work in tests.
-        \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::except([
+        VerifyCsrfToken::except([
             'oauth/authorize',
             'oauth/token',
         ]);
@@ -31,8 +32,8 @@ class OAuthFlowTest extends TestCase
      *   2. POST /oauth/authorize — approve consent, get redirect with auth code
      *   3. POST /oauth/token     — exchange code for access token (fires AccessTokenCreated)
      *
-     * @param  array<string>  $wings     Per-wing slugs to restrict (empty = use all_wings)
-     * @param  bool           $allWings  If true, grant access to all wings (no restriction)
+     * @param  array<string>  $wings  Per-wing slugs to restrict (empty = use all_wings)
+     * @param  bool  $allWings  If true, grant access to all wings (no restriction)
      */
     private function completeOAuthFlow(
         Client $client,
@@ -41,12 +42,12 @@ class OAuthFlowTest extends TestCase
         bool $allWings = false
     ): string {
         // Step 1: Initiate consent
-        $authResp = $this->get('/oauth/authorize?' . http_build_query([
-            'client_id'     => $client->id,
-            'redirect_uri'  => 'http://localhost/cb',
+        $authResp = $this->get('/oauth/authorize?'.http_build_query([
+            'client_id' => $client->id,
+            'redirect_uri' => 'http://localhost/cb',
             'response_type' => 'code',
-            'scope'         => 'palace.read',
-            'state'         => 'st',
+            'scope' => 'palace.read',
+            'state' => 'st',
         ]));
         $authResp->assertStatus(200);
 
@@ -58,8 +59,8 @@ class OAuthFlowTest extends TestCase
         // Step 2: Approve consent (stores wing data in cache via CaptureConsentWings middleware)
         $postData = [
             'auth_token' => $authToken,
-            'client_id'  => $client->id,
-            'scopes'     => ['palace.read'],
+            'client_id' => $client->id,
+            'scopes' => ['palace.read'],
         ];
         if ($allWings) {
             $postData['all_wings'] = '1';
@@ -79,11 +80,11 @@ class OAuthFlowTest extends TestCase
         // Step 3: Exchange code for access token (fires AccessTokenCreated → listener runs)
         // Use plainSecret (set during factory creation) since secret is stored hashed.
         $tokenResp = $this->post('/oauth/token', [
-            'grant_type'    => 'authorization_code',
-            'client_id'     => $client->id,
+            'grant_type' => 'authorization_code',
+            'client_id' => $client->id,
             'client_secret' => $client->plainSecret,
-            'redirect_uri'  => 'http://localhost/cb',
-            'code'          => $code,
+            'redirect_uri' => 'http://localhost/cb',
+            'code' => $code,
         ]);
         $tokenResp->assertStatus(200);
         $tokenData = $tokenResp->json();
@@ -97,7 +98,7 @@ class OAuthFlowTest extends TestCase
         Wing::factory()->create(['slug' => 'work']);
         Wing::factory()->create(['slug' => 'personal']);
 
-        $user   = User::factory()->create();
+        $user = User::factory()->create();
         $client = Client::factory()->create([
             'redirect_uris' => ['http://localhost/cb'],
         ]);
@@ -114,7 +115,7 @@ class OAuthFlowTest extends TestCase
 
     public function test_all_wings_checkbox_persists_null_restriction(): void
     {
-        $user   = User::factory()->create();
+        $user = User::factory()->create();
         $client = Client::factory()->create([
             'redirect_uris' => ['http://localhost/cb'],
         ]);

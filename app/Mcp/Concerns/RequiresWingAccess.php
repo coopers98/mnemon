@@ -20,7 +20,7 @@ trait RequiresWingAccess
     }
 
     /**
-     * @return array<string>|null  null = unrestricted (all wings allowed)
+     * @return array<string>|null null = unrestricted (all wings allowed)
      */
     protected function wingPatternsFor(Request $request): ?array
     {
@@ -28,6 +28,7 @@ trait RequiresWingAccess
     }
 
     private ?string $resolvedTokenId = null;
+
     private ?McpTokenRestriction $resolvedRestriction = null;
 
     private function resolveRestriction(Request $request): ?McpTokenRestriction

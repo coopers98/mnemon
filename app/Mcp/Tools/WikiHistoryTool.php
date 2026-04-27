@@ -31,11 +31,11 @@ class WikiHistoryTool extends Tool
         }
 
         $params = $request->validate([
-            'name'  => 'required|string|max:255',
+            'name' => 'required|string|max:255',
             'limit' => 'nullable|integer|min:1|max:50',
         ]);
 
-        $name  = $params['name'];
+        $name = $params['name'];
         $limit = (int) ($params['limit'] ?? 10);
 
         $page = WikiPage::where('name', $name)->first();
@@ -51,23 +51,23 @@ class WikiHistoryTool extends Tool
             ->limit($limit)
             ->get()
             ->map(fn (WikiPageRevision $r) => [
-                'revision'     => $r->revision,
+                'revision' => $r->revision,
                 'content_hash' => $r->content_hash,
-                'agent_id'     => $r->agent_id,
-                'written_at'   => $r->written_at?->toIso8601String(),
+                'agent_id' => $r->agent_id,
+                'written_at' => $r->written_at?->toIso8601String(),
             ])
             ->all();
 
         $result = [
-            'name'                  => $page->name,
-            'revision_count'        => $page->revision_count ?? 1,
+            'name' => $page->name,
+            'revision_count' => $page->revision_count ?? 1,
             'previous_content_hash' => $page->previous_content_hash,
-            'last_compiled_at'      => $page->last_compiled_at?->toIso8601String(),
-            'last_accessed_at'      => $page->last_accessed_at?->toIso8601String(),
-            'confidence_score'      => $page->confidence_score,
-            'quality_score'         => $page->quality_score,
-            'source_count'          => $page->source_count,
-            'revisions'             => $revisions,
+            'last_compiled_at' => $page->last_compiled_at?->toIso8601String(),
+            'last_accessed_at' => $page->last_accessed_at?->toIso8601String(),
+            'confidence_score' => $page->confidence_score,
+            'quality_score' => $page->quality_score,
+            'source_count' => $page->source_count,
+            'revisions' => $revisions,
         ];
 
         BrainSessionLogger::log($request, 'wiki_history', ['name' => $name], count($revisions));
@@ -78,7 +78,7 @@ class WikiHistoryTool extends Tool
     public function schema(JsonSchema $s): array
     {
         return [
-            'name'  => $s->string()->required()->description('Wiki page name (e.g. "person:alice", "project:atlas").'),
+            'name' => $s->string()->required()->description('Wiki page name (e.g. "person:alice", "project:atlas").'),
             'limit' => $s->integer()->description('Max revisions to return (1-50). Default 10.')->default(10),
         ];
     }

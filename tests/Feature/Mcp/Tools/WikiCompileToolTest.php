@@ -4,15 +4,15 @@ namespace Tests\Feature\Mcp\Tools;
 
 use App\Models\Drawer;
 use App\Models\Room;
-use App\Models\Wing;
 use App\Models\WikiPage;
+use App\Models\Wing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\MakesMcpRequests;
 use Tests\TestCase;
 
 class WikiCompileToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -77,8 +77,8 @@ class WikiCompileToolTest extends TestCase
         $this->makeDrawer($room->id);
 
         WikiPage::factory()->create([
-            'name'           => 'person:alice',
-            'content'        => 'Alice is a developer.',
+            'name' => 'person:alice',
+            'content' => 'Alice is a developer.',
             'revision_count' => 3,
         ]);
 
@@ -152,7 +152,7 @@ class WikiCompileToolTest extends TestCase
         $this->makeDrawer($room->id);
 
         $r = $this->mcpCall('wiki_compile', [
-            'name'     => 'decision:build',
+            'name' => 'decision:build',
             'agent_id' => 'custom-agent-v2',
         ], ['wiki.write']);
         $r->assertStatus(200);

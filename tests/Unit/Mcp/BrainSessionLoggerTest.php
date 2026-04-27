@@ -27,7 +27,7 @@ use Tests\TestCase;
  */
 class BrainSessionLoggerTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient;
+    use CreatesPassportClient, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -46,15 +46,15 @@ class BrainSessionLoggerTest extends TestCase
         // via its __get/__call magic using oauth_access_token_id as the lookup key.
         $accessToken = new AccessToken([
             'oauth_access_token_id' => $eloquentToken->id,
-            'oauth_client_id'       => $eloquentToken->client_id,
-            'oauth_scopes'          => ['palace.read'],
+            'oauth_client_id' => $eloquentToken->client_id,
+            'oauth_scopes' => ['palace.read'],
         ]);
 
         // actingAs with 'api' guard makes Passport the default guard, so
         // Request::user() (null guard) returns this user with the token set.
         $this->actingAs($user->withAccessToken($accessToken), 'api');
 
-        $request = new Request();
+        $request = new Request;
 
         BrainSessionLogger::log($request, 'drawer_search', ['query' => 'foo'], 5);
 

@@ -13,7 +13,7 @@ use Tests\TestCase;
 
 class RequiresScopeTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient, MakesMcpRequest;
+    use CreatesPassportClient, MakesMcpRequest, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -27,10 +27,16 @@ class RequiresScopeTest extends TestCase
         $token = $user->createToken('t', ['palace.read'])->token;
         $request = $this->mcpRequestFor($user, $token);
 
-        $tool = new class {
+        $tool = new class
+        {
             use RequiresScope;
+
             protected string $scope = 'palace.read';
-            public function check(Request $r): ?Response { return $this->requireScope($r); }
+
+            public function check(Request $r): ?Response
+            {
+                return $this->requireScope($r);
+            }
         };
 
         $this->assertNull($tool->check($request));
@@ -42,10 +48,16 @@ class RequiresScopeTest extends TestCase
         $token = $user->createToken('t', ['wiki.read'])->token;
         $request = $this->mcpRequestFor($user, $token);
 
-        $tool = new class {
+        $tool = new class
+        {
             use RequiresScope;
+
             protected string $scope = 'palace.write';
-            public function check(Request $r): ?Response { return $this->requireScope($r); }
+
+            public function check(Request $r): ?Response
+            {
+                return $this->requireScope($r);
+            }
         };
 
         $result = $tool->check($request);

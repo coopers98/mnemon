@@ -17,13 +17,13 @@ class BrainSessionLogger
         $client = $token?->client;
 
         BrainSession::create([
-            'tool_name'        => $tool,
-            'oauth_client_id'  => $client?->id,
-            'user_id'          => $user?->id,
-            'access_token_id'  => $token?->id,
-            'source'           => self::renderSource($client, $user, $token),
-            'input'            => $input,
-            'result_count'     => $resultCount,
+            'tool_name' => $tool,
+            'oauth_client_id' => $client?->id,
+            'user_id' => $user?->id,
+            'access_token_id' => $token?->id,
+            'source' => self::renderSource($client, $user, $token),
+            'input' => $input,
+            'result_count' => $resultCount,
         ]);
     }
 
@@ -38,6 +38,7 @@ class BrainSessionLogger
         if ($token) {
             $parts[] = '(token …'.substr($token->id, -4).')';
         }
+
         return implode(' ', $parts);
     }
 }

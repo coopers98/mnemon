@@ -13,12 +13,12 @@ use Tests\TestCase;
 
 class ContextSetToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_creates_new_wiki_page(): void
     {
         $r = $this->mcpCall('context_set', [
-            'name'    => 'concept:second-brain',
+            'name' => 'concept:second-brain',
             'content' => 'A persistent knowledge store.',
         ], ['wiki.write']);
 
@@ -40,8 +40,8 @@ class ContextSetToolTest extends TestCase
     public function test_agent_id_override_stored_in_revision(): void
     {
         $this->mcpCall('context_set', [
-            'name'     => 'concept:test',
-            'content'  => 'hello',
+            'name' => 'concept:test',
+            'content' => 'hello',
             'agent_id' => 'my-custom-agent',
         ], ['wiki.write']);
 
@@ -54,8 +54,8 @@ class ContextSetToolTest extends TestCase
         WikiPage::factory()->create(['name' => 'concept:x', 'revision_count' => 3]);
 
         $r = $this->mcpCall('context_set', [
-            'name'              => 'concept:x',
-            'content'           => 'new',
+            'name' => 'concept:x',
+            'content' => 'new',
             'expected_revision' => 1,
         ], ['wiki.write']);
 
@@ -76,7 +76,7 @@ class ContextSetToolTest extends TestCase
         WikiPage::factory()->create(['name' => 'project:x', 'type' => 'project', 'content' => 'Original']);
 
         $r = $this->mcpCall('context_set', [
-            'name'    => 'project:x',
+            'name' => 'project:x',
             'content' => 'Updated content',
         ], ['wiki.write']);
 
@@ -91,7 +91,7 @@ class ContextSetToolTest extends TestCase
         WikiPage::factory()->create(['name' => 'concept:inc', 'revision_count' => 1]);
 
         $r = $this->mcpCall('context_set', [
-            'name'    => 'concept:inc',
+            'name' => 'concept:inc',
             'content' => 'new content',
         ], ['wiki.write']);
 
@@ -143,7 +143,7 @@ class ContextSetToolTest extends TestCase
         $drawer = Drawer::create(['content' => 'Source text', 'room_id' => $room->id, 'tier' => 'raw']);
 
         $this->mcpCall('context_set', [
-            'name'    => 'concept:sourced',
+            'name' => 'concept:sourced',
             'content' => 'From a drawer',
             'sources' => [$drawer->id],
         ], ['wiki.write']);
@@ -157,7 +157,7 @@ class ContextSetToolTest extends TestCase
         $page->delete();
 
         $r = $this->mcpCall('context_set', [
-            'name'    => 'concept:deleted',
+            'name' => 'concept:deleted',
             'content' => 'Restored content',
         ], ['wiki.write']);
 
@@ -168,7 +168,7 @@ class ContextSetToolTest extends TestCase
     public function test_rejects_nonexistent_source_drawer_ids(): void
     {
         $r = $this->mcpCall('context_set', [
-            'name'    => 'concept:bad-sources',
+            'name' => 'concept:bad-sources',
             'content' => 'content',
             'sources' => [99999],
         ], ['wiki.write']);
@@ -182,8 +182,8 @@ class ContextSetToolTest extends TestCase
     public function test_rejects_invalid_confidence_value(): void
     {
         $r = $this->mcpCall('context_set', [
-            'name'       => 'concept:conf',
-            'content'    => 'content',
+            'name' => 'concept:conf',
+            'content' => 'content',
             'confidence' => 'very-high',
         ], ['wiki.write']);
 
@@ -194,13 +194,13 @@ class ContextSetToolTest extends TestCase
     public function test_creates_wiki_page_revision_row(): void
     {
         $this->mcpCall('context_set', [
-            'name'    => 'person:alice',
+            'name' => 'person:alice',
             'content' => 'Alice is a developer.',
         ], ['wiki.write']);
 
         $this->assertDatabaseHas('wiki_page_revisions', [
             'page_name' => 'person:alice',
-            'revision'  => 1,
+            'revision' => 1,
         ]);
     }
 }

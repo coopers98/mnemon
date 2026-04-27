@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class ServerSmokeTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient;
+    use CreatesPassportClient, RefreshDatabase;
 
     protected function setUp(): void
     {

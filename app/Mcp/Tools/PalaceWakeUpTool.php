@@ -48,14 +48,14 @@ class PalaceWakeUpTool extends Tool
         }
 
         $recentDrawers = $drawerQuery->get()->map(fn ($d) => [
-            'id'              => $d->id,
-            'content'         => mb_substr($d->content, 0, 200),
-            'wing'            => $d->room->wing->name ?? null,
-            'wing_slug'       => $d->room->wing->slug ?? null,
-            'room'            => $d->room->name ?? null,
-            'room_slug'       => $d->room->slug ?? null,
-            'source'          => $d->source,
-            'created_at'      => $d->created_at->toIso8601String(),
+            'id' => $d->id,
+            'content' => mb_substr($d->content, 0, 200),
+            'wing' => $d->room->wing->name ?? null,
+            'wing_slug' => $d->room->wing->slug ?? null,
+            'room' => $d->room->name ?? null,
+            'room_slug' => $d->room->slug ?? null,
+            'source' => $d->source,
+            'created_at' => $d->created_at->toIso8601String(),
         ])->values()->all();
 
         // Active wings (wing-filtered when restrictions apply)
@@ -78,8 +78,8 @@ class PalaceWakeUpTool extends Tool
         }
 
         $activeWings = $wingQuery->get()->map(fn ($w) => [
-            'name'             => $w->name,
-            'slug'             => $w->slug,
+            'name' => $w->name,
+            'slug' => $w->slug,
             'latest_drawer_at' => $w->latest_drawer_at,
         ])->values()->all();
 
@@ -88,9 +88,9 @@ class PalaceWakeUpTool extends Tool
             ->orderByDesc('updated_at')
             ->get()
             ->map(fn ($p) => [
-                'name'       => $p->name,
-                'type'       => $p->type,
-                'title'      => $p->title,
+                'name' => $p->name,
+                'type' => $p->type,
+                'title' => $p->title,
                 'updated_at' => $p->updated_at->toIso8601String(),
             ])->values()->all();
 
@@ -104,8 +104,8 @@ class PalaceWakeUpTool extends Tool
         })->orderBy('last_compiled_at')
             ->get()
             ->map(fn ($p) => [
-                'name'             => $p->name,
-                'type'             => $p->type,
+                'name' => $p->name,
+                'type' => $p->type,
                 'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
             ])->values()->all();
 
@@ -113,18 +113,18 @@ class PalaceWakeUpTool extends Tool
         $pendingUpdatePages = WikiPage::pendingUpdates()
             ->get()
             ->map(fn ($p) => [
-                'name'                          => $p->name,
-                'type'                          => $p->type,
+                'name' => $p->name,
+                'type' => $p->type,
                 'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
-                'last_compiled_at'              => $p->last_compiled_at?->toIso8601String(),
+                'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
             ])->values()->all();
 
         $payload = [
-            'greeting'            => 'Welcome to Mnemon. Your palace is ready.',
-            'recent_drawers'      => $recentDrawers,
-            'active_wings'        => $activeWings,
+            'greeting' => 'Welcome to Mnemon. Your palace is ready.',
+            'recent_drawers' => $recentDrawers,
+            'active_wings' => $activeWings,
             'recent_wiki_updates' => $recentWikiUpdates,
-            'stale_wiki_pages'    => $staleWikiPages,
+            'stale_wiki_pages' => $staleWikiPages,
             'pending_update_pages' => $pendingUpdatePages,
         ];
 

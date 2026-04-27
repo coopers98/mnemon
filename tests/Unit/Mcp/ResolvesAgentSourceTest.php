@@ -12,7 +12,7 @@ use Tests\TestCase;
 
 class ResolvesAgentSourceTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient, MakesMcpRequest;
+    use CreatesPassportClient, MakesMcpRequest, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -26,9 +26,14 @@ class ResolvesAgentSourceTest extends TestCase
         $token = $user->createToken('Claude Code')->token;
         $request = $this->mcpRequestFor($user, $token);
 
-        $tool = new class {
+        $tool = new class
+        {
             use ResolvesAgentSource;
-            public function call(Request $r, ?string $o) { return $this->agentSource($r, $o); }
+
+            public function call(Request $r, ?string $o)
+            {
+                return $this->agentSource($r, $o);
+            }
         };
 
         $this->assertEquals('explicit-source', $tool->call($request, 'explicit-source'));
@@ -40,9 +45,14 @@ class ResolvesAgentSourceTest extends TestCase
         $token = $user->createToken('Claude Code')->token;
         $request = $this->mcpRequestFor($user, $token);
 
-        $tool = new class {
+        $tool = new class
+        {
             use ResolvesAgentSource;
-            public function call(Request $r, ?string $o) { return $this->agentSource($r, $o); }
+
+            public function call(Request $r, ?string $o)
+            {
+                return $this->agentSource($r, $o);
+            }
         };
 
         // The plan says "OAuth client name" — but Task 11 found that
@@ -57,11 +67,16 @@ class ResolvesAgentSourceTest extends TestCase
 
     public function test_falls_back_to_unknown_client_when_no_token(): void
     {
-        $request = new Request(); // no auth
+        $request = new Request; // no auth
 
-        $tool = new class {
+        $tool = new class
+        {
             use ResolvesAgentSource;
-            public function call(Request $r, ?string $o) { return $this->agentSource($r, $o); }
+
+            public function call(Request $r, ?string $o)
+            {
+                return $this->agentSource($r, $o);
+            }
         };
 
         $this->assertEquals('unknown-client', $tool->call($request, null));

@@ -42,13 +42,13 @@ class DrawerGetTool extends Tool
         }
 
         $payload = [
-            'id'         => $drawer->id,
-            'content'    => $drawer->content,
-            'wing'       => $drawer->room->wing->slug,
-            'room'       => $drawer->room->slug,
-            'source'     => $drawer->source,
-            'metadata'   => $drawer->metadata,
-            'tier'       => $drawer->tier,
+            'id' => $drawer->id,
+            'content' => $drawer->content,
+            'wing' => $drawer->room->wing->slug,
+            'room' => $drawer->room->slug,
+            'source' => $drawer->source,
+            'metadata' => $drawer->metadata,
+            'tier' => $drawer->tier,
             'created_at' => $drawer->created_at?->toIso8601String(),
         ];
 

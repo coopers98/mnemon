@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class McpTokenRestrictionTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient;
+    use CreatesPassportClient, RefreshDatabase;
 
     protected function setUp(): void
     {

@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class ContextGetToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_returns_wiki_page_by_name(): void
     {

@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class WikiGraphToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -24,9 +24,9 @@ class WikiGraphToolTest extends TestCase
     private function makeEdge(string $from, string $to, string $type = 'references', ?string $description = null): EntityRelationship
     {
         return EntityRelationship::create([
-            'from_page'   => $from,
-            'to_page'     => $to,
-            'edge_type'   => $type,
+            'from_page' => $from,
+            'to_page' => $to,
+            'edge_type' => $type,
             'description' => $description,
         ]);
     }
@@ -88,7 +88,7 @@ class WikiGraphToolTest extends TestCase
         $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['wiki.read']);
         $r->assertStatus(200);
 
-        $body  = $r->json('result.structuredContent');
+        $body = $r->json('result.structuredContent');
         $names = array_column($body['nodes'], 'name');
         $this->assertContains('person:alice', $names);
     }
@@ -182,7 +182,7 @@ class WikiGraphToolTest extends TestCase
 
         $r = $this->mcpCall('wiki_graph', [
             'start_page' => 'person:alice',
-            'edge_types'  => ['uses'],
+            'edge_types' => ['uses'],
         ], ['wiki.read']);
         $r->assertStatus(200);
 

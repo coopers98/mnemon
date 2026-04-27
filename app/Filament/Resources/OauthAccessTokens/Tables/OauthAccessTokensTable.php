@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\OauthAccessTokens\Tables;
 
 use App\Models\McpTokenRestriction;
+use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -26,7 +27,7 @@ class OauthAccessTokensTable
                             return null;
                         }
 
-                        return \App\Models\User::find($record->user_id)?->email;
+                        return User::find($record->user_id)?->email;
                     }),
                 TextColumn::make('scopes')
                     ->label('Scopes')

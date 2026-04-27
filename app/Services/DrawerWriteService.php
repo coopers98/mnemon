@@ -17,11 +17,11 @@ class DrawerWriteService
      * Create a drawer, auto-creating the wing and room if they don't exist.
      * Content is sanitized before storage to redact secrets.
      *
-     * @param  string       $wingSlug  Slug for the wing (e.g. "work")
-     * @param  string       $roomSlug  Slug for the room (e.g. "notes")
-     * @param  string       $content   Verbatim drawer content
-     * @param  string       $source    Source attribution (token name or explicit override)
-     * @param  array|null   $metadata  Optional JSON metadata
+     * @param  string  $wingSlug  Slug for the wing (e.g. "work")
+     * @param  string  $roomSlug  Slug for the room (e.g. "notes")
+     * @param  string  $content  Verbatim drawer content
+     * @param  string  $source  Source attribution (token name or explicit override)
+     * @param  array|null  $metadata  Optional JSON metadata
      */
     public function createDrawer(
         string $wingSlug,
@@ -41,11 +41,11 @@ class DrawerWriteService
         );
 
         return Drawer::create([
-            'content'  => $this->sanitizer->sanitize($content),
-            'room_id'  => $room->id,
-            'source'   => $source,
+            'content' => $this->sanitizer->sanitize($content),
+            'room_id' => $room->id,
+            'source' => $source,
             'metadata' => $metadata,
-            'tier'     => 'raw',
+            'tier' => 'raw',
         ]);
     }
 }

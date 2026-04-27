@@ -2,6 +2,24 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Prompts\DrawerToWikiPrompt;
+use App\Mcp\Prompts\FindStaleWikiPagesPrompt;
+use App\Mcp\Prompts\SynthesizeWingPrompt;
+use App\Mcp\Resources\DrawerResource;
+use App\Mcp\Resources\WikiPageResource;
+use App\Mcp\Resources\WingResource;
+use App\Mcp\Tools\BrainStatusTool;
+use App\Mcp\Tools\ContextGetTool;
+use App\Mcp\Tools\ContextListTool;
+use App\Mcp\Tools\ContextSetTool;
+use App\Mcp\Tools\DrawerAddTool;
+use App\Mcp\Tools\DrawerGetTool;
+use App\Mcp\Tools\DrawerSearchTool;
+use App\Mcp\Tools\PalaceWakeUpTool;
+use App\Mcp\Tools\WikiCompileTool;
+use App\Mcp\Tools\WikiGraphTool;
+use App\Mcp\Tools\WikiHistoryTool;
+use App\Mcp\Tools\WikiLintTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -13,27 +31,29 @@ use Laravel\Mcp\Server\Attributes\Version;
 class MnemonServer extends Server
 {
     protected array $tools = [
-        \App\Mcp\Tools\DrawerSearchTool::class,
-        \App\Mcp\Tools\DrawerGetTool::class,
-        \App\Mcp\Tools\DrawerAddTool::class,
-        \App\Mcp\Tools\BrainStatusTool::class,
-        \App\Mcp\Tools\PalaceWakeUpTool::class,
-        \App\Mcp\Tools\ContextGetTool::class,
-        \App\Mcp\Tools\ContextSetTool::class,
-        \App\Mcp\Tools\ContextListTool::class,
-        \App\Mcp\Tools\WikiLintTool::class,
-        \App\Mcp\Tools\WikiCompileTool::class,
-        \App\Mcp\Tools\WikiHistoryTool::class,
-        \App\Mcp\Tools\WikiGraphTool::class,
+        DrawerSearchTool::class,
+        DrawerGetTool::class,
+        DrawerAddTool::class,
+        BrainStatusTool::class,
+        PalaceWakeUpTool::class,
+        ContextGetTool::class,
+        ContextSetTool::class,
+        ContextListTool::class,
+        WikiLintTool::class,
+        WikiCompileTool::class,
+        WikiHistoryTool::class,
+        WikiGraphTool::class,
     ];
+
     protected array $resources = [
-        \App\Mcp\Resources\DrawerResource::class,
-        \App\Mcp\Resources\WikiPageResource::class,
-        \App\Mcp\Resources\WingResource::class,
+        DrawerResource::class,
+        WikiPageResource::class,
+        WingResource::class,
     ];
+
     protected array $prompts = [
-        \App\Mcp\Prompts\SynthesizeWingPrompt::class,
-        \App\Mcp\Prompts\FindStaleWikiPagesPrompt::class,
-        \App\Mcp\Prompts\DrawerToWikiPrompt::class,
+        SynthesizeWingPrompt::class,
+        FindStaleWikiPagesPrompt::class,
+        DrawerToWikiPrompt::class,
     ];
 }

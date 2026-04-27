@@ -14,7 +14,7 @@ use Tests\TestCase;
 
 class RequiresWingAccessTest extends TestCase
 {
-    use RefreshDatabase, CreatesPassportClient, MakesMcpRequest;
+    use CreatesPassportClient, MakesMcpRequest, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -71,10 +71,19 @@ class RequiresWingAccessTest extends TestCase
 
     private function harness()
     {
-        return new class {
+        return new class
+        {
             use RequiresWingAccess;
-            public function check(Request $r, string $w) { return $this->requireWingAccess($r, $w); }
-            public function patterns(Request $r) { return $this->wingPatternsFor($r); }
+
+            public function check(Request $r, string $w)
+            {
+                return $this->requireWingAccess($r, $w);
+            }
+
+            public function patterns(Request $r)
+            {
+                return $this->wingPatternsFor($r);
+            }
         };
     }
 }

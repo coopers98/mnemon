@@ -10,13 +10,13 @@ use Tests\TestCase;
 
 class DrawerAddToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_creates_drawer_with_oauth_client_as_default_source(): void
     {
         $r = $this->mcpCall('drawer_add', [
-            'wing'    => 'work',
-            'room'    => 'notes',
+            'wing' => 'work',
+            'room' => 'notes',
             'content' => 'meeting notes',
         ], ['palace.write']);
 
@@ -29,10 +29,10 @@ class DrawerAddToolTest extends TestCase
     public function test_explicit_source_overrides_oauth_client_name(): void
     {
         $r = $this->mcpCall('drawer_add', [
-            'wing'    => 'work',
-            'room'    => 'notes',
+            'wing' => 'work',
+            'room' => 'notes',
             'content' => 'foo',
-            'source'  => 'manual-entry',
+            'source' => 'manual-entry',
         ], ['palace.write']);
 
         $this->assertEquals('manual-entry', Drawer::first()->source);
@@ -41,8 +41,8 @@ class DrawerAddToolTest extends TestCase
     public function test_rejects_write_outside_wing_restrictions(): void
     {
         $r = $this->mcpCall('drawer_add', [
-            'wing'    => 'personal',
-            'room'    => 'notes',
+            'wing' => 'personal',
+            'room' => 'notes',
             'content' => 'foo',
         ], ['palace.write'], wingPatterns: ['work:*']);
 
@@ -61,8 +61,8 @@ class DrawerAddToolTest extends TestCase
     public function test_sanitizes_content_before_storing(): void
     {
         $r = $this->mcpCall('drawer_add', [
-            'wing'    => 'work',
-            'room'    => 'notes',
+            'wing' => 'work',
+            'room' => 'notes',
             'content' => 'My API key is sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz',
         ], ['palace.write']);
 
@@ -75,15 +75,15 @@ class DrawerAddToolTest extends TestCase
     public function test_increments_pending_drawers_on_related_wiki_page(): void
     {
         $page = WikiPage::create([
-            'name'                          => 'work',
-            'type'                          => 'concept',
-            'content'                       => '',
+            'name' => 'work',
+            'type' => 'concept',
+            'content' => '',
             'pending_drawers_since_compile' => 0,
         ]);
 
         $r = $this->mcpCall('drawer_add', [
-            'wing'    => 'work',
-            'room'    => 'notes',
+            'wing' => 'work',
+            'room' => 'notes',
             'content' => 'some content',
         ], ['palace.write']);
 

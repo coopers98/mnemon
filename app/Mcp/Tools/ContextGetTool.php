@@ -42,30 +42,30 @@ class ContextGetTool extends Tool
         $page->update(['last_accessed_at' => now()]);
 
         $payload = [
-            'id'                            => $page->id,
-            'name'                          => $page->name,
-            'type'                          => $page->type,
-            'title'                         => $page->title,
-            'description'                   => $page->description,
-            'confidence'                    => $page->confidence,
-            'sources'                       => $page->sources,
-            'related'                       => $page->related,
-            'confidence_score'              => $page->confidence_score,
-            'source_count'                  => $page->source_count,
+            'id' => $page->id,
+            'name' => $page->name,
+            'type' => $page->type,
+            'title' => $page->title,
+            'description' => $page->description,
+            'confidence' => $page->confidence,
+            'sources' => $page->sources,
+            'related' => $page->related,
+            'confidence_score' => $page->confidence_score,
+            'source_count' => $page->source_count,
             'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
-            'revision_count'                => $page->revision_count,
-            'content'                       => $page->content,
-            'last_compiled_at'              => $page->last_compiled_at?->toIso8601String(),
-            'last_accessed_at'              => $page->last_accessed_at?->toIso8601String(),
-            'word_count'                    => $page->content ? str_word_count($page->content) : 0,
+            'revision_count' => $page->revision_count,
+            'content' => $page->content,
+            'last_compiled_at' => $page->last_compiled_at?->toIso8601String(),
+            'last_accessed_at' => $page->last_accessed_at?->toIso8601String(),
+            'word_count' => $page->content ? str_word_count($page->content) : 0,
         ];
 
         $token = $request->user()?->currentAccessToken();
         if ($token?->can('palace.read') && ! empty($page->sources)) {
             $payload['source_details'] = Drawer::whereIn('id', $page->sources)->get()->map(fn ($d) => [
-                'id'              => $d->id,
+                'id' => $d->id,
                 'content_preview' => mb_substr($d->content, 0, 200),
-                'source'          => $d->source,
+                'source' => $d->source,
             ])->all();
         }
 

@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class WingResourceTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_resource_lists_for_palace_read_token(): void
     {

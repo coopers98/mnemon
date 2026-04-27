@@ -2,8 +2,6 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Collection;
-
 class DrawerSearchService
 {
     public function __construct(
@@ -40,17 +38,17 @@ class DrawerSearchService
         }
 
         return $results->values()->map(fn ($r) => [
-            'id'         => $r->id,
-            'content'    => $r->content,
-            'wing'       => $r->wing,
-            'wing_slug'  => $r->wing_slug,
-            'room'       => $r->room,
-            'room_slug'  => $r->room_slug,
-            'source'     => $r->source,
-            'metadata'   => $r->metadata,
-            'tier'       => $r->tier ?? 'raw',
+            'id' => $r->id,
+            'content' => $r->content,
+            'wing' => $r->wing,
+            'wing_slug' => $r->wing_slug,
+            'room' => $r->room,
+            'room_slug' => $r->room_slug,
+            'source' => $r->source,
+            'metadata' => $r->metadata,
+            'tier' => $r->tier ?? 'raw',
             'created_at' => $r->created_at,
-            'score'      => $r->score,
+            'score' => $r->score,
         ])->all();
     }
 

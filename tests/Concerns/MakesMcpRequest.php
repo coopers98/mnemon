@@ -18,12 +18,12 @@ trait MakesMcpRequest
     {
         $accessToken = new AccessToken([
             'oauth_access_token_id' => $token->id,
-            'oauth_client_id'       => $token->client_id,
-            'oauth_scopes'          => $token->scopes,
+            'oauth_client_id' => $token->client_id,
+            'oauth_scopes' => $token->scopes,
         ]);
 
         $this->actingAs($user->withAccessToken($accessToken), 'api');
 
-        return new Request();
+        return new Request;
     }
 }

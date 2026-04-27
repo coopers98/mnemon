@@ -2,11 +2,12 @@
 
 namespace Database\Factories;
 
+use App\Models\Wing;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Wing>
+ * @extends Factory<Wing>
  */
 class WingFactory extends Factory
 {
@@ -15,8 +16,8 @@ class WingFactory extends Factory
         $name = $this->faker->unique()->words(2, true);
 
         return [
-            'name'        => ucwords($name),
-            'slug'        => Str::slug($name),
+            'name' => ucwords($name),
+            'slug' => Str::slug($name),
             'description' => $this->faker->optional()->sentence(),
         ];
     }

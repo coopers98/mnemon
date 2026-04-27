@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class BrainStatusToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_returns_aggregate_counts(): void
     {

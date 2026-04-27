@@ -5,6 +5,7 @@ namespace Tests\Concerns;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use Illuminate\Testing\TestResponse;
+use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 
 trait MakesMcpRequests
@@ -20,7 +21,7 @@ trait MakesMcpRequests
         /** @var ClientRepository $clients */
         $clients = app(ClientRepository::class);
 
-        if (! \Laravel\Passport\Client::where('personal_access_client', true)->exists()) {
+        if (! Client::where('personal_access_client', true)->exists()) {
             $clients->createPersonalAccessGrantClient('Test Client', 'users');
         }
 
@@ -38,7 +39,7 @@ trait MakesMcpRequests
         if ($wingPatterns !== null) {
             McpTokenRestriction::create([
                 'access_token_id' => $token->id,
-                'wing_patterns'   => $wingPatterns,
+                'wing_patterns' => $wingPatterns,
             ]);
         }
 
@@ -78,7 +79,7 @@ trait MakesMcpRequests
     protected function mcpPromptGet(string $name, array $args = [], array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('prompts/get', [
-            'name'      => $name,
+            'name' => $name,
             'arguments' => $args,
         ], $scopes, $wingPatterns);
     }

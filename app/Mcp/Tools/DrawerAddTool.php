@@ -32,10 +32,10 @@ class DrawerAddTool extends Tool
         }
 
         $params = $request->validate([
-            'wing'     => 'required|string',
-            'room'     => 'required|string',
-            'content'  => 'required|string',
-            'source'   => 'nullable|string',
+            'wing' => 'required|string',
+            'room' => 'required|string',
+            'content' => 'required|string',
+            'source' => 'nullable|string',
             'metadata' => 'nullable|array',
         ]);
 
@@ -59,10 +59,10 @@ class DrawerAddTool extends Tool
     public function schema(JsonSchema $s): array
     {
         return [
-            'wing'     => $s->string()->required()->description('Wing slug (auto-created if missing).'),
-            'room'     => $s->string()->required()->description('Room slug within wing.'),
-            'content'  => $s->string()->required()->description('Verbatim drawer content.'),
-            'source'   => $s->string()->description('Optional source override; defaults to OAuth client name.'),
+            'wing' => $s->string()->required()->description('Wing slug (auto-created if missing).'),
+            'room' => $s->string()->required()->description('Room slug within wing.'),
+            'content' => $s->string()->required()->description('Verbatim drawer content.'),
+            'source' => $s->string()->description('Optional source override; defaults to OAuth client name.'),
             'metadata' => $s->object()->description('Optional JSON metadata.'),
         ];
     }

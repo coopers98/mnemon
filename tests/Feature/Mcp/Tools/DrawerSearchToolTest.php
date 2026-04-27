@@ -12,7 +12,7 @@ use Tests\TestCase;
 
 class DrawerSearchToolTest extends TestCase
 {
-    use RefreshDatabase, MakesMcpRequests;
+    use MakesMcpRequests, RefreshDatabase;
 
     public function test_returns_drawer_results_for_query(): void
     {

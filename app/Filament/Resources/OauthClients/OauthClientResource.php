@@ -7,7 +7,6 @@ use App\Filament\Resources\OauthClients\Pages\ViewOauthClient;
 use App\Filament\Resources\OauthClients\Tables\OauthClientsTable;
 use BackedEnum;
 use Filament\Resources\Resource;
-use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;

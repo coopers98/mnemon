@@ -23,6 +23,7 @@ class BrainStatusTool extends Tool
     use RequiresScope;
 
     protected string $name = 'brain_status';
+
     protected string $scope = 'palace.read';
 
     public function handle(Request $request): Response|ResponseFactory
@@ -38,16 +39,16 @@ class BrainStatusTool extends Tool
             $query->whereNull('last_compiled_at')
                 ->orWhere('last_compiled_at', '<', $staleThreshold);
         })->orderBy('last_compiled_at')->get()->map(fn ($p) => [
-            'name'             => $p->name,
+            'name' => $p->name,
             'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
         ])->values()->all();
 
         $pendingUpdatePages = WikiPage::pendingUpdates()
             ->get()
             ->map(fn ($p) => [
-                'name'                          => $p->name,
+                'name' => $p->name,
                 'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
-                'last_compiled_at'              => $p->last_compiled_at?->toIso8601String(),
+                'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
             ])->values()->all();
 
         $drawersByTier = Drawer::query()
@@ -62,23 +63,23 @@ class BrainStatusTool extends Tool
             $query->join('drawers', 'drawers.room_id', '=', 'rooms.id')
                 ->whereNull('drawers.deleted_at');
         }])->get()->map(fn ($w) => [
-            'name'         => $w->name,
-            'slug'         => $w->slug,
+            'name' => $w->name,
+            'slug' => $w->slug,
             'drawer_count' => (int) $w->drawer_count,
         ])->values()->all();
 
         $payload = [
-            'wings'               => Wing::count(),
-            'rooms'               => Room::count(),
-            'drawers'             => Drawer::count(),
-            'wiki_pages'          => WikiPage::count(),
-            'drawers_by_tier'     => $drawersByTier,
-            'wings_detail'        => $wingsWithCounts,
-            'last_write'          => $lastWrite ? $lastWrite->toIso8601String() : null,
-            'stale_wiki_pages'    => $staleWikiPages,
+            'wings' => Wing::count(),
+            'rooms' => Room::count(),
+            'drawers' => Drawer::count(),
+            'wiki_pages' => WikiPage::count(),
+            'drawers_by_tier' => $drawersByTier,
+            'wings_detail' => $wingsWithCounts,
+            'last_write' => $lastWrite ? $lastWrite->toIso8601String() : null,
+            'stale_wiki_pages' => $staleWikiPages,
             'pending_update_pages' => $pendingUpdatePages,
-            'embedding'           => [
-                'driver'     => config('mnemon.embedding.driver'),
+            'embedding' => [
+                'driver' => config('mnemon.embedding.driver'),
                 'dimensions' => config('mnemon.embedding.dimensions'),
             ],
         ];

@@ -69,4 +69,17 @@ trait MakesMcpRequests
     {
         return $this->mcpRequest('resources/read', ['uri' => $uri], $scopes, $wingPatterns);
     }
+
+    protected function mcpPromptList(array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    {
+        return $this->mcpRequest('prompts/list', [], $scopes, $wingPatterns);
+    }
+
+    protected function mcpPromptGet(string $name, array $args = [], array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    {
+        return $this->mcpRequest('prompts/get', [
+            'name'      => $name,
+            'arguments' => $args,
+        ], $scopes, $wingPatterns);
+    }
 }

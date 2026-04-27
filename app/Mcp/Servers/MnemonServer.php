@@ -31,5 +31,9 @@ class MnemonServer extends Server
         \App\Mcp\Resources\WikiPageResource::class,
         \App\Mcp\Resources\WingResource::class,
     ];
-    protected array $prompts = [];
+    protected array $prompts = [
+        \App\Mcp\Prompts\SynthesizeWingPrompt::class,
+        \App\Mcp\Prompts\FindStaleWikiPagesPrompt::class,
+        \App\Mcp\Prompts\DrawerToWikiPrompt::class,
+    ];
 }

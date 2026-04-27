@@ -4,13 +4,19 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Passport\ClientRepository;
 use Laravel\Passport\HasApiTokens;
+use Tests\Concerns\CreatesPassportClient;
 use Tests\TestCase;
 
 class UserHasApiTokensTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, CreatesPassportClient;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->setUpPassportClient();
+    }
 
     public function test_user_uses_passport_has_api_tokens_trait(): void
     {
@@ -20,9 +26,6 @@ class UserHasApiTokensTest extends TestCase
 
     public function test_user_can_create_personal_access_token(): void
     {
-        // Passport requires a personal access client in the DB
-        app(ClientRepository::class)->createPersonalAccessGrantClient('Test Client', 'users');
-
         $user = User::factory()->create();
         $token = $user->createToken('test', ['palace.read']);
 

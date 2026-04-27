@@ -9,8 +9,13 @@ use Illuminate\Support\Str;
 
 class DrawerWriteService
 {
+    public function __construct(
+        private readonly ContentSanitizer $sanitizer,
+    ) {}
+
     /**
      * Create a drawer, auto-creating the wing and room if they don't exist.
+     * Content is sanitized before storage to redact secrets.
      *
      * @param  string       $wingSlug  Slug for the wing (e.g. "work")
      * @param  string       $roomSlug  Slug for the room (e.g. "notes")
@@ -36,7 +41,7 @@ class DrawerWriteService
         );
 
         return Drawer::create([
-            'content'  => $content,
+            'content'  => $this->sanitizer->sanitize($content),
             'room_id'  => $room->id,
             'source'   => $source,
             'metadata' => $metadata,

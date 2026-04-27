@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Drawer;
+use App\Models\WikiPage;
 use App\Services\EmbeddingManager;
 
 class DrawerObserver
@@ -14,6 +15,22 @@ class DrawerObserver
     public function creating(Drawer $drawer): void
     {
         $this->embedContent($drawer);
+    }
+
+    public function created(Drawer $drawer): void
+    {
+        $drawer->load('room.wing');
+        $wing = $drawer->room?->wing;
+
+        if (! $wing) {
+            return;
+        }
+
+        $candidates = collect([$wing->name, $wing->slug, str_replace('-', ':', $wing->slug)])->unique();
+
+        WikiPage::whereIn('name', $candidates)->each(
+            fn (WikiPage $page) => $page->increment('pending_drawers_since_compile')
+        );
     }
 
     public function updating(Drawer $drawer): void

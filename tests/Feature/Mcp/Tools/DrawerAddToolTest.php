@@ -3,6 +3,7 @@
 namespace Tests\Feature\Mcp\Tools;
 
 use App\Models\Drawer;
+use App\Models\WikiPage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\MakesMcpRequests;
 use Tests\TestCase;
@@ -55,5 +56,38 @@ class DrawerAddToolTest extends TestCase
         $r = $this->mcpCall('drawer_add', ['wing' => 'work', 'room' => 'notes', 'content' => 'foo'], ['palace.read']);
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
+    }
+
+    public function test_sanitizes_content_before_storing(): void
+    {
+        $r = $this->mcpCall('drawer_add', [
+            'wing'    => 'work',
+            'room'    => 'notes',
+            'content' => 'My API key is sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz',
+        ], ['palace.write']);
+
+        $r->assertStatus(200);
+        $stored = Drawer::first()->content;
+        $this->assertStringNotContainsString('sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz', $stored);
+        $this->assertStringContainsString('[REDACTED:API_KEY]', $stored);
+    }
+
+    public function test_increments_pending_drawers_on_related_wiki_page(): void
+    {
+        $page = WikiPage::create([
+            'name'                          => 'work',
+            'type'                          => 'concept',
+            'content'                       => '',
+            'pending_drawers_since_compile' => 0,
+        ]);
+
+        $r = $this->mcpCall('drawer_add', [
+            'wing'    => 'work',
+            'room'    => 'notes',
+            'content' => 'some content',
+        ], ['palace.write']);
+
+        $r->assertStatus(200);
+        $this->assertEquals(1, $page->fresh()->pending_drawers_since_compile);
     }
 }

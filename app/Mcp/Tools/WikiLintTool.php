@@ -2,40 +2,44 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Support\BrainSessionLogger;
 use App\Models\WikiPage;
 use App\Services\WikiLintAutoFixer;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\Eloquent\Collection;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
 
-class WikiLintTool extends BaseTool
+#[Description('Scan wiki pages for quality issues (stale, orphans, empty, low confidence, low quality). Optionally auto-fix safe issues.')]
+class WikiLintTool extends Tool
 {
-    public function __construct(private readonly WikiLintAutoFixer $autoFixer) {}
+    use RequiresScope;
 
-    public function requiredScope(): string
-    {
-        return 'wiki:read';
-    }
+    protected string $name = 'wiki_lint';
+
+    protected string $scope = 'wiki.write';
 
     private const VALID_FOCUS = ['stale', 'orphans', 'empty', 'low_confidence', 'low_quality', 'all'];
 
-    public function execute(array $params, ApiKey $apiKey): array
+    public function __construct(private readonly WikiLintAutoFixer $autoFixer) {}
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        $this->requireScope($apiKey, $this->requiredScope());
+        if ($err = $this->requireScope($request)) {
+            return $err;
+        }
+
+        $params = $request->validate([
+            'focus'    => 'nullable|string|in:'.implode(',', self::VALID_FOCUS),
+            'auto_fix' => 'nullable|boolean',
+        ]);
 
         $focus = $params['focus'] ?? 'all';
-        if (! in_array($focus, self::VALID_FOCUS, true)) {
-            throw McpException::invalidParams(
-                'Parameter "focus" must be one of: '.implode(', ', self::VALID_FOCUS)
-            );
-        }
-
         $autoFix = (bool) ($params['auto_fix'] ?? false);
-        if ($autoFix) {
-            // Auto-fix mutates the wiki — escalate scope requirement
-            $this->requireScope($apiKey, 'wiki:write');
-        }
 
         // Load all pages once and pass the collection to each detector
         $allPages = WikiPage::all();
@@ -67,28 +71,38 @@ class WikiLintTool extends BaseTool
 
         $result = [
             'findings' => $findings,
-            'summary' => [
-                'total' => count($findings),
+            'summary'  => [
+                'total'    => count($findings),
                 'warnings' => $warnings,
-                'info' => $info,
-                'focus' => $focus,
+                'info'     => $info,
+                'focus'    => $focus,
             ],
         ];
 
         // Item 13: Self-Healing Lint — apply safe auto-fixes
         if ($autoFix) {
-            $result['auto_fixes'] = $this->autoFixer->fix($findings, $apiKey);
+            $result['auto_fixes'] = $this->autoFixer->fix($findings);
         }
 
-        $this->logSession('wiki_lint', $apiKey, $params, count($findings));
+        BrainSessionLogger::log($request, 'wiki_lint', $params, count($findings));
 
-        return $result;
+        return Response::structured($result);
+    }
+
+    public function schema(JsonSchema $s): array
+    {
+        return [
+            'focus' => $s->string()
+                ->description('Which issue category to scan (default: all). One of: '.implode(', ', self::VALID_FOCUS).'.'),
+            'auto_fix' => $s->boolean()
+                ->description('When true, apply safe auto-fixes (prune broken refs, archive empty stubs, queue orphans).'),
+        ];
     }
 
     /**
      * @param  Collection<int, WikiPage>  $allPages
      */
-    private function detectStalePages(array &$findings, $allPages): void
+    private function detectStalePages(array &$findings, Collection $allPages): void
     {
         $staleDays = (int) config('mnemon.wiki.stale_days', 30);
         $staleThreshold = now()->subDays($staleDays);
@@ -97,12 +111,12 @@ class WikiLintTool extends BaseTool
         $pendingPages = $allPages->filter(fn ($p) => $p->pending_drawers_since_compile > 0);
         foreach ($pendingPages as $page) {
             $findings[] = [
-                'type' => 'stale',
-                'severity' => 'warning',
-                'page' => $page->name,
-                'page_id' => $page->id,
+                'type'        => 'stale',
+                'severity'    => 'warning',
+                'page'        => $page->name,
+                'page_id'     => $page->id,
                 'description' => "Page has {$page->pending_drawers_since_compile} new drawer(s) since last compile",
-                'suggestion' => 'Re-compile this wiki page with recent drawer content',
+                'suggestion'  => 'Re-compile this wiki page with recent drawer content',
             ];
         }
 
@@ -120,12 +134,12 @@ class WikiLintTool extends BaseTool
         foreach ($stalePages as $page) {
             $compiled = $page->last_compiled_at?->toIso8601String() ?? 'never';
             $findings[] = [
-                'type' => 'stale',
-                'severity' => 'warning',
-                'page' => $page->name,
-                'page_id' => $page->id,
+                'type'        => 'stale',
+                'severity'    => 'warning',
+                'page'        => $page->name,
+                'page_id'     => $page->id,
                 'description' => "Page last compiled: {$compiled} (threshold: {$staleDays} days)",
-                'suggestion' => 'Review and re-compile this wiki page',
+                'suggestion'  => 'Review and re-compile this wiki page',
             ];
         }
     }
@@ -133,7 +147,7 @@ class WikiLintTool extends BaseTool
     /**
      * @param  Collection<int, WikiPage>  $allPages
      */
-    private function detectOrphanPages(array &$findings, $allPages): void
+    private function detectOrphanPages(array &$findings, Collection $allPages): void
     {
         $excludedNames = ['wiki/index', 'wiki/log'];
 
@@ -151,12 +165,12 @@ class WikiLintTool extends BaseTool
         foreach ($filteredPages as $page) {
             if (! $referencedNames->contains($page->name)) {
                 $findings[] = [
-                    'type' => 'orphan',
-                    'severity' => 'info',
-                    'page' => $page->name,
-                    'page_id' => $page->id,
-                    'description' => 'Page is not referenced by any other wiki page\'s related array',
-                    'suggestion' => 'Add this page to related arrays of relevant pages, or review if still needed',
+                    'type'        => 'orphan',
+                    'severity'    => 'info',
+                    'page'        => $page->name,
+                    'page_id'     => $page->id,
+                    'description' => "Page is not referenced by any other wiki page's related array",
+                    'suggestion'  => 'Add this page to related arrays of relevant pages, or review if still needed',
                 ];
             }
         }
@@ -165,18 +179,18 @@ class WikiLintTool extends BaseTool
     /**
      * @param  Collection<int, WikiPage>  $allPages
      */
-    private function detectEmptyPages(array &$findings, $allPages): void
+    private function detectEmptyPages(array &$findings, Collection $allPages): void
     {
         foreach ($allPages as $page) {
             $contentLength = mb_strlen(trim($page->content ?? ''));
             if ($contentLength < 50) {
                 $findings[] = [
-                    'type' => 'empty',
-                    'severity' => 'warning',
-                    'page' => $page->name,
-                    'page_id' => $page->id,
+                    'type'        => 'empty',
+                    'severity'    => 'warning',
+                    'page'        => $page->name,
+                    'page_id'     => $page->id,
                     'description' => "Page content is very short ({$contentLength} chars)",
-                    'suggestion' => 'Add more content or remove this stub page',
+                    'suggestion'  => 'Add more content or remove this stub page',
                 ];
             }
         }
@@ -185,21 +199,21 @@ class WikiLintTool extends BaseTool
     /**
      * @param  Collection<int, WikiPage>  $allPages
      */
-    private function detectLowConfidence(array &$findings, $allPages): void
+    private function detectLowConfidence(array &$findings, Collection $allPages): void
     {
         // Use numeric confidence_score when available (threshold: < 0.3)
         foreach ($allPages as $page) {
             if ($page->confidence_score !== null && $page->confidence_score < 0.3) {
                 $findings[] = [
-                    'type' => 'low_confidence',
-                    'severity' => 'warning',
-                    'page' => $page->name,
-                    'page_id' => $page->id,
+                    'type'        => 'low_confidence',
+                    'severity'    => 'warning',
+                    'page'        => $page->name,
+                    'page_id'     => $page->id,
                     'description' => sprintf(
                         'Page has low confidence score: %.2f (threshold: 0.30)',
                         $page->confidence_score
                     ),
-                    'suggestion' => 'Gather more sources or re-compile to strengthen confidence',
+                    'suggestion'  => 'Gather more sources or re-compile to strengthen confidence',
                 ];
 
                 continue;
@@ -208,12 +222,12 @@ class WikiLintTool extends BaseTool
             // Fallback to categorical confidence for pages without a numeric score
             if ($page->confidence === 'low') {
                 $findings[] = [
-                    'type' => 'low_confidence',
-                    'severity' => 'info',
-                    'page' => $page->name,
-                    'page_id' => $page->id,
+                    'type'        => 'low_confidence',
+                    'severity'    => 'info',
+                    'page'        => $page->name,
+                    'page_id'     => $page->id,
                     'description' => 'Page has low confidence rating',
-                    'suggestion' => 'Gather more sources or review content accuracy',
+                    'suggestion'  => 'Gather more sources or review content accuracy',
                 ];
             }
         }
@@ -224,7 +238,7 @@ class WikiLintTool extends BaseTool
      *
      * @param  Collection<int, WikiPage>  $allPages
      */
-    private function detectLowQuality(array &$findings, $allPages): void
+    private function detectLowQuality(array &$findings, Collection $allPages): void
     {
         $threshold = (float) config('mnemon.quality.low_threshold', 0.4);
 
@@ -237,16 +251,16 @@ class WikiLintTool extends BaseTool
             }
 
             $findings[] = [
-                'type' => 'low_quality',
-                'severity' => 'warning',
-                'page' => $page->name,
-                'page_id' => $page->id,
+                'type'        => 'low_quality',
+                'severity'    => 'warning',
+                'page'        => $page->name,
+                'page_id'     => $page->id,
                 'description' => sprintf(
                     'Page has low quality score: %.2f (threshold: %.2f)',
                     $page->quality_score,
                     $threshold
                 ),
-                'suggestion' => 'Add structure (headings, citations, examples) or re-write with more specifics',
+                'suggestion'  => 'Add structure (headings, citations, examples) or re-write with more specifics',
             ];
         }
     }

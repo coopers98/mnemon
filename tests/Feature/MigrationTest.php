@@ -80,19 +80,4 @@ class MigrationTest extends TestCase
         ]));
     }
 
-    public function test_api_keys_table_has_expected_columns(): void
-    {
-        $this->assertTrue(Schema::hasTable('api_keys'));
-        $this->assertTrue(Schema::hasColumns('api_keys', [
-            'id',
-            'name',
-            'key_hash',
-            'scopes',
-            'wing_restrictions',
-            'last_used_at',
-            'revoked_at',
-            'created_at',
-            'updated_at',
-        ]));
-    }
 }

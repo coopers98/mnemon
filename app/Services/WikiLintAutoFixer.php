@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\ApiKey;
 use App\Models\WikiLintAction;
 use App\Models\WikiPage;
 
@@ -22,7 +21,7 @@ class WikiLintAutoFixer
      * @param  array<int, array<string, mixed>>  $findings
      * @return array{applied: array<int, array<string, mixed>>, summary: array<string, int>}
      */
-    public function fix(array $findings, ?ApiKey $apiKey = null): array
+    public function fix(array $findings): array
     {
         $applied = [];
 

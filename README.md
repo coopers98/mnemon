@@ -209,6 +209,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 
 ## Documentation
 
+- [`docs/USERGUIDE.md`](docs/USERGUIDE.md) — **day-to-day playbook**: setup, connecting agents, OAuth, multi-device, troubleshooting, FAQ
 - [`CLAUDE.md`](CLAUDE.md) — agent / contributor conventions (canonical for AI work)
 - [`AGENTS.md`](AGENTS.md) — pointer for non-Claude agents
 - [`docs/FRD.md`](docs/FRD.md) — functional requirements

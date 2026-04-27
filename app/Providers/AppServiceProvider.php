@@ -7,6 +7,9 @@ use App\Models\WikiPage;
 use App\Observers\DrawerObserver;
 use App\Observers\WikiPageObserver;
 use App\Services\EmbeddingManager;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
 
@@ -40,5 +43,11 @@ class AppServiceProvider extends ServiceProvider
         ]);
 
         Passport::authorizationView(fn ($p) => view('mcp.authorize', $p));
+
+        RateLimiter::for('mcp', function (Request $request) {
+            return $request->user()
+                ? Limit::perMinute(120)->by($request->user()->currentAccessToken()->id ?? $request->ip())
+                : Limit::perMinute(20)->by($request->ip());
+        });
     }
 }

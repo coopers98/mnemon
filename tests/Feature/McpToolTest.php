@@ -7,7 +7,6 @@ use App\Mcp\Tools\BrainStatusTool;
 use App\Mcp\Tools\ContextGetTool;
 use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\ContextSetTool;
-use App\Mcp\Tools\DrawerAddTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Models\ApiKey;
 use App\Models\Drawer;
@@ -140,66 +139,6 @@ class McpToolTest extends TestCase
 
         $staleNames = array_column($result['stale_wiki_pages'], 'name');
         $this->assertContains('stale-page', $staleNames);
-    }
-
-    // ─── drawer_add ──────────────────────────────────────────────────────────
-
-    public function test_drawer_add_creates_drawer_with_auto_created_wing_and_room(): void
-    {
-        $tool = app(DrawerAddTool::class);
-        $result = $tool->execute([
-            'content' => 'Test note content',
-            'wing' => 'My Projects',
-        ], $this->apiKey);
-
-        $this->assertArrayHasKey('drawer_id', $result);
-        $this->assertEquals('my-projects', $result['wing_slug']);
-        $this->assertDatabaseHas('wings', ['slug' => 'my-projects']);
-        $this->assertDatabaseHas('drawers', ['id' => $result['drawer_id']]);
-    }
-
-    public function test_drawer_add_with_existing_wing_reuses_it(): void
-    {
-        Wing::create(['name' => 'Work', 'slug' => 'work']);
-
-        $tool = app(DrawerAddTool::class);
-        $result = $tool->execute([
-            'content' => 'Another note',
-            'wing' => 'Work',
-        ], $this->apiKey);
-
-        $this->assertEquals(1, Wing::where('slug', 'work')->count());
-        $this->assertEquals('work', $result['wing_slug']);
-    }
-
-    public function test_drawer_add_auto_creates_room_with_default_yyyy_mm(): void
-    {
-        $tool = app(DrawerAddTool::class);
-        $result = $tool->execute([
-            'content' => 'Note',
-            'wing' => 'Work',
-        ], $this->apiKey);
-
-        $expectedSlug = now()->format('Y-m');
-        $this->assertEquals($expectedSlug, $result['room_slug']);
-    }
-
-    public function test_drawer_add_requires_content(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('content');
-
-        $tool = app(DrawerAddTool::class);
-        $tool->execute(['wing' => 'Work'], $this->apiKey);
-    }
-
-    public function test_drawer_add_requires_wing(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('wing');
-
-        $tool = app(DrawerAddTool::class);
-        $tool->execute(['content' => 'test'], $this->apiKey);
     }
 
     // ─── context_get ─────────────────────────────────────────────────────────

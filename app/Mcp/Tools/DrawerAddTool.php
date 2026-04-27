@@ -2,112 +2,68 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
-use App\Models\Drawer;
-use App\Models\Room;
-use App\Models\WikiPage;
-use App\Models\Wing;
-use App\Services\ContentSanitizer;
-use Illuminate\Support\Str;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
+use App\Mcp\Concerns\ResolvesAgentSource;
+use App\Mcp\Support\BrainSessionLogger;
+use App\Services\DrawerWriteService;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
 
-class DrawerAddTool extends BaseTool
+#[Description('Add a drawer (verbatim content) to a room within a wing.')]
+class DrawerAddTool extends Tool
 {
-    public function __construct(
-        private readonly ContentSanitizer $sanitizer,
-    ) {}
+    use RequiresScope, RequiresWingAccess, ResolvesAgentSource;
 
-    public function requiredScope(): string
+    protected string $name = 'drawer_add';
+
+    protected string $scope = 'palace.write';
+
+    public function __construct(protected DrawerWriteService $writer) {}
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        return 'palace:write';
-    }
-
-    public function execute(array $params, ApiKey $apiKey): array
-    {
-        $this->requireScope($apiKey, $this->requiredScope());
-
-        $content = $params['content'] ?? null;
-        $wingName = $params['wing'] ?? null;
-
-        if (empty($content)) {
-            throw McpException::invalidParams('Parameter "content" is required.');
+        if ($err = $this->requireScope($request)) {
+            return $err;
         }
 
-        if (empty($wingName)) {
-            throw McpException::invalidParams('Parameter "wing" is required.');
-        }
-
-        $roomName = $params['room'] ?? now()->format('Y-m');
-        $source = $params['source'] ?? null;
-        $metadata = isset($params['metadata']) && is_array($params['metadata'])
-            ? $params['metadata']
-            : null;
-
-        $wingSlug = Str::slug(str_replace(':', '-', $wingName));
-
-        $this->requireWingAccess($apiKey, $wingSlug);
-
-        $wing = Wing::firstOrCreate(
-            ['slug' => $wingSlug],
-            ['name' => $wingName]
-        );
-
-        $roomSlug = Str::slug($roomName);
-
-        $room = Room::firstOrCreate(
-            ['wing_id' => $wing->id, 'slug' => $roomSlug],
-            ['name' => $roomName, 'wing_id' => $wing->id]
-        );
-
-        // Sanitize content before storing
-        $sanitizedContent = $this->sanitizer->sanitize($content);
-
-        $drawer = Drawer::create([
-            'content' => $sanitizedContent,
-            'room_id' => $room->id,
-            'source' => $source,
-            'metadata' => $metadata,
+        $params = $request->validate([
+            'wing'     => 'required|string',
+            'room'     => 'required|string',
+            'content'  => 'required|string',
+            'source'   => 'nullable|string',
+            'metadata' => 'nullable|array',
         ]);
 
-        // Cascade awareness: flag related wiki pages as having new content
-        $affectedPages = $this->incrementPendingWikiPages($wing);
-
-        $result = [
-            'drawer_id' => $drawer->id,
-            'wing_slug' => $wing->slug,
-            'room_slug' => $room->slug,
-            'embedding_status' => 'pending',
-            'wiki_pages_flagged' => $affectedPages,
-        ];
-
-        $this->logSession('drawer_add', $apiKey, array_filter([
-            'wing' => $wingName,
-            'room' => $roomName,
-            'source' => $source,
-        ]), 1);
-
-        return $result;
-    }
-
-    /**
-     * Find wiki pages whose name matches the wing and increment their pending counter.
-     *
-     * Matches by: wing name (which often IS the wiki page name, e.g. `project:atlas`),
-     * wing slug, or slug-to-colon conversion for wings created with colon names.
-     *
-     * @return int Number of wiki pages flagged
-     */
-    private function incrementPendingWikiPages(Wing $wing): int
-    {
-        $candidates = collect([$wing->name, $wing->slug, str_replace('-', ':', $wing->slug)])->unique();
-
-        $pages = WikiPage::whereIn('name', $candidates)->get();
-
-        foreach ($pages as $page) {
-            $page->increment('pending_drawers_since_compile');
+        if ($err = $this->requireWingAccess($request, $params['wing'])) {
+            return $err;
         }
 
-        return $pages->count();
+        $drawer = $this->writer->createDrawer(
+            wingSlug: $params['wing'],
+            roomSlug: $params['room'],
+            content: $params['content'],
+            source: $this->agentSource($request, $params['source'] ?? null),
+            metadata: $params['metadata'] ?? null,
+        );
+
+        BrainSessionLogger::log($request, 'drawer_add', $params, 1);
+
+        return Response::structured(['id' => $drawer->id, 'tier' => $drawer->tier]);
+    }
+
+    public function schema(JsonSchema $s): array
+    {
+        return [
+            'wing'     => $s->string()->required()->description('Wing slug (auto-created if missing).'),
+            'room'     => $s->string()->required()->description('Room slug within wing.'),
+            'content'  => $s->string()->required()->description('Verbatim drawer content.'),
+            'source'   => $s->string()->description('Optional source override; defaults to OAuth client name.'),
+            'metadata' => $s->object()->description('Optional JSON metadata.'),
+        ];
     }
 }

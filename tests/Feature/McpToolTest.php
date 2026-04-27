@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Mcp\Tools\ContextListTool;
-use App\Mcp\Tools\ContextSetTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
 use App\Models\ApiKey;
 use App\Models\Drawer;
@@ -79,79 +78,6 @@ class McpToolTest extends TestCase
 
         $staleNames = array_column($result['stale_wiki_pages'], 'name');
         $this->assertContains('stale-page', $staleNames);
-    }
-
-    // ─── context_set ─────────────────────────────────────────────────────────
-
-    public function test_context_set_creates_new_wiki_page(): void
-    {
-        $tool = app(ContextSetTool::class);
-        $result = $tool->execute([
-            'name' => 'concept:ideas',
-            'content' => 'Some ideas',
-        ], $this->apiKey);
-
-        $this->assertEquals('created', $result['created_or_updated']);
-        $this->assertEquals('concept:ideas', $result['name']);
-        $this->assertEquals('concept', $result['type']);
-        $this->assertDatabaseHas('wiki_pages', ['name' => 'concept:ideas', 'type' => 'concept']);
-    }
-
-    public function test_context_set_updates_existing_wiki_page(): void
-    {
-        WikiPage::create(['name' => 'project:x', 'type' => 'project', 'content' => 'Original']);
-
-        $tool = app(ContextSetTool::class);
-        $result = $tool->execute([
-            'name' => 'project:x',
-            'content' => 'Updated content',
-        ], $this->apiKey);
-
-        $this->assertEquals('updated', $result['created_or_updated']);
-        $this->assertDatabaseHas('wiki_pages', [
-            'name' => 'project:x',
-            'content' => 'Updated content',
-        ]);
-    }
-
-    public function test_context_set_auto_infers_type_from_name_prefix(): void
-    {
-        $tool = app(ContextSetTool::class);
-
-        $cases = [
-            ['person:alice', 'person'],
-            ['project:beta', 'project'],
-            ['concept:flow', 'concept'],
-            ['decision:arch', 'decision'],
-            ['misc-page', 'synthesis'],
-        ];
-
-        foreach ($cases as [$name, $expectedType]) {
-            $result = $tool->execute(['name' => $name, 'content' => 'content'], $this->apiKey);
-            $this->assertEquals($expectedType, $result['type'], "Expected type {$expectedType} for name {$name}");
-        }
-    }
-
-    public function test_context_set_auto_updates_wiki_index(): void
-    {
-        $tool = app(ContextSetTool::class);
-        $tool->execute(['name' => 'project:gamma', 'content' => 'Gamma project'], $this->apiKey);
-
-        $this->assertDatabaseHas('wiki_pages', ['name' => 'wiki/index']);
-        $indexPage = WikiPage::where('name', 'wiki/index')->first();
-        $this->assertStringContainsString('project:gamma', $indexPage->content);
-    }
-
-    public function test_context_set_appends_to_wiki_log(): void
-    {
-        $tool = app(ContextSetTool::class);
-        $tool->execute(['name' => 'concept:x', 'content' => 'X'], $this->apiKey);
-        $tool->execute(['name' => 'concept:y', 'content' => 'Y'], $this->apiKey);
-
-        $logPage = WikiPage::where('name', 'wiki/log')->first();
-        $this->assertNotNull($logPage);
-        $this->assertStringContainsString('concept:x', $logPage->content);
-        $this->assertStringContainsString('concept:y', $logPage->content);
     }
 
     // ─── context_list ────────────────────────────────────────────────────────

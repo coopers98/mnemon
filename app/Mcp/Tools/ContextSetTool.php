@@ -2,38 +2,52 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\ResolvesAgentSource;
+use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
 use App\Models\WikiPageRevision;
 use App\Services\KnowledgeGraphService;
 use App\Services\QualityScoreService;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
 
-class ContextSetTool extends BaseTool
+#[Description('Upsert a wiki page with optimistic locking and revision audit.')]
+class ContextSetTool extends Tool
 {
-    public function requiredScope(): string
+    use RequiresScope, ResolvesAgentSource;
+
+    protected string $name = 'context_set';
+
+    protected string $scope = 'wiki.write';
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        return 'wiki:write';
-    }
-
-    public function execute(array $params, ApiKey $apiKey): array
-    {
-        $this->requireScope($apiKey, $this->requiredScope());
-
-        $name = $params['name'] ?? null;
-        $content = $params['content'] ?? null;
-
-        if (empty($name)) {
-            throw McpException::invalidParams('Parameter "name" is required.');
+        if ($err = $this->requireScope($request)) {
+            return $err;
         }
 
-        if (empty($content)) {
-            throw McpException::invalidParams('Parameter "content" is required.');
-        }
+        $params = $request->validate([
+            'name'              => 'required|string|max:255',
+            'content'           => 'required|string',
+            'description'       => 'nullable|string',
+            'confidence'        => 'nullable|string',
+            'sources'           => 'nullable|array',
+            'sources.*'         => 'integer',
+            'related'           => 'nullable|array',
+            'related.*'         => 'string',
+            'expected_revision' => 'nullable|integer',
+            'agent_id'          => 'nullable|string',
+        ]);
 
+        $name = $params['name'];
+        $content = $params['content'];
         $description = $params['description'] ?? null;
         $confidence = $params['confidence'] ?? null;
         $sources = $params['sources'] ?? null;
@@ -42,38 +56,26 @@ class ContextSetTool extends BaseTool
         $agentId = $params['agent_id'] ?? null;
 
         if ($confidence !== null && ! in_array($confidence, WikiPage::CONFIDENCE_LEVELS, true)) {
-            throw McpException::invalidParams(
-                'Parameter "confidence" must be one of: high, medium, low.'
-            );
+            return Response::error('Parameter "confidence" must be one of: high, medium, low.');
         }
 
         if ($sources !== null) {
-            if (! is_array($sources)) {
-                throw McpException::invalidParams('Parameter "sources" must be an array of drawer IDs.');
-            }
             foreach ($sources as $id) {
                 if (! is_int($id)) {
-                    throw McpException::invalidParams(
-                        'All elements in "sources" must be integers. Got: '.gettype($id)
-                    );
+                    return Response::error('All elements in "sources" must be integers. Got: '.gettype($id));
                 }
             }
             $sources = array_values(array_unique($sources));
             $existingCount = Drawer::whereIn('id', $sources)->count();
             if ($existingCount !== count($sources)) {
-                throw McpException::invalidParams('One or more source drawer IDs do not exist.');
+                return Response::error('One or more source drawer IDs do not exist.');
             }
         }
 
         if ($related !== null) {
-            if (! is_array($related)) {
-                throw McpException::invalidParams('Parameter "related" must be an array of wiki page names.');
-            }
             foreach ($related as $r) {
                 if (! is_string($r) || trim($r) === '') {
-                    throw McpException::invalidParams(
-                        'All elements in "related" must be non-empty strings.'
-                    );
+                    return Response::error('All elements in "related" must be non-empty strings.');
                 }
             }
         }
@@ -82,33 +84,31 @@ class ContextSetTool extends BaseTool
 
         $existing = WikiPage::withTrashed()->where('name', $name)->first();
 
-        // Fix: Restore soft-deleted pages on re-create
+        // Restore soft-deleted pages on re-create
         if ($existing !== null && $existing->trashed()) {
             $existing->restore();
         }
 
         $createdOrUpdated = $existing === null ? 'created' : 'updated';
 
-        // Item 15: Multi-agent conflict detection
+        // Multi-agent conflict detection
         if ($existing !== null && $expectedRevision !== null) {
             $currentRevision = $existing->revision_count ?? 1;
             if ($currentRevision !== $expectedRevision) {
-                throw new McpException(
+                return Response::error(
                     "Conflict: page '{$name}' was modified since expected revision {$expectedRevision} "
                     .'(current revision: '.$currentRevision.'). '
-                    .'Fetch the current page with context_get, merge your changes, then retry with expected_revision='.$currentRevision,
-                    -32010,
-                    409
+                    .'Fetch the current page with context_get, merge your changes, then retry with expected_revision='.$currentRevision
                 );
             }
         }
 
         $attributes = [
-            'title' => $existing?->title ?? $name,
-            'content' => $content,
-            'type' => $type,
-            'description' => $description ?? ($existing?->description),
-            'last_compiled_at' => now(),
+            'title'                         => $existing?->title ?? $name,
+            'content'                       => $content,
+            'type'                          => $type,
+            'description'                   => $description ?? ($existing?->description),
+            'last_compiled_at'              => now(),
             'pending_drawers_since_compile' => 0,
         ];
 
@@ -123,32 +123,30 @@ class ContextSetTool extends BaseTool
             $attributes['related'] = $related;
         }
 
-        // Item 2: Supersession — track content hash and revision count
-        $previousContent = null;
-        $previousRevision = null;
+        // Supersession — track content hash and revision count
         if ($existing !== null) {
             $previousContent = $existing->content ?? '';
-            $previousRevision = $existing->revision_count ?? 1;
             $attributes['previous_content_hash'] = hash('sha256', $previousContent);
-            $attributes['revision_count'] = $previousRevision + 1;
+            $attributes['revision_count'] = ($existing->revision_count ?? 1) + 1;
         } else {
             // Initialize revision_count=1 on new pages for consistent state
             $attributes['revision_count'] = 1;
         }
 
+        // Resolve agent string once (used in revision row and wiki log)
+        $resolvedAgent = $this->agentSource($request, $agentId);
+
         // Wrap optimistic locking + write + revision insert in a transaction
         // to prevent concurrent agents from writing the same revision number
-        $page = DB::transaction(function () use ($name, $attributes, $content, $agentId, $apiKey, $sources, $existing) {
+        $page = DB::transaction(function () use ($name, $attributes, $content, $resolvedAgent, $sources, $existing) {
             // Re-check revision inside transaction for true optimistic locking
             if ($existing !== null && isset($attributes['revision_count'])) {
                 $freshRevision = WikiPage::where('name', $name)->lockForUpdate()->value('revision_count') ?? 1;
                 $expectedPrev = $attributes['revision_count'] - 1;
                 if ($freshRevision !== $expectedPrev) {
-                    throw new McpException(
+                    throw new \RuntimeException(
                         "Conflict: page '{$name}' was modified concurrently (expected revision {$expectedPrev}, found {$freshRevision}). "
-                        .'Fetch the current page with context_get, merge your changes, then retry.',
-                        -32010,
-                        409
+                        .'Fetch the current page with context_get, merge your changes, then retry.'
                     );
                 }
             }
@@ -161,23 +159,23 @@ class ContextSetTool extends BaseTool
             // Recalculate confidence score
             $page->update(['confidence_score' => $page->calculateConfidenceScore()]);
 
-            // Item 12: Quality scoring (heuristics or LLM — LLM path gated by config)
+            // Quality scoring (heuristics or LLM — LLM path gated by config)
             $qualityService = app(QualityScoreService::class);
             $page->update(['quality_score' => $qualityService->score($content)]);
 
-            // Item 3: Mark source drawers as consolidated
+            // Mark source drawers as consolidated
             if (! empty($sources)) {
                 Drawer::whereIn('id', $sources)->update(['tier' => 'consolidated']);
             }
 
-            // Item 15: Store revision in audit log
+            // Store revision in audit log
             WikiPageRevision::create([
-                'page_name' => $page->name,
-                'revision' => $page->revision_count ?? 1,
-                'content' => $content,
+                'page_name'    => $page->name,
+                'revision'     => $page->revision_count ?? 1,
+                'content'      => $content,
                 'content_hash' => hash('sha256', $content),
-                'agent_id' => $agentId ?? $apiKey->name,
-                'written_at' => now(),
+                'agent_id'     => $resolvedAgent,
+                'written_at'   => now(),
             ]);
 
             return $page;
@@ -185,40 +183,54 @@ class ContextSetTool extends BaseTool
 
         // Extract entity from page name prefix (e.g., person:cooper → Entity type=person)
         $graphService = app(KnowledgeGraphService::class);
-        $entity = $graphService->extractEntity($page);
+        $graphService->extractEntity($page);
 
         // Wire related array into knowledge graph edges
         if (! empty($page->related)) {
             $graphService->syncReferencesFromRelated($page);
         }
 
-        $this->updateWikiIndex($apiKey);
-        $this->appendToWikiLog($name, $type, $createdOrUpdated, $apiKey);
+        $this->updateWikiIndex();
+        $this->appendToWikiLog($name, $type, $createdOrUpdated, $resolvedAgent);
 
         $result = [
-            'page_id' => $page->id,
+            'page_id'            => $page->id,
             'created_or_updated' => $createdOrUpdated,
-            'name' => $page->name,
-            'type' => $page->type,
-            'confidence_score' => $page->confidence_score,
-            'quality_score' => $page->quality_score,
-            'revision_count' => $page->revision_count,
+            'name'               => $page->name,
+            'type'               => $page->type,
+            'confidence_score'   => $page->confidence_score,
+            'quality_score'      => $page->quality_score,
+            'revision_count'     => $page->revision_count,
         ];
 
-        $this->logSession('context_set', $apiKey, [
+        BrainSessionLogger::log($request, 'context_set', [
             'name' => $name,
             'type' => $type,
         ], 1);
 
-        return $result;
+        return Response::structured($result);
+    }
+
+    public function schema(JsonSchema $s): array
+    {
+        return [
+            'name'              => $s->string()->required()->description('Wiki page name. Use a prefix for type inference (e.g. "person:alice", "project:beta", "concept:flow", "decision:arch"). No prefix defaults to "synthesis".'),
+            'content'           => $s->string()->required()->description('Full page content (Markdown).'),
+            'description'       => $s->string()->description('Short one-line summary of the page.'),
+            'confidence'        => $s->string()->description('Confidence level: high, medium, or low.'),
+            'sources'           => $s->array()->description('Array of palace drawer IDs this page was compiled from.'),
+            'related'           => $s->array()->description('Array of related wiki page names (graph edges).'),
+            'expected_revision' => $s->integer()->description('Optimistic locking: current revision_count. Provide to detect concurrent modifications.'),
+            'agent_id'          => $s->string()->description('Agent identifier override for the revision audit log. Defaults to OAuth client name.'),
+        ];
     }
 
     private function inferType(string $name): string
     {
         $prefixes = [
-            'person:' => 'person',
-            'project:' => 'project',
-            'concept:' => 'concept',
+            'person:'   => 'person',
+            'project:'  => 'project',
+            'concept:'  => 'concept',
             'decision:' => 'decision',
         ];
 
@@ -231,7 +243,7 @@ class ContextSetTool extends BaseTool
         return 'synthesis';
     }
 
-    private function updateWikiIndex(ApiKey $apiKey): void
+    private function updateWikiIndex(): void
     {
         $pages = WikiPage::orderBy('name')->get();
 
@@ -250,26 +262,26 @@ class ContextSetTool extends BaseTool
         WikiPage::updateOrCreate(
             ['name' => 'wiki/index'],
             [
-                'title' => 'Wiki Index',
-                'content' => $indexContent,
-                'type' => 'synthesis',
+                'title'            => 'Wiki Index',
+                'content'          => $indexContent,
+                'type'             => 'synthesis',
                 'last_compiled_at' => now(),
             ]
         );
     }
 
-    private function appendToWikiLog(string $name, string $type, string $action, ApiKey $apiKey): void
+    private function appendToWikiLog(string $name, string $type, string $action, string $agent): void
     {
         $logPage = WikiPage::where('name', 'wiki/log')->first();
         $timestamp = now()->toIso8601String();
-        $entry = "- {$timestamp} | {$action} | `{$name}` ({$type}) by {$apiKey->name}";
+        $entry = "- {$timestamp} | {$action} | `{$name}` ({$type}) by {$agent}";
 
         if ($logPage === null) {
             WikiPage::create([
-                'name' => 'wiki/log',
-                'title' => 'Wiki Log',
-                'type' => 'synthesis',
-                'content' => "# Wiki Log\n\n{$entry}",
+                'name'             => 'wiki/log',
+                'title'            => 'Wiki Log',
+                'type'             => 'synthesis',
+                'content'          => "# Wiki Log\n\n{$entry}",
                 'last_compiled_at' => now(),
             ]);
         } else {

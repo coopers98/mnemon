@@ -22,6 +22,7 @@ class MnemonServer extends Server
         \App\Mcp\Tools\ContextSetTool::class,
         \App\Mcp\Tools\ContextListTool::class,
         \App\Mcp\Tools\WikiLintTool::class,
+        \App\Mcp\Tools\WikiCompileTool::class,
     ];
     protected array $resources = [];
     protected array $prompts = [];

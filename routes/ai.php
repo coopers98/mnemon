@@ -1,5 +1,9 @@
 <?php
 
+use App\Mcp\Servers\MnemonServer;
 use Laravel\Mcp\Facades\Mcp;
 
-// Mcp::web('/mcp/demo', \App\Mcp\Servers\PublicServer::class);
+Mcp::oauthRoutes();
+
+Mcp::web('/mcp', MnemonServer::class)
+    ->middleware(['auth:api', 'throttle:mcp']);

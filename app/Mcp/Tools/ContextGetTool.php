@@ -2,83 +2,80 @@
 
 namespace App\Mcp\Tools;
 
-use App\Mcp\BaseTool;
-use App\Mcp\McpException;
-use App\Models\ApiKey;
+use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-class ContextGetTool extends BaseTool
+#[Description('Read a synthesized wiki page by name.')]
+#[IsReadOnly]
+class ContextGetTool extends Tool
 {
-    public function requiredScope(): string
+    use RequiresScope;
+
+    protected string $name = 'context_get';
+
+    protected string $scope = 'wiki.read';
+
+    public function handle(Request $request): Response|ResponseFactory
     {
-        return 'wiki:read';
-    }
-
-    public function execute(array $params, ApiKey $apiKey): array
-    {
-        $this->requireScope($apiKey, $this->requiredScope());
-
-        $name = $params['name'] ?? null;
-
-        if (empty($name)) {
-            throw McpException::invalidParams('Parameter "name" is required.');
+        if ($err = $this->requireScope($request)) {
+            return $err;
         }
 
-        $page = WikiPage::where('name', $name)->first();
+        $params = $request->validate(['name' => 'required|string|max:255']);
 
-        if ($page === null) {
-            $this->logSession('context_get', $apiKey, ['name' => $name], 0);
+        $page = WikiPage::where('name', $params['name'])->first();
+        if (! $page) {
+            BrainSessionLogger::log($request, 'context_get', $params, 0);
 
-            return [
-                'error' => 'Wiki page not found',
-                'name' => $name,
-            ];
+            return Response::error("Wiki page not found: {$params['name']}");
         }
 
-        // Update last_accessed_at on read
         $page->update(['last_accessed_at' => now()]);
 
-        $wordCount = $page->content ? str_word_count($page->content) : 0;
-
-        $result = [
-            'id' => $page->id,
-            'name' => $page->name,
-            'type' => $page->type,
-            'title' => $page->title,
-            'description' => $page->description,
-            'confidence' => $page->confidence,
-            'sources' => $page->sources,
-            'related' => $page->related,
+        $payload = [
+            'id'                            => $page->id,
+            'name'                          => $page->name,
+            'type'                          => $page->type,
+            'title'                         => $page->title,
+            'description'                   => $page->description,
+            'confidence'                    => $page->confidence,
+            'sources'                       => $page->sources,
+            'related'                       => $page->related,
+            'confidence_score'              => $page->confidence_score,
+            'source_count'                  => $page->source_count,
+            'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
+            'revision_count'                => $page->revision_count,
+            'content'                       => $page->content,
+            'last_compiled_at'              => $page->last_compiled_at?->toIso8601String(),
+            'last_accessed_at'              => $page->last_accessed_at?->toIso8601String(),
+            'word_count'                    => $page->content ? str_word_count($page->content) : 0,
         ];
 
-        // Only include source_details if the API key has palace:read scope
-        if (! empty($page->sources) && $apiKey->hasScope('palace:read')) {
-            $sourceDetails = [];
-            $drawers = Drawer::whereIn('id', $page->sources)->get();
-            foreach ($drawers as $drawer) {
-                $sourceDetails[] = [
-                    'id' => $drawer->id,
-                    'content_preview' => mb_substr($drawer->content, 0, 200),
-                    'source' => $drawer->source,
-                ];
-            }
-            $result['source_details'] = $sourceDetails;
+        $token = $request->user()?->currentAccessToken();
+        if ($token?->can('palace.read') && ! empty($page->sources)) {
+            $payload['source_details'] = Drawer::whereIn('id', $page->sources)->get()->map(fn ($d) => [
+                'id'              => $d->id,
+                'content_preview' => mb_substr($d->content, 0, 200),
+                'source'          => $d->source,
+            ])->all();
         }
 
-        $result += [
-            'confidence_score' => $page->confidence_score,
-            'source_count' => $page->source_count,
-            'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
-            'revision_count' => $page->revision_count,
-            'content' => $page->content,
-            'last_compiled_at' => $page->last_compiled_at?->toIso8601String(),
-            'last_accessed_at' => $page->last_accessed_at?->toIso8601String(),
-            'word_count' => $wordCount,
-        ];
+        BrainSessionLogger::log($request, 'context_get', $params, 1);
 
-        $this->logSession('context_get', $apiKey, ['name' => $name], 1);
+        return Response::structured($payload);
+    }
 
-        return $result;
+    public function schema(JsonSchema $s): array
+    {
+        return ['name' => $s->string()->required()->description('Wiki page name (e.g. "person:cooper").')];
     }
 }

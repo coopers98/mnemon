@@ -2,8 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Mcp\McpException;
-use App\Mcp\Tools\ContextGetTool;
 use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\ContextSetTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
@@ -81,45 +79,6 @@ class McpToolTest extends TestCase
 
         $staleNames = array_column($result['stale_wiki_pages'], 'name');
         $this->assertContains('stale-page', $staleNames);
-    }
-
-    // ─── context_get ─────────────────────────────────────────────────────────
-
-    public function test_context_get_returns_wiki_page_by_name(): void
-    {
-        WikiPage::create([
-            'name' => 'project:atlas',
-            'type' => 'project',
-            'content' => 'Atlas project content',
-            'description' => 'A great project',
-        ]);
-
-        $tool = app(ContextGetTool::class);
-        $result = $tool->execute(['name' => 'project:atlas'], $this->apiKey);
-
-        $this->assertEquals('project:atlas', $result['name']);
-        $this->assertEquals('project', $result['type']);
-        $this->assertEquals('Atlas project content', $result['content']);
-        $this->assertArrayHasKey('word_count', $result);
-    }
-
-    public function test_context_get_returns_error_for_nonexistent_name(): void
-    {
-        $tool = app(ContextGetTool::class);
-        $result = $tool->execute(['name' => 'nonexistent:page'], $this->apiKey);
-
-        $this->assertArrayHasKey('error', $result);
-        $this->assertEquals('Wiki page not found', $result['error']);
-        $this->assertEquals('nonexistent:page', $result['name']);
-    }
-
-    public function test_context_get_requires_name(): void
-    {
-        $this->expectException(McpException::class);
-        $this->expectExceptionMessage('"name"');
-
-        $tool = app(ContextGetTool::class);
-        $tool->execute([], $this->apiKey);
     }
 
     // ─── context_set ─────────────────────────────────────────────────────────

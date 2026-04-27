@@ -18,6 +18,7 @@ class MnemonServer extends Server
         \App\Mcp\Tools\DrawerAddTool::class,
         \App\Mcp\Tools\BrainStatusTool::class,
         \App\Mcp\Tools\PalaceWakeUpTool::class,
+        \App\Mcp\Tools\ContextGetTool::class,
     ];
     protected array $resources = [];
     protected array $prompts = [];

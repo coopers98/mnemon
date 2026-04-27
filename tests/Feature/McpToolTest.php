@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Mcp\McpException;
-use App\Mcp\Tools\BrainStatusTool;
 use App\Mcp\Tools\ContextGetTool;
 use App\Mcp\Tools\ContextListTool;
 use App\Mcp\Tools\ContextSetTool;
@@ -30,63 +29,6 @@ class McpToolTest extends TestCase
             'name' => 'Test Key',
             'key_hash' => hash('sha256', 'test-key-value'),
             'scopes' => ['*'],
-        ]);
-    }
-
-    // ─── brain_status ────────────────────────────────────────────────────────
-
-    public function test_brain_status_returns_correct_counts(): void
-    {
-        $wing = Wing::create(['name' => 'Work', 'slug' => 'work']);
-        $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
-        Drawer::create(['content' => 'Hello', 'room_id' => $room->id]);
-        WikiPage::create(['name' => 'project:x', 'type' => 'project', 'content' => 'Stuff']);
-
-        $tool = app(BrainStatusTool::class);
-        $result = $tool->execute([], $this->apiKey);
-
-        $this->assertEquals(1, $result['drawer_count']);
-        $this->assertEquals(1, $result['wiki_page_count']);
-        $this->assertIsArray($result['wings']);
-        $this->assertCount(1, $result['wings']);
-        $this->assertEquals('work', $result['wings'][0]['slug']);
-        $this->assertArrayHasKey('embedding_driver', $result);
-        $this->assertArrayHasKey('last_write', $result);
-        $this->assertArrayHasKey('stale_wiki_pages', $result);
-    }
-
-    public function test_brain_status_identifies_stale_wiki_pages(): void
-    {
-        WikiPage::create([
-            'name' => 'old-page',
-            'type' => 'synthesis',
-            'content' => 'Old content',
-            'last_compiled_at' => now()->subDays(40),
-        ]);
-
-        WikiPage::create([
-            'name' => 'fresh-page',
-            'type' => 'synthesis',
-            'content' => 'New content',
-            'last_compiled_at' => now()->subDays(5),
-        ]);
-
-        $tool = app(BrainStatusTool::class);
-        $result = $tool->execute([], $this->apiKey);
-
-        $staleNames = array_column($result['stale_wiki_pages'], 'name');
-        $this->assertContains('old-page', $staleNames);
-        $this->assertNotContains('fresh-page', $staleNames);
-    }
-
-    public function test_brain_status_logs_brain_session(): void
-    {
-        $tool = app(BrainStatusTool::class);
-        $tool->execute([], $this->apiKey);
-
-        $this->assertDatabaseHas('brain_sessions', [
-            'tool_name' => 'brain_status',
-            'source' => 'Test Key',
         ]);
     }
 

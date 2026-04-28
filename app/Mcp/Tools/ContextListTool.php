@@ -21,7 +21,6 @@ class ContextListTool extends Tool
 
     protected string $name = 'context_list';
 
-    protected string $scope = 'wiki.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {

@@ -24,7 +24,6 @@ class PalaceWakeUpTool extends Tool
 
     protected string $name = 'palace_wake_up';
 
-    protected string $scope = 'palace.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {

@@ -20,7 +20,7 @@ class PalaceWakeUpToolTest extends TestCase
         $r = Room::factory()->create(['wing_id' => $w->id]);
         Drawer::factory()->count(3)->create(['room_id' => $r->id]);
 
-        $resp = $this->mcpCall('palace_wake_up', [], ['palace.read']);
+        $resp = $this->mcpCall('palace_wake_up', [], ['mcp:use']);
         $resp->assertStatus(200);
         $body = $resp->json('result.structuredContent');
         $this->assertArrayHasKey('greeting', $body);
@@ -37,7 +37,7 @@ class PalaceWakeUpToolTest extends TestCase
         Drawer::factory()->create(['room_id' => $workRoom->id, 'content' => 'work-thing']);
         Drawer::factory()->create(['room_id' => $personalRoom->id, 'content' => 'personal-thing']);
 
-        $resp = $this->mcpCall('palace_wake_up', [], ['palace.read'], wingPatterns: ['work:*', 'work']);
+        $resp = $this->mcpCall('palace_wake_up', [], ['mcp:use'], wingPatterns: ['work:*', 'work']);
         $body = $resp->json('result.structuredContent');
         $contents = collect($body['recent_drawers'])->pluck('content')->all();
         // partial-match check since content may be truncated/decorated
@@ -47,19 +47,19 @@ class PalaceWakeUpToolTest extends TestCase
         $this->assertFalse($hasPersonalContent);
     }
 
-    public function test_rejects_token_without_palace_read_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $resp = $this->mcpCall('palace_wake_up', [], ['wiki.read']);
+        $resp = $this->mcpCall('palace_wake_up', [], []);
         $body = $resp->json();
         $this->assertTrue(
             isset($body['result']['isError']) && $body['result']['isError'] === true,
-            'Expected MCP error response for missing scope'
+            'Expected MCP error response for missing mcp:use scope'
         );
     }
 
     public function test_includes_greeting_text(): void
     {
-        $resp = $this->mcpCall('palace_wake_up', [], ['palace.read']);
+        $resp = $this->mcpCall('palace_wake_up', [], ['mcp:use']);
         $greeting = $resp->json('result.structuredContent.greeting');
         $this->assertNotEmpty($greeting);
         $this->assertIsString($greeting);
@@ -71,7 +71,7 @@ class PalaceWakeUpToolTest extends TestCase
         $r = Room::factory()->create(['wing_id' => $w->id]);
         Drawer::factory()->create(['room_id' => $r->id]);
 
-        $this->mcpCall('palace_wake_up', [], ['palace.read']);
+        $this->mcpCall('palace_wake_up', [], ['mcp:use']);
 
         $session = BrainSession::latest('id')->first();
         $this->assertEquals('palace_wake_up', $session->tool_name);

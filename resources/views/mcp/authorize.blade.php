@@ -62,7 +62,7 @@
                 </h3>
 
                 <p class="text-sm text-muted-foreground text-center mt-2">
-                    Review the permissions and palace wings this application will be able to access.
+                    Authorize {{ $client->name }} to access your Mnemon brain. Choose which wings this agent can see.
                 </p>
             </div>
 
@@ -73,36 +73,15 @@
                 <input type="hidden" name="client_id" value="{{ $client->id }}">
                 <input type="hidden" name="auth_token" value="{{ $authToken }}">
 
+                {{-- mcp:use is the single OAuth scope; submit it so Passport records the grant --}}
+                <input type="hidden" name="scopes[]" value="mcp:use">
+
                 <div class="px-6 pb-2 space-y-5">
                     <!-- User Info -->
                     <div class="rounded-lg border p-4 bg-muted/50">
                         <p class="text-sm text-muted-foreground mb-1">Logged in as:</p>
                         <p class="font-medium text-sm">{{ $user->email }}</p>
                     </div>
-
-                    <!-- Scopes / Permissions -->
-                    @if(count($scopes) > 0)
-                        <div class="space-y-2">
-                            <p class="text-sm font-medium">Permissions to grant:</p>
-                            <div class="rounded-lg border divide-y">
-                                @foreach($scopes as $scope)
-                                    <label class="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors">
-                                        <input
-                                            type="checkbox"
-                                            name="scopes[]"
-                                            value="{{ $scope->id }}"
-                                            checked
-                                            class="mt-0.5 h-4 w-4 rounded border-input text-primary focus:ring-primary"
-                                        >
-                                        <div class="flex-1 min-w-0">
-                                            <span class="text-sm font-medium">{{ $scope->id }}</span>
-                                            <p class="text-xs text-muted-foreground mt-0.5">{{ $scope->description }}</p>
-                                        </div>
-                                    </label>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
 
                     <!-- Wing Restrictions -->
                     <div class="space-y-2">

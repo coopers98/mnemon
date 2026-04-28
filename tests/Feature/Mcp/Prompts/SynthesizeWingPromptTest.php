@@ -12,7 +12,7 @@ class SynthesizeWingPromptTest extends TestCase
 
     public function test_prompt_appears_in_list(): void
     {
-        $r = $this->mcpPromptList(['wiki.write']);
+        $r = $this->mcpPromptList(['mcp:use']);
         $r->assertStatus(200);
         $names = collect($r->json('result.prompts'))->pluck('name')->all();
         $this->assertContains('synthesize_wing', $names);
@@ -20,7 +20,7 @@ class SynthesizeWingPromptTest extends TestCase
 
     public function test_prompt_renders_with_argument(): void
     {
-        $r = $this->mcpPromptGet('synthesize_wing', ['wing_slug' => 'work'], ['wiki.write']);
+        $r = $this->mcpPromptGet('synthesize_wing', ['wing_slug' => 'work'], ['mcp:use']);
         $r->assertStatus(200);
         $messages = $r->json('result.messages');
         $this->assertNotEmpty($messages);
@@ -28,10 +28,10 @@ class SynthesizeWingPromptTest extends TestCase
         $this->assertStringContainsString('work', $combined);
     }
 
-    public function test_prompt_hidden_for_token_without_scope(): void
+    public function test_prompt_hidden_for_token_without_mcp_use(): void
     {
-        $r = $this->mcpPromptList(['palace.read']);
-        $names = collect($r->json('result.prompts'))->pluck('name')->all();
+        $r = $this->mcpPromptList([]);
+        $names = collect($r->json('result.prompts') ?? [])->pluck('name')->all();
         $this->assertNotContains('synthesize_wing', $names);
     }
 }

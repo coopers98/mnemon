@@ -15,7 +15,7 @@ class ContextListToolTest extends TestCase
     {
         WikiPage::factory()->count(3)->create();
 
-        $r = $this->mcpCall('context_list', [], ['wiki.read']);
+        $r = $this->mcpCall('context_list', [], ['mcp:use']);
         $r->assertStatus(200);
         $this->assertCount(3, $r->json('result.structuredContent.pages'));
     }
@@ -25,15 +25,15 @@ class ContextListToolTest extends TestCase
         WikiPage::factory()->create(['name' => 'person:a', 'type' => 'person']);
         WikiPage::factory()->create(['name' => 'concept:b', 'type' => 'concept']);
 
-        $r = $this->mcpCall('context_list', ['type' => 'person'], ['wiki.read']);
+        $r = $this->mcpCall('context_list', ['type' => 'person'], ['mcp:use']);
         $pages = $r->json('result.structuredContent.pages');
         $this->assertCount(1, $pages);
         $this->assertEquals('person:a', $pages[0]['name']);
     }
 
-    public function test_rejects_missing_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('context_list', [], ['palace.read']);
+        $r = $this->mcpCall('context_list', [], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -48,7 +48,7 @@ class ContextListToolTest extends TestCase
             'content' => 'one two three',
         ]);
 
-        $r = $this->mcpCall('context_list', [], ['wiki.read']);
+        $r = $this->mcpCall('context_list', [], ['mcp:use']);
         $page = $r->json('result.structuredContent.pages.0');
 
         $this->assertEquals('concept:test', $page['name']);
@@ -65,7 +65,7 @@ class ContextListToolTest extends TestCase
     {
         WikiPage::factory()->count(10)->create();
 
-        $r = $this->mcpCall('context_list', ['limit' => 3], ['wiki.read']);
+        $r = $this->mcpCall('context_list', ['limit' => 3], ['mcp:use']);
         $r->assertStatus(200);
         $this->assertCount(3, $r->json('result.structuredContent.pages'));
     }

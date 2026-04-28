@@ -56,8 +56,8 @@ Mnemon's MCP endpoint is `POST /mcp` (Streamable HTTP, JSON-RPC 2.0), authentica
 
 ```bash
 claude mcp add --transport http mnemon https://mnemon.example.com/mcp
-# Opens a browser window — log in, grant scopes (palace.read, wiki.read, etc.),
-# optionally restrict to specific wings. After consent, the token is stored.
+# Opens a browser window — log in, choose which wings to grant access to.
+# After consent, the token is stored. Scope: mcp:use (single scope, auto-granted).
 ```
 
 **Direct curl** — obtain a Passport bearer token first (e.g. via `php artisan tinker` or the personal-access-token flow), then:
@@ -180,18 +180,20 @@ Content is hashed with SHA-256 and stored in `metadata.content_hash`. On re-impo
 
 ## MCP Tool Reference
 
-| Tool | Scope | Description |
-|------|-------|-------------|
-| `brain_status` | palace.read | Drawer/wiki counts, wings, pending updates |
-| `palace_wake_up` | palace.read | Recent activity, pages needing compilation |
-| `drawer_add` | palace.write | Store verbatim content |
-| `drawer_search` | palace.read | Hybrid search (semantic + fulltext + temporal) |
-| `drawer_get` | palace.read | Fetch drawer by ID |
-| `context_get` | wiki.read | Fetch wiki page (+ source previews if palace.read) |
-| `context_set` | wiki.write | Create/update wiki page with metadata |
-| `context_list` | wiki.read | List all wiki pages |
-| `wiki_lint` | wiki.read | Health check (stale, orphan, empty, low-confidence) |
-| `wiki_compile` | palace.read | Gather drawers for wiki page compilation |
+All tools require the single OAuth scope `mcp:use`. Wing restrictions on the token provide per-agent isolation.
+
+| Tool | Description |
+|------|-------------|
+| `brain_status` | Drawer/wiki counts, wings, pending updates |
+| `palace_wake_up` | Recent activity, pages needing compilation |
+| `drawer_add` | Store verbatim content |
+| `drawer_search` | Hybrid search (semantic + fulltext + temporal) |
+| `drawer_get` | Fetch drawer by ID |
+| `context_get` | Fetch wiki page (includes source previews) |
+| `context_set` | Create/update wiki page with metadata |
+| `context_list` | List all wiki pages |
+| `wiki_lint` | Health check (stale, orphan, empty, low-confidence) |
+| `wiki_compile` | Gather drawers for wiki page compilation |
 
 ---
 

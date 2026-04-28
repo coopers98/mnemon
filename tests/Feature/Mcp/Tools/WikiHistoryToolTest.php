@@ -33,15 +33,9 @@ class WikiHistoryToolTest extends TestCase
     // Scope enforcement
     // -----------------------------------------------------------------------
 
-    public function test_rejects_palace_read_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['palace.read']);
-        $this->assertTrue($r->json('result.isError') ?? false);
-    }
-
-    public function test_rejects_wiki_write_scope(): void
-    {
-        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -51,7 +45,7 @@ class WikiHistoryToolTest extends TestCase
 
     public function test_name_parameter_is_required(): void
     {
-        $r = $this->mcpCall('wiki_history', [], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', [], ['mcp:use']);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -61,7 +55,7 @@ class WikiHistoryToolTest extends TestCase
 
     public function test_returns_error_for_unknown_page(): void
     {
-        $r = $this->mcpCall('wiki_history', ['name' => 'person:nobody'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'person:nobody'], ['mcp:use']);
 
         $this->assertTrue($r->json('result.isError') ?? false);
         $errorText = $r->json('result.content.0.text') ?? '';
@@ -70,7 +64,7 @@ class WikiHistoryToolTest extends TestCase
 
     public function test_logs_brain_session_for_missing_page(): void
     {
-        $this->mcpCall('wiki_history', ['name' => 'person:ghost'], ['wiki.read']);
+        $this->mcpCall('wiki_history', ['name' => 'person:ghost'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_history']);
     }
@@ -86,7 +80,7 @@ class WikiHistoryToolTest extends TestCase
         $this->makeRevision('project:atlas', 2, ['agent_id' => 'agent-b', 'content_hash' => hash('sha256', 'v2')]);
         $this->makeRevision('project:atlas', 3, ['agent_id' => 'agent-c', 'content_hash' => hash('sha256', 'v3')]);
 
-        $r = $this->mcpCall('wiki_history', ['name' => 'project:atlas'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'project:atlas'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -108,7 +102,7 @@ class WikiHistoryToolTest extends TestCase
         ]);
         $this->makeRevision('concept:flow', 1);
 
-        $r = $this->mcpCall('wiki_history', ['name' => 'concept:flow'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'concept:flow'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -129,7 +123,7 @@ class WikiHistoryToolTest extends TestCase
             'written_at' => '2026-04-01 12:00:00',
         ]);
 
-        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['mcp:use']);
         $r->assertStatus(200);
 
         $rev = $r->json('result.structuredContent.revisions.0');
@@ -146,7 +140,7 @@ class WikiHistoryToolTest extends TestCase
             $this->makeRevision('decision:arch', $rev);
         }
 
-        $r = $this->mcpCall('wiki_history', ['name' => 'decision:arch', 'limit' => 2], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'decision:arch', 'limit' => 2], ['mcp:use']);
         $r->assertStatus(200);
 
         $this->assertCount(2, $r->json('result.structuredContent.revisions'));
@@ -156,7 +150,7 @@ class WikiHistoryToolTest extends TestCase
     {
         $this->makePage('synthesis:base');
 
-        $r = $this->mcpCall('wiki_history', ['name' => 'synthesis:base'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_history', ['name' => 'synthesis:base'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -173,7 +167,7 @@ class WikiHistoryToolTest extends TestCase
     {
         $this->makePage('person:bob');
 
-        $this->mcpCall('wiki_history', ['name' => 'person:bob'], ['wiki.read']);
+        $this->mcpCall('wiki_history', ['name' => 'person:bob'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_history']);
     }

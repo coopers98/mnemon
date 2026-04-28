@@ -26,7 +26,6 @@ class WikiCompileTool extends Tool
 
     protected string $name = 'wiki_compile';
 
-    protected string $scope = 'wiki.write';
 
     public function handle(Request $request): Response|ResponseFactory
     {

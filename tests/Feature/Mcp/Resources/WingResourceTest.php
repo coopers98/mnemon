@@ -15,15 +15,15 @@ class WingResourceTest extends TestCase
 
     public function test_resource_lists_for_palace_read_token(): void
     {
-        $r = $this->mcpResourceList(['palace.read']);
+        $r = $this->mcpResourceList(['mcp:use']);
         $r->assertStatus(200);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertContains('mnemon://wing/{slug}', $uris);
     }
 
-    public function test_resource_hidden_for_token_without_palace_read(): void
+    public function test_resource_hidden_for_token_without_mcp_use(): void
     {
-        $r = $this->mcpResourceList(['wiki.read']);
+        $r = $this->mcpResourceList([]);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertNotContains('mnemon://wing/{slug}', $uris);
     }
@@ -36,7 +36,7 @@ class WingResourceTest extends TestCase
         Drawer::factory()->count(3)->create(['room_id' => $room1->id]);
         Drawer::factory()->count(1)->create(['room_id' => $room2->id]);
 
-        $r = $this->mcpResourceRead('mnemon://wing/work', ['palace.read']);
+        $r = $this->mcpResourceRead('mnemon://wing/work', ['mcp:use']);
         $r->assertStatus(200);
         $body = $r->json('result.contents.0');
         $this->assertEquals('mnemon://wing/work', $body['uri']);
@@ -51,7 +51,7 @@ class WingResourceTest extends TestCase
     {
         Wing::factory()->create(['slug' => 'personal', 'name' => 'Personal']);
 
-        $r = $this->mcpResourceRead('mnemon://wing/personal', ['palace.read'], wingPatterns: ['work:*']);
+        $r = $this->mcpResourceRead('mnemon://wing/personal', ['mcp:use'], wingPatterns: ['work:*']);
         $body = $r->json();
         $this->assertTrue(($body['result']['isError'] ?? false) || isset($body['error']));
     }

@@ -46,7 +46,7 @@ class OAuthFlowTest extends TestCase
             'client_id' => $client->id,
             'redirect_uri' => 'http://localhost/cb',
             'response_type' => 'code',
-            'scope' => 'palace.read',
+            'scope' => 'mcp:use',
             'state' => 'st',
         ]));
         $authResp->assertStatus(200);
@@ -60,7 +60,7 @@ class OAuthFlowTest extends TestCase
         $postData = [
             'auth_token' => $authToken,
             'client_id' => $client->id,
-            'scopes' => ['palace.read'],
+            'scopes' => ['mcp:use'],
         ];
         if ($allWings) {
             $postData['all_wings'] = '1';

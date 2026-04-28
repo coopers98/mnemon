@@ -39,13 +39,6 @@ class AppServiceProvider extends ServiceProvider
         Passport::refreshTokensExpireIn(now()->addDays(90));
         Passport::personalAccessTokensExpireIn(now()->addDays(90));
 
-        Passport::tokensCan([
-            'palace.read' => 'Read drawers and palace metadata',
-            'palace.write' => 'Add drawers',
-            'wiki.read' => 'Read wiki pages, history, graph',
-            'wiki.write' => 'Compile, lint, and write wiki pages',
-        ]);
-
         Passport::authorizationView(fn ($p) => view('mcp.authorize', array_merge($p, [
             'wings' => Wing::orderBy('slug')->get(),
         ])));

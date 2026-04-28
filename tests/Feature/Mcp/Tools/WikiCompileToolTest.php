@@ -37,15 +37,9 @@ class WikiCompileToolTest extends TestCase
     // Scope enforcement
     // -----------------------------------------------------------------------
 
-    public function test_rejects_wiki_read_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('wiki_compile', ['name' => 'project:atlas'], ['wiki.read']);
-        $this->assertTrue($r->json('result.isError') ?? false);
-    }
-
-    public function test_rejects_palace_read_scope(): void
-    {
-        $r = $this->mcpCall('wiki_compile', ['name' => 'project:atlas'], ['palace.read']);
+        $r = $this->mcpCall('wiki_compile', ['name' => 'project:atlas'], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -60,7 +54,7 @@ class WikiCompileToolTest extends TestCase
         $this->makeDrawer($room->id, 'raw');
         $this->makeDrawer($room->id, 'reviewed');
 
-        $r = $this->mcpCall('wiki_compile', ['name' => 'project:atlas'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_compile', ['name' => 'project:atlas'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -82,7 +76,7 @@ class WikiCompileToolTest extends TestCase
             'revision_count' => 3,
         ]);
 
-        $r = $this->mcpCall('wiki_compile', ['name' => 'person:alice'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_compile', ['name' => 'person:alice'], ['mcp:use']);
         $r->assertStatus(200);
 
         $page = $r->json('result.structuredContent.page');
@@ -98,7 +92,7 @@ class WikiCompileToolTest extends TestCase
         $room = $this->makeRoom($wing->id);
         $drawer = $this->makeDrawer($room->id, 'raw');
 
-        $this->mcpCall('wiki_compile', ['name' => 'concept:flow'], ['wiki.write']);
+        $this->mcpCall('wiki_compile', ['name' => 'concept:flow'], ['mcp:use']);
 
         $this->assertDatabaseHas('drawers', ['id' => $drawer->id, 'tier' => 'reviewed']);
     }
@@ -109,7 +103,7 @@ class WikiCompileToolTest extends TestCase
         $room = $this->makeRoom($wing->id);
         $drawer = $this->makeDrawer($room->id, 'reviewed');
 
-        $this->mcpCall('wiki_compile', ['name' => 'concept:loop'], ['wiki.write']);
+        $this->mcpCall('wiki_compile', ['name' => 'concept:loop'], ['mcp:use']);
 
         $this->assertDatabaseHas('drawers', ['id' => $drawer->id, 'tier' => 'reviewed']);
     }
@@ -120,7 +114,7 @@ class WikiCompileToolTest extends TestCase
 
     public function test_returns_error_when_wing_not_found(): void
     {
-        $r = $this->mcpCall('wiki_compile', ['name' => 'project:nonexistent'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_compile', ['name' => 'project:nonexistent'], ['mcp:use']);
 
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
@@ -138,7 +132,7 @@ class WikiCompileToolTest extends TestCase
         $room = $this->makeRoom($wing->id);
         $this->makeDrawer($room->id);
 
-        $r = $this->mcpCall('wiki_compile', ['name' => 'decision:arch'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_compile', ['name' => 'decision:arch'], ['mcp:use']);
         $r->assertStatus(200);
 
         $agent = $r->json('result.structuredContent.agent');
@@ -154,7 +148,7 @@ class WikiCompileToolTest extends TestCase
         $r = $this->mcpCall('wiki_compile', [
             'name' => 'decision:build',
             'agent_id' => 'custom-agent-v2',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
         $r->assertStatus(200);
 
         $agent = $r->json('result.structuredContent.agent');
@@ -171,14 +165,14 @@ class WikiCompileToolTest extends TestCase
         $room = $this->makeRoom($wing->id);
         $this->makeDrawer($room->id);
 
-        $this->mcpCall('wiki_compile', ['name' => 'synthesis:base'], ['wiki.write']);
+        $this->mcpCall('wiki_compile', ['name' => 'synthesis:base'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_compile']);
     }
 
     public function test_brain_session_written_even_for_missing_wing(): void
     {
-        $this->mcpCall('wiki_compile', ['name' => 'project:ghost'], ['wiki.write']);
+        $this->mcpCall('wiki_compile', ['name' => 'project:ghost'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_compile']);
     }
@@ -196,8 +190,8 @@ class WikiCompileToolTest extends TestCase
 
         WikiPage::factory()->create(['name' => 'concept:seq', 'revision_count' => 5]);
 
-        $r1 = $this->mcpCall('wiki_compile', ['name' => 'concept:seq'], ['wiki.write']);
-        $r2 = $this->mcpCall('wiki_compile', ['name' => 'concept:seq'], ['wiki.write']);
+        $r1 = $this->mcpCall('wiki_compile', ['name' => 'concept:seq'], ['mcp:use']);
+        $r2 = $this->mcpCall('wiki_compile', ['name' => 'concept:seq'], ['mcp:use']);
 
         $r1->assertStatus(200);
         $r2->assertStatus(200);

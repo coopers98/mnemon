@@ -20,7 +20,7 @@ class DrawerSearchToolTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $wing->id]);
         Drawer::factory()->create(['room_id' => $room->id, 'content' => 'meeting with dorothy vaughan']);
 
-        $response = $this->mcpCall('drawer_search', ['query' => 'dorothy', 'limit' => 5], ['palace.read']);
+        $response = $this->mcpCall('drawer_search', ['query' => 'dorothy', 'limit' => 5], ['mcp:use']);
 
         $response->assertStatus(200);
         $results = $response->json('result.structuredContent.results');
@@ -28,13 +28,13 @@ class DrawerSearchToolTest extends TestCase
         $this->assertStringContainsString('dorothy', strtolower($results[0]['content']));
     }
 
-    public function test_rejects_token_without_palace_read_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $response = $this->mcpCall('drawer_search', ['query' => 'foo'], ['wiki.read']);
+        $response = $this->mcpCall('drawer_search', ['query' => 'foo'], []);
         $body = $response->json();
         $this->assertTrue(
             isset($body['result']['isError']) && $body['result']['isError'] === true,
-            'Expected MCP error response for missing scope'
+            'Expected MCP error response for missing mcp:use scope'
         );
     }
 
@@ -43,7 +43,7 @@ class DrawerSearchToolTest extends TestCase
         $response = $this->mcpCall(
             'drawer_search',
             ['query' => 'foo', 'wing' => 'personal'],
-            ['palace.read'],
+            ['mcp:use'],
             wingPatterns: ['work:*']
         );
 
@@ -60,7 +60,7 @@ class DrawerSearchToolTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $wing->id]);
         Drawer::factory()->create(['room_id' => $room->id, 'content' => 'foo']);
 
-        $this->mcpCall('drawer_search', ['query' => 'foo'], ['palace.read']);
+        $this->mcpCall('drawer_search', ['query' => 'foo'], ['mcp:use']);
 
         $session = BrainSession::latest('id')->first();
         $this->assertEquals('drawer_search', $session->tool_name);

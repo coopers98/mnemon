@@ -20,7 +20,7 @@ class ContextSetToolTest extends TestCase
         $r = $this->mcpCall('context_set', [
             'name' => 'concept:second-brain',
             'content' => 'A persistent knowledge store.',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $body = $r->json('result.structuredContent');
@@ -31,7 +31,7 @@ class ContextSetToolTest extends TestCase
 
     public function test_revision_audit_uses_oauth_client_name_as_agent_id(): void
     {
-        $this->mcpCall('context_set', ['name' => 'foo', 'content' => 'bar'], ['wiki.write']);
+        $this->mcpCall('context_set', ['name' => 'foo', 'content' => 'bar'], ['mcp:use']);
 
         $rev = WikiPageRevision::latest('id')->first();
         $this->assertEquals('Test Client', $rev->agent_id);
@@ -43,7 +43,7 @@ class ContextSetToolTest extends TestCase
             'name' => 'concept:test',
             'content' => 'hello',
             'agent_id' => 'my-custom-agent',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $rev = WikiPageRevision::latest('id')->first();
         $this->assertEquals('my-custom-agent', $rev->agent_id);
@@ -57,7 +57,7 @@ class ContextSetToolTest extends TestCase
             'name' => 'concept:x',
             'content' => 'new',
             'expected_revision' => 1,
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
@@ -65,9 +65,9 @@ class ContextSetToolTest extends TestCase
         $this->assertStringContainsString('Conflict', $errorText);
     }
 
-    public function test_rejects_missing_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('context_set', ['name' => 'foo', 'content' => 'bar'], ['wiki.read']);
+        $r = $this->mcpCall('context_set', ['name' => 'foo', 'content' => 'bar'], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -78,7 +78,7 @@ class ContextSetToolTest extends TestCase
         $r = $this->mcpCall('context_set', [
             'name' => 'project:x',
             'content' => 'Updated content',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $body = $r->json('result.structuredContent');
@@ -93,7 +93,7 @@ class ContextSetToolTest extends TestCase
         $r = $this->mcpCall('context_set', [
             'name' => 'concept:inc',
             'content' => 'new content',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $body = $r->json('result.structuredContent');
         $this->assertEquals(2, $body['revision_count']);
@@ -110,7 +110,7 @@ class ContextSetToolTest extends TestCase
         ];
 
         foreach ($cases as [$name, $expectedType]) {
-            $r = $this->mcpCall('context_set', ['name' => $name, 'content' => 'content'], ['wiki.write']);
+            $r = $this->mcpCall('context_set', ['name' => $name, 'content' => 'content'], ['mcp:use']);
             $body = $r->json('result.structuredContent');
             $this->assertEquals($expectedType, $body['type'], "Expected type {$expectedType} for name {$name}");
         }
@@ -118,7 +118,7 @@ class ContextSetToolTest extends TestCase
 
     public function test_auto_updates_wiki_index(): void
     {
-        $this->mcpCall('context_set', ['name' => 'project:gamma', 'content' => 'Gamma project'], ['wiki.write']);
+        $this->mcpCall('context_set', ['name' => 'project:gamma', 'content' => 'Gamma project'], ['mcp:use']);
 
         $this->assertDatabaseHas('wiki_pages', ['name' => 'wiki/index']);
         $indexPage = WikiPage::where('name', 'wiki/index')->first();
@@ -127,8 +127,8 @@ class ContextSetToolTest extends TestCase
 
     public function test_appends_to_wiki_log(): void
     {
-        $this->mcpCall('context_set', ['name' => 'concept:x', 'content' => 'X'], ['wiki.write']);
-        $this->mcpCall('context_set', ['name' => 'concept:y', 'content' => 'Y'], ['wiki.write']);
+        $this->mcpCall('context_set', ['name' => 'concept:x', 'content' => 'X'], ['mcp:use']);
+        $this->mcpCall('context_set', ['name' => 'concept:y', 'content' => 'Y'], ['mcp:use']);
 
         $logPage = WikiPage::where('name', 'wiki/log')->first();
         $this->assertNotNull($logPage);
@@ -146,7 +146,7 @@ class ContextSetToolTest extends TestCase
             'name' => 'concept:sourced',
             'content' => 'From a drawer',
             'sources' => [$drawer->id],
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $this->assertDatabaseHas('drawers', ['id' => $drawer->id, 'tier' => 'consolidated']);
     }
@@ -159,7 +159,7 @@ class ContextSetToolTest extends TestCase
         $r = $this->mcpCall('context_set', [
             'name' => 'concept:deleted',
             'content' => 'Restored content',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $this->assertDatabaseHas('wiki_pages', ['name' => 'concept:deleted', 'deleted_at' => null]);
@@ -171,7 +171,7 @@ class ContextSetToolTest extends TestCase
             'name' => 'concept:bad-sources',
             'content' => 'content',
             'sources' => [99999],
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
@@ -185,7 +185,7 @@ class ContextSetToolTest extends TestCase
             'name' => 'concept:conf',
             'content' => 'content',
             'confidence' => 'very-high',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
@@ -196,7 +196,7 @@ class ContextSetToolTest extends TestCase
         $this->mcpCall('context_set', [
             'name' => 'person:alice',
             'content' => 'Alice is a developer.',
-        ], ['wiki.write']);
+        ], ['mcp:use']);
 
         $this->assertDatabaseHas('wiki_page_revisions', [
             'page_name' => 'person:alice',

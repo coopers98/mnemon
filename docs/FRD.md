@@ -26,18 +26,13 @@ Primary consumer: OpenClaw (dogfood), then Laravel developers via Composer packa
 
 **Phase 1: Single user with OAuth-scoped tokens.** Filament admin protected by a single admin user.
 
-**Agents** access Mnemon via MCP, authenticated with OAuth 2.1 bearer tokens issued via Laravel Passport. Each token carries coarse permission scopes and optional per-token wing restrictions captured at the consent screen.
+**Agents** access Mnemon via MCP, authenticated with OAuth 2.1 bearer tokens issued via Laravel Passport. Each token carries the single scope `mcp:use` and optional per-token wing restrictions captured at the consent screen.
 
-### 2.1 OAuth Scopes
+### 2.1 OAuth Scope
 
-| Scope | Allows |
-|---|---|
-| `palace.read` | `drawer_search`, `drawer_get`, `brain_status`, `palace_wake_up`, `wiki_compile` |
-| `palace.write` | `drawer_add` |
-| `wiki.read` | `context_get`, `context_list`, `wiki_lint`, `wiki_graph`, `wiki_history` |
-| `wiki.write` | `context_set` |
+Single scope: **`mcp:use`** — required for all 12 MCP tools and all resource/prompt endpoints. The `laravel/mcp` package advertises only this scope to DCR clients. No per-operation scopes exist.
 
-**Wing restrictions (optional):** A token can be limited to specific wings at the OAuth consent screen. Patterns support wildcards (e.g. `project:*`). Null = unrestricted.
+**Wing restrictions (the real isolation mechanism):** A token can be limited to specific wings at the OAuth consent screen. Patterns support wildcards (e.g. `project:*`). Null = unrestricted. Wing checks run before the tool executes — a restricted token cannot see outside its allowed wings regardless of which tool is called.
 
 **Client management:** Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. Access tokens are revocable via the Filament admin panel.
 
@@ -55,7 +50,7 @@ mcp_token_restrictions
   created_at
 ```
 
-Access tokens expire after 1 hour; refresh tokens after 90 days. Every MCP request must include a valid, non-revoked bearer token with the required scope. All MCP calls are logged to `brain_sessions`.
+Access tokens expire after 1 hour; refresh tokens after 90 days. Every MCP request must include a valid, non-revoked bearer token with the `mcp:use` scope. All MCP calls are logged to `brain_sessions`.
 
 **Phase 3:** Multi-user and tenant isolation.
 

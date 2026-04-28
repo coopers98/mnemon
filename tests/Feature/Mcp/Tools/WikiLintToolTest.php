@@ -15,15 +15,9 @@ class WikiLintToolTest extends TestCase
     // Scope enforcement
     // -----------------------------------------------------------------------
 
-    public function test_rejects_wiki_read_only_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('wiki_lint', [], ['wiki.read']);
-        $this->assertTrue($r->json('result.isError') ?? false);
-    }
-
-    public function test_rejects_palace_read_scope(): void
-    {
-        $r = $this->mcpCall('wiki_lint', [], ['palace.read']);
+        $r = $this->mcpCall('wiki_lint', [], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -33,7 +27,7 @@ class WikiLintToolTest extends TestCase
 
     public function test_returns_empty_report_when_no_pages(): void
     {
-        $r = $this->mcpCall('wiki_lint', [], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', [], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -52,7 +46,7 @@ class WikiLintToolTest extends TestCase
     {
         WikiPage::factory()->create(['name' => 'concept:stub', 'content' => 'too short']);
 
-        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -72,7 +66,7 @@ class WikiLintToolTest extends TestCase
             'content' => str_repeat('x', 200),
         ]);
 
-        $r = $this->mcpCall('wiki_lint', ['focus' => 'stale'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', ['focus' => 'stale'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -93,7 +87,7 @@ class WikiLintToolTest extends TestCase
             'last_compiled_at' => now(),
         ]);
 
-        $r = $this->mcpCall('wiki_lint', ['focus' => 'low_confidence'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', ['focus' => 'low_confidence'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -110,7 +104,7 @@ class WikiLintToolTest extends TestCase
         // empty page → warning
         WikiPage::factory()->create(['name' => 'concept:stub2', 'content' => 'tiny', 'last_compiled_at' => now(), 'confidence_score' => 0.9]);
 
-        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty'], ['mcp:use']);
         $r->assertStatus(200);
 
         $summary = $r->json('result.structuredContent.summary');
@@ -132,7 +126,7 @@ class WikiLintToolTest extends TestCase
             'confidence_score' => 0.9,
         ]);
 
-        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty', 'auto_fix' => true], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', ['focus' => 'empty', 'auto_fix' => true], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -145,7 +139,7 @@ class WikiLintToolTest extends TestCase
     {
         WikiPage::factory()->create(['name' => 'concept:stub3', 'content' => 'stub']);
 
-        $r = $this->mcpCall('wiki_lint', [], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', [], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -158,7 +152,7 @@ class WikiLintToolTest extends TestCase
 
     public function test_writes_brain_session_row(): void
     {
-        $r = $this->mcpCall('wiki_lint', [], ['wiki.write']);
+        $r = $this->mcpCall('wiki_lint', [], ['mcp:use']);
         $r->assertStatus(200);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_lint']);

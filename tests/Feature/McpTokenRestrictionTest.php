@@ -21,7 +21,7 @@ class McpTokenRestrictionTest extends TestCase
     public function test_can_persist_wing_patterns_for_a_token(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('test', ['palace.read'])->token;
+        $token = $user->createToken('test', ['mcp:use'])->token;
 
         $restriction = McpTokenRestriction::create([
             'access_token_id' => $token->id,

@@ -41,7 +41,7 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 - **Verbatim retention.** No lossy summarisation at ingest. The drawer you stored is the drawer you retrieve.
 - **Hybrid retrieval.** Semantic, keyword, and recency together — so finding "that thing about retries last week" works even when the keyword is misremembered and the meeting note didn't use the same words.
 - **Synthesis without losing source.** The wiki is the compiled view; the palace remains the canonical record. Wiki pages can be regenerated from drawers; the reverse is not true.
-- **Per-agent authorisation.** OAuth tokens carry coarse scopes (`palace.read`, `palace.write`, `wiki.read`, `wiki.write`) and optional per-token wing restrictions captured at the consent screen. A scratch agent can read but not write; a project-specific agent can only see its own wing.
+- **Per-agent authorisation.** OAuth tokens carry the single scope `mcp:use` and optional per-token wing restrictions captured at the consent screen. Wing restrictions are the real isolation mechanism — a project-specific agent sees only its own wing; a read-only agent gets a token restricted to wings that have no write-capable counterpart.
 - **Audit trail.** Every MCP tool invocation lands in `brain_sessions`. You can see what each agent has been doing, when, and against which key.
 - **Knowledge graph.** Entities and typed relationships extracted from drawers and wiki pages, with graph traversal queries for discovering connections across your knowledge base.
 - **Confidence & quality scoring.** Every piece of content carries a confidence score that decays over time, plus a multi-factor quality score. Stale or low-quality content surfaces automatically for review.
@@ -82,7 +82,7 @@ Then visit `http://localhost:8000/admin`. The panel ships:
 
 ### As an AI agent (MCP)
 
-Mnemon exposes 12 tools over Streamable HTTP at `POST /mcp` (JSON-RPC 2.0). Authenticate with an OAuth 2.1 bearer token issued via Passport. Each tool is gated by scope.
+Mnemon exposes 12 tools over Streamable HTTP at `POST /mcp` (JSON-RPC 2.0). Authenticate with an OAuth 2.1 bearer token issued via Passport. All tools require the `mcp:use` scope; wing restrictions (selected at the consent screen) provide per-agent isolation.
 
 To connect from Claude Code:
 
@@ -91,20 +91,22 @@ claude mcp add --transport http mnemon https://mnemon.example.com/mcp
 # Complete the browser OAuth flow — log in, grant scopes, select wing restrictions
 ```
 
-| Tool | Scope | What it does |
-|---|---|---|
-| `brain_status` | `palace.read` | Drawer/wiki counts, wings, embedding driver, staleness summary |
-| `palace_wake_up` | `palace.read` | Recent drawers, wing activity, stale wiki pages |
-| `drawer_add` | `palace.write` | Add a drawer (auto-creates wing/room if missing, embeds content, flags related wiki pages for recompilation) |
-| `drawer_search` | `palace.read` | Hybrid search; supports `wing`, `room`, `mode`, `limit` |
-| `drawer_get` | `palace.read` | Fetch a single drawer by id |
-| `context_get` | `wiki.read` | Read a wiki page by name (includes structured metadata, confidence, sources) |
-| `context_set` | `wiki.write` | Upsert a wiki page (auto-updates index/log; stamps `last_compiled_at`) |
-| `context_list` | `wiki.read` | List wiki pages, optionally filtered by type |
-| `wiki_lint` | `wiki.read` | Detect stale, orphan, empty, and low-confidence wiki pages; auto-fix mode with audit trail |
-| `wiki_compile` | `wiki.read` | Gather related drawers for wiki page compilation; supports consolidation tiers |
-| `wiki_graph` | `wiki.read` | Query the knowledge graph — entities, typed relationships, graph traversal |
-| `wiki_history` | `wiki.read` | Supersession and revision history for wiki pages; track how knowledge evolved |
+All tools require scope `mcp:use`. Wing restrictions on the token provide per-agent isolation.
+
+| Tool | What it does |
+|---|---|
+| `brain_status` | Drawer/wiki counts, wings, embedding driver, staleness summary |
+| `palace_wake_up` | Recent drawers, wing activity, stale wiki pages |
+| `drawer_add` | Add a drawer (auto-creates wing/room if missing, embeds content, flags related wiki pages for recompilation) |
+| `drawer_search` | Hybrid search; supports `wing`, `room`, `mode`, `limit` |
+| `drawer_get` | Fetch a single drawer by id |
+| `context_get` | Read a wiki page by name (includes structured metadata, confidence, sources) |
+| `context_set` | Upsert a wiki page (auto-updates index/log; stamps `last_compiled_at`) |
+| `context_list` | List wiki pages, optionally filtered by type |
+| `wiki_lint` | Detect stale, orphan, empty, and low-confidence wiki pages; auto-fix mode with audit trail |
+| `wiki_compile` | Gather related drawers for wiki page compilation; supports consolidation tiers |
+| `wiki_graph` | Query the knowledge graph — entities, typed relationships, graph traversal |
+| `wiki_history` | Supersession and revision history for wiki pages; track how knowledge evolved |
 
 Wing restrictions on a token short-circuit before the tool even runs — a token restricted to `project:atlas` can never see a drawer in `personal`.
 
@@ -165,7 +167,7 @@ All sprints complete. 413 tests passing. Deployed at [mnemon.example.com](https:
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
 - **Sprint 3 — Hybrid retrieval.** `PalaceSearchService` (semantic / fulltext / hybrid modes with temporal boost), `WikiSearchService`, wing/room scoping.
-- **Sprint 4 — MCP server.** All 12 MCP tools, OAuth 2.1 + Passport with scope and per-token wing-restriction enforcement, audit logging on every call.
+- **Sprint 4 — MCP server.** All 12 MCP tools, OAuth 2.1 + Passport with `mcp:use` scope and per-token wing-restriction enforcement, audit logging on every call.
 - **Sprint 5 — Filament v5 admin panel.** Six resources, dashboard stats widget, custom palace + wiki Search page.
 - **Sprint 6 — OpenClaw integration.** Session ingest, memory-file imports, bidirectional sync, reference client.
 - **Tier 1 — Karpathy core.** Structured metadata (confidence, sources, related), source citations with drawer previews, cascade awareness (`drawer_add` flags wiki pages), `wiki_lint`, `wiki_compile`.
@@ -195,7 +197,7 @@ Mnemon runs several automated maintenance tasks to keep the knowledge base healt
 
 This is a working personal tool, not a finished product. Honest constraints today:
 
-- **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). There are no per-user scopes inside the panel — OAuth tokens (not API keys) provide the agent-level isolation via Passport scopes and per-token wing restrictions.
+- **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
 - **Word count is ASCII-only.** `getWordCountAttribute()` uses PHP's `str_word_count`. Multi-byte content under-counts. Documented; will be revisited if it ever matters.

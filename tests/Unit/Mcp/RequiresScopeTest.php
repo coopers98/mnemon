@@ -21,17 +21,15 @@ class RequiresScopeTest extends TestCase
         $this->setUpPassportClient();
     }
 
-    public function test_returns_null_when_token_has_required_scope(): void
+    public function test_returns_null_when_token_has_mcp_use_scope(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('t', ['palace.read'])->token;
+        $token = $user->createToken('t', ['mcp:use'])->token;
         $request = $this->mcpRequestFor($user, $token);
 
         $tool = new class
         {
             use RequiresScope;
-
-            protected string $scope = 'palace.read';
 
             public function check(Request $r): ?Response
             {
@@ -42,17 +40,15 @@ class RequiresScopeTest extends TestCase
         $this->assertNull($tool->check($request));
     }
 
-    public function test_returns_error_response_when_token_lacks_scope(): void
+    public function test_returns_error_response_when_token_lacks_mcp_use_scope(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('t', ['wiki.read'])->token;
+        $token = $user->createToken('t', [])->token;
         $request = $this->mcpRequestFor($user, $token);
 
         $tool = new class
         {
             use RequiresScope;
-
-            protected string $scope = 'palace.write';
 
             public function check(Request $r): ?Response
             {

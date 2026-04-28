@@ -23,7 +23,7 @@ class FindStaleWikiPagesPrompt extends Prompt
 
     public function shouldRegister(Request $request): bool
     {
-        return (bool) ($request?->user()?->currentAccessToken()?->can('wiki.read') ?? false);
+        return (bool) ($request?->user()?->currentAccessToken()?->can('mcp:use') ?? false);
     }
 
     public function handle(Request $request): ResponseFactory

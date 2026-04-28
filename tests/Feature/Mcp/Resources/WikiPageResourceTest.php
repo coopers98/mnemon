@@ -13,15 +13,15 @@ class WikiPageResourceTest extends TestCase
 
     public function test_resource_lists_for_wiki_read_token(): void
     {
-        $r = $this->mcpResourceList(['wiki.read']);
+        $r = $this->mcpResourceList(['mcp:use']);
         $r->assertStatus(200);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertContains('mnemon://wiki/{slug}', $uris);
     }
 
-    public function test_resource_hidden_for_token_without_wiki_read(): void
+    public function test_resource_hidden_for_token_without_mcp_use(): void
     {
-        $r = $this->mcpResourceList(['palace.read']);
+        $r = $this->mcpResourceList([]);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertNotContains('mnemon://wiki/{slug}', $uris);
     }
@@ -38,7 +38,7 @@ class WikiPageResourceTest extends TestCase
 
         // URL-encode the colon so the URI template parser receives a plain slug token.
         $encodedName = urlencode($page->name); // person%3Acooper
-        $r = $this->mcpResourceRead("mnemon://wiki/{$encodedName}", ['wiki.read']);
+        $r = $this->mcpResourceRead("mnemon://wiki/{$encodedName}", ['mcp:use']);
         $r->assertStatus(200);
         $body = $r->json('result.contents.0');
         $this->assertEquals("mnemon://wiki/{$encodedName}", $body['uri']);

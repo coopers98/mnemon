@@ -21,7 +21,6 @@ class DrawerAddTool extends Tool
 
     protected string $name = 'drawer_add';
 
-    protected string $scope = 'palace.write';
 
     public function __construct(protected DrawerWriteService $writer) {}
 

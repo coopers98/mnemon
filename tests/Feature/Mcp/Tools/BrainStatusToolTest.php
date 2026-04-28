@@ -19,7 +19,7 @@ class BrainStatusToolTest extends TestCase
         $r = Room::factory()->create(['wing_id' => $w->id]);
         Drawer::factory()->count(3)->create(['room_id' => $r->id]);
 
-        $resp = $this->mcpCall('brain_status', [], ['palace.read']);
+        $resp = $this->mcpCall('brain_status', [], ['mcp:use']);
         $resp->assertStatus(200);
         $body = $resp->json('result.structuredContent');
         $this->assertEquals(1, $body['wings']);
@@ -27,9 +27,9 @@ class BrainStatusToolTest extends TestCase
         $this->assertEquals(3, $body['drawers']);
     }
 
-    public function test_rejects_missing_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('brain_status', [], ['wiki.read']);
+        $r = $this->mcpCall('brain_status', [], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 }

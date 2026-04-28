@@ -21,7 +21,6 @@ class WikiLintTool extends Tool
 
     protected string $name = 'wiki_lint';
 
-    protected string $scope = 'wiki.write';
 
     private const VALID_FOCUS = ['stale', 'orphans', 'empty', 'low_confidence', 'low_quality', 'all'];
 

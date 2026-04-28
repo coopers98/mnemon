@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. OAuth 2.1 via Passport with coarse scopes and per-token wing restrictions controls access.
+Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. OAuth 2.1 via Passport with the `mcp:use` scope and per-token wing restrictions controls access.
 
 ## Stack
 
@@ -52,13 +52,9 @@ Raw content lives in a three-level hierarchy:
 
 Endpoint: `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Built on [`laravel/mcp`](https://github.com/laravel/mcp).
 
-Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant scopes and optionally restrict which wings the token can access.
+Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant the token and restrict which wings it can access.
 
-Scopes:
-- `palace.read` — `brain_status`, `palace_wake_up`, `drawer_search`, `drawer_get`, `wiki_compile`
-- `palace.write` — `drawer_add`
-- `wiki.read` — `context_get`, `context_list`, `wiki_lint`, `wiki_graph`, `wiki_history`
-- `wiki.write` — `context_set`
+Single scope: **`mcp:use`** — required for all 12 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_token_restrictions`) are the real per-agent isolation mechanism.
 
 Access tokens expire after 1 hour; refresh tokens after 90 days.
 
@@ -68,7 +64,7 @@ See full spec at `docs/superpowers/specs/2026-04-26-mcp-rework-design.md`.
 
 Authentication is handled by Laravel Passport (OAuth 2.1):
 - **OAuth clients** are registered via DCR (MCP clients like Claude Code do this automatically) or manually via `php artisan passport:client`.
-- **Access tokens** carry coarse scopes (`palace.read/write`, `wiki.read/write`).
+- **Access tokens** carry the single scope `mcp:use`.
 - **Per-token wing restrictions** are captured at the consent screen and stored in `mcp_token_restrictions` (FK → `oauth_access_tokens`).
 - Token revocation via the Filament admin panel under OAuth Access Tokens.
 

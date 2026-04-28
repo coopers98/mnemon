@@ -382,3 +382,20 @@ Add a final task to the implementation plan: **before the PR is opened, grep the
 - **Filament + Passport route collision** — confirm `/oauth/*` doesn't collide with anything Filament uses. Spot-check before merge.
 - **Refresh-token UX in Claude clients** — clients that don't refresh proactively will surface auth prompts at expiry; 1h is short. If this is annoying in practice, lengthen access token lifetime to 24h after observing behavior.
 - **Wing restrictions on resources** — `shouldRegister()` runs at registration time, but per-resource wing checks must also run at read time. Easy to forget; covered by tests in section "Tool dispatch."
+
+---
+
+## Postscript: Scope simplification (2026-04-26)
+
+The 4-scope model (`palace.read`, `palace.write`, `wiki.read`, `wiki.write`) was collapsed to a single scope: **`mcp:use`**.
+
+**Reason:** The `laravel/mcp` package hardcodes `mcp:use` as the only advertised OAuth scope in its DCR metadata (`scopes_supported`). DCR clients receive `mcp:use` only; the old per-operation scopes were never visible to them, so `RequiresScope` would reject every tool call.
+
+**What changed:**
+- `RequiresScope::requireScope()` now checks `tokenCan('mcp:use')` only — no per-tool `$scope` property.
+- All 12 Tool classes have the `protected string $scope` property removed.
+- All 3 Resource and 3 Prompt classes: `shouldRegister()` gates on `mcp:use`.
+- `AppServiceProvider::boot()`: `Passport::tokensCan([...])` with the 4 scopes removed; `mcp:use` is auto-injected by `Registrar::ensureMcpScope()`.
+- Consent view: scope checkboxes removed; `mcp:use` submitted as a hidden field. Wing selection remains the real authorization decision.
+
+**What did NOT change:** Wing restrictions (`mcp_token_restrictions`) remain the per-token isolation mechanism. They provide the read/write and access-boundary control that scopes previously attempted to provide.

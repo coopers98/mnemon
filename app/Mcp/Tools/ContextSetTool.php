@@ -25,7 +25,6 @@ class ContextSetTool extends Tool
 
     protected string $name = 'context_set';
 
-    protected string $scope = 'wiki.write';
 
     public function handle(Request $request): Response|ResponseFactory
     {

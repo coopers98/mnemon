@@ -22,7 +22,6 @@ class WikiHistoryTool extends Tool
 
     protected string $name = 'wiki_history';
 
-    protected string $scope = 'wiki.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {

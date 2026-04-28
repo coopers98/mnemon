@@ -15,15 +15,15 @@ class DrawerResourceTest extends TestCase
 
     public function test_resource_lists_for_palace_read_token(): void
     {
-        $r = $this->mcpResourceList(['palace.read']);
+        $r = $this->mcpResourceList(['mcp:use']);
         $r->assertStatus(200);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertContains('mnemon://drawer/{id}', $uris);
     }
 
-    public function test_resource_hidden_for_token_without_palace_read(): void
+    public function test_resource_hidden_for_token_without_mcp_use(): void
     {
-        $r = $this->mcpResourceList(['wiki.read']);
+        $r = $this->mcpResourceList([]);
         $uris = collect($r->json('result.resources') ?? $r->json('result.resourceTemplates') ?? [])->pluck('uriTemplate')->all();
         $this->assertNotContains('mnemon://drawer/{id}', $uris);
     }
@@ -34,7 +34,7 @@ class DrawerResourceTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $w->id]);
         $drawer = Drawer::factory()->create(['room_id' => $room->id, 'content' => 'foo']);
 
-        $r = $this->mcpResourceRead("mnemon://drawer/{$drawer->id}", ['palace.read']);
+        $r = $this->mcpResourceRead("mnemon://drawer/{$drawer->id}", ['mcp:use']);
         $r->assertStatus(200);
         $body = $r->json('result.contents.0');
         $this->assertEquals("mnemon://drawer/{$drawer->id}", $body['uri']);
@@ -47,7 +47,7 @@ class DrawerResourceTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $w->id]);
         $drawer = Drawer::factory()->create(['room_id' => $room->id]);
 
-        $r = $this->mcpResourceRead("mnemon://drawer/{$drawer->id}", ['palace.read'], wingPatterns: ['work:*']);
+        $r = $this->mcpResourceRead("mnemon://drawer/{$drawer->id}", ['mcp:use'], wingPatterns: ['work:*']);
         $body = $r->json();
         $this->assertTrue(($body['result']['isError'] ?? false) || isset($body['error']));
     }

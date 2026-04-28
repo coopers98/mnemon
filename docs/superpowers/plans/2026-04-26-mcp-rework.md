@@ -4172,3 +4172,15 @@ After writing the plan, the author re-checked the spec against the plan:
 - Trait method names: `requireScope()`, `requireWingAccess()`, `wingPatternsFor()`, `agentSource()` — used identically across tasks.
 - `BrainSessionLogger::log()` signature consistent: `($request, $tool, $input, $resultCount)`.
 - `mcpCall()` test helper signature consistent: `($tool, $arguments, $scopes, ?$wingPatterns)`.
+
+---
+
+## Postscript: Scope simplification (2026-04-26)
+
+After all 51 plan tasks were completed, the OAuth scope model was simplified in a follow-up commit.
+
+**Decision:** The 4-scope model (`palace.read`, `palace.write`, `wiki.read`, `wiki.write`) is superseded by a single scope `mcp:use`, which is the only scope the `laravel/mcp` package advertises to DCR clients. The old scopes were never reachable by DCR clients, making `RequiresScope` reject all tool calls in practice.
+
+**Impact:** No tasks in this plan need re-execution. The simplification was implemented as a follow-up code change: `RequiresScope`, all 12 tools, 3 resources, 3 prompts, `AppServiceProvider`, the consent view, and all associated tests were updated. Wing restrictions continue to provide isolation — nothing changed in that layer.
+
+**Commit:** `refactor: collapse OAuth scopes to mcp:use; rely on wing restrictions for isolation`

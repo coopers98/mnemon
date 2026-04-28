@@ -19,7 +19,7 @@ class DrawerGetToolTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $wing->id]);
         $drawer = Drawer::factory()->create(['room_id' => $room->id, 'content' => 'hello']);
 
-        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], ['palace.read']);
+        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], ['mcp:use']);
         $r->assertStatus(200);
         $body = $r->json('result.structuredContent');
         $this->assertEquals($drawer->id, $body['id']);
@@ -29,7 +29,7 @@ class DrawerGetToolTest extends TestCase
 
     public function test_returns_error_for_unknown_id(): void
     {
-        $r = $this->mcpCall('drawer_get', ['id' => 99999], ['palace.read']);
+        $r = $this->mcpCall('drawer_get', ['id' => 99999], ['mcp:use']);
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
     }
@@ -40,15 +40,15 @@ class DrawerGetToolTest extends TestCase
         $room = Room::factory()->create(['wing_id' => $personal->id]);
         $drawer = Drawer::factory()->create(['room_id' => $room->id]);
 
-        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], ['palace.read'], wingPatterns: ['work:*']);
+        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], ['mcp:use'], wingPatterns: ['work:*']);
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
     }
 
-    public function test_rejects_missing_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
         $drawer = Drawer::factory()->create();
-        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], ['wiki.read']);
+        $r = $this->mcpCall('drawer_get', ['id' => $drawer->id], []);
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
     }

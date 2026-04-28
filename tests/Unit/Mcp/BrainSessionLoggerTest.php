@@ -38,7 +38,7 @@ class BrainSessionLoggerTest extends TestCase
     public function test_log_writes_brain_session_with_oauth_metadata(): void
     {
         $user = User::factory()->create();
-        $tokenResult = $user->createToken('Claude Code', ['palace.read']);
+        $tokenResult = $user->createToken('Claude Code', ['mcp:use']);
         $eloquentToken = $tokenResult->token;
 
         // Wrap the Eloquent Token in an AccessToken (implements ScopeAuthorizable).
@@ -47,7 +47,7 @@ class BrainSessionLoggerTest extends TestCase
         $accessToken = new AccessToken([
             'oauth_access_token_id' => $eloquentToken->id,
             'oauth_client_id' => $eloquentToken->client_id,
-            'oauth_scopes' => ['palace.read'],
+            'oauth_scopes' => ['mcp:use'],
         ]);
 
         // actingAs with 'api' guard makes Passport the default guard, so

@@ -35,15 +35,9 @@ class WikiGraphToolTest extends TestCase
     // Scope enforcement
     // -----------------------------------------------------------------------
 
-    public function test_rejects_palace_read_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['palace.read']);
-        $this->assertTrue($r->json('result.isError') ?? false);
-    }
-
-    public function test_rejects_wiki_write_scope(): void
-    {
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['wiki.write']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -53,7 +47,7 @@ class WikiGraphToolTest extends TestCase
 
     public function test_start_page_parameter_is_required(): void
     {
-        $r = $this->mcpCall('wiki_graph', [], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', [], ['mcp:use']);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
 
@@ -63,7 +57,7 @@ class WikiGraphToolTest extends TestCase
 
     public function test_returns_error_for_unknown_start_page(): void
     {
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:nobody'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:nobody'], ['mcp:use']);
 
         $this->assertTrue($r->json('result.isError') ?? false);
         $errorText = $r->json('result.content.0.text') ?? '';
@@ -72,7 +66,7 @@ class WikiGraphToolTest extends TestCase
 
     public function test_logs_brain_session_for_missing_page(): void
     {
-        $this->mcpCall('wiki_graph', ['start_page' => 'person:ghost'], ['wiki.read']);
+        $this->mcpCall('wiki_graph', ['start_page' => 'person:ghost'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_graph']);
     }
@@ -85,7 +79,7 @@ class WikiGraphToolTest extends TestCase
     {
         $this->makePage('person:alice');
 
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -99,7 +93,7 @@ class WikiGraphToolTest extends TestCase
         $this->makePage('project:atlas');
         $this->makeEdge('person:alice', 'project:atlas', 'uses');
 
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -119,7 +113,7 @@ class WikiGraphToolTest extends TestCase
     {
         $this->makePage('concept:flow');
 
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'concept:flow'], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'concept:flow'], ['mcp:use']);
         $r->assertStatus(200);
 
         $body = $r->json('result.structuredContent');
@@ -144,7 +138,7 @@ class WikiGraphToolTest extends TestCase
         $this->makeEdge('person:alice', 'project:atlas', 'uses');
         $this->makeEdge('project:atlas', 'concept:deep', 'references');
 
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice', 'max_depth' => 1], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice', 'max_depth' => 1], ['mcp:use']);
         $r->assertStatus(200);
 
         $names = array_column($r->json('result.structuredContent.nodes'), 'name');
@@ -161,7 +155,7 @@ class WikiGraphToolTest extends TestCase
         $this->makeEdge('person:alice', 'project:atlas', 'uses');
         $this->makeEdge('project:atlas', 'concept:deep', 'references');
 
-        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice', 'max_depth' => 2], ['wiki.read']);
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'person:alice', 'max_depth' => 2], ['mcp:use']);
         $r->assertStatus(200);
 
         $names = array_column($r->json('result.structuredContent.nodes'), 'name');
@@ -183,7 +177,7 @@ class WikiGraphToolTest extends TestCase
         $r = $this->mcpCall('wiki_graph', [
             'start_page' => 'person:alice',
             'edge_types' => ['uses'],
-        ], ['wiki.read']);
+        ], ['mcp:use']);
         $r->assertStatus(200);
 
         $names = array_column($r->json('result.structuredContent.nodes'), 'name');
@@ -199,7 +193,7 @@ class WikiGraphToolTest extends TestCase
     {
         $this->makePage('decision:arch');
 
-        $this->mcpCall('wiki_graph', ['start_page' => 'decision:arch'], ['wiki.read']);
+        $this->mcpCall('wiki_graph', ['start_page' => 'decision:arch'], ['mcp:use']);
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_graph']);
     }

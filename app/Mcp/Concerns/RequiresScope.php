@@ -13,16 +13,10 @@ trait RequiresScope
      */
     protected function requireScope(Request $request): ?Response
     {
-        $scope = $this->scope ?? null;
-
-        if ($scope === null) {
-            return null;
-        }
-
         $token = $request->user()?->currentAccessToken();
 
-        if ($token === null || ! $token->can($scope)) {
-            return Response::error("Missing required scope: {$scope}");
+        if ($token === null || ! $token->can('mcp:use')) {
+            return Response::error('Missing required scope: mcp:use');
         }
 
         return null;

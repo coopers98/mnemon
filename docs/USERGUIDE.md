@@ -107,21 +107,16 @@ Claude Code opens a browser to the OAuth authorize endpoint. The first time, Cla
 
 The browser shows the Filament admin login (or the Mnemon landing page → login). Use your admin credentials. After login, you're redirected to the consent screen.
 
-### Step 3: Grant scopes and wings
+### Step 3: Choose wing access
 
 The consent screen looks like this:
 
 ```
 Authorize "Claude Code"
-
-Scopes:
-  ☑ palace.read     Read drawers and palace metadata
-  ☑ palace.write    Add drawers
-  ☑ wiki.read       Read wiki pages, history, graph
-  ☑ wiki.write      Compile, lint, and write wiki pages
+Authorize Claude Code to access your Mnemon brain. Choose which wings this agent can see.
 
 Wing access:
-  ☐ All wings (no restriction)
+  ☑ All wings (no restriction)
   ☐ work
   ☐ personal
   ☐ research
@@ -129,7 +124,9 @@ Wing access:
 [ Authorize ]   [ Deny ]
 ```
 
-For your first agent, the simplest grant is **all four scopes + the "All wings" master toggle** — full access. You can mint additional, more restrictive tokens for specific agent installs later (see [Multi-device](#multi-device)).
+All tools use the single `mcp:use` scope — there are no scope checkboxes. The real authorization decision is **which wings** this agent can see.
+
+For your first agent, the simplest grant is **"All wings" (the master toggle)** — full access. You can mint additional, more restricted tokens for specific agent installs later (see [Multi-device](#multi-device)).
 
 Click **Authorize**. The browser closes. Claude Code shows `mnemon: connected`.
 
@@ -191,7 +188,7 @@ php artisan tinker
 
 ```php
 $user = \App\Models\User::first();
-$token = $user->createToken('My Custom Agent', ['palace.read', 'palace.write'])->accessToken;
+$token = $user->createToken('My Custom Agent', ['mcp:use'])->accessToken;
 echo $token;
 ```
 
@@ -340,27 +337,22 @@ Claude calls `wiki_graph` with `start_page: "project:atlas"`, `max_depth: 2`. Yo
 
 ## OAuth consent
 
-The consent screen is where you decide what each agent can see and do. Worth understanding deeply.
+The consent screen is where you decide what each agent can see. Worth understanding deeply.
 
-### Scopes
+### Scope
 
-Four coarse scopes:
+All Mnemon tools require the single OAuth scope **`mcp:use`**. There are no per-operation scope checkboxes — the `laravel/mcp` package only advertises `mcp:use` to OAuth clients. The scope is submitted automatically when you click Authorize.
 
-- `palace.read` — read drawers, search, palace metadata
-- `palace.write` — add drawers (cannot delete; drawers are append-only)
-- `wiki.read` — read wiki pages, list, history, graph
-- `wiki.write` — compile, lint, set wiki pages
+### Wing access (the real authorization decision)
 
-You can grant any subset. A scratch read-only agent might get only `palace.read` + `wiki.read`. A trusted writer agent gets all four.
-
-### Wing access
-
-Independent of scopes — controls *which wings* the granted scopes apply to.
+Wing restrictions control *which wings* the token can access.
 
 - **All wings (no restriction)** — token sees every wing. Use for trusted personal-device agents.
-- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing, even if it has `palace.read`.
+- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing, regardless of which tool is called.
 
-Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each `project:*` wing manually, or grant "All wings" and rely on the agent to scope its calls.
+Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each matching wing, or grant "All wings" and rely on the agent to scope its calls.
+
+To create a read-only agent: give it a token restricted to wings that contain only content you want it to read. There is no separate read-scope — wing isolation is how you limit what an agent can touch.
 
 ### Token lifetimes
 
@@ -396,12 +388,14 @@ Or: register fresh per-agent on each device — DCR makes this cheap. Either wor
 
 Suggested layout:
 
-| Device | Client name | Wings granted |
-|---|---|---|
-| Work laptop | `Mnemon @ work-laptop` | `work`, `project:*`, `person:*` (work-related) |
-| Personal desktop | `Mnemon @ home-desktop` | All wings |
-| Phone (read-only) | `Mnemon @ phone` | All wings, `palace.read` + `wiki.read` only |
-| Untrusted environment (CI, scratch) | `Mnemon @ ci` | Specific wing only, write disabled |
+| Device | Client name | Wings granted | Notes |
+|---|---|---|---|
+| Work laptop | `Mnemon @ work-laptop` | `work`, `project:*`, `person:*` (work-related) | Full access to work wings only |
+| Personal desktop | `Mnemon @ home-desktop` | All wings | Trusted device |
+| Phone (reference only) | `Mnemon @ phone` | Read-only wings only | Restrict to wings the agent should only read from |
+| Untrusted environment (CI, scratch) | `Mnemon @ ci` | Specific wing only | Narrow wing access limits blast radius |
+
+All tokens carry the single `mcp:use` scope — wing restrictions are the real isolation mechanism. To create a "read-only" agent, restrict it to wings where writing would be harmless or nonexistent.
 
 This way: lose the work laptop, the attacker can't access `personal` content even if they extract the token.
 
@@ -421,7 +415,7 @@ The dashboard's **Live MCP Sessions** widget shows the 5 most recent calls acros
 
 1. On the new device, run `claude mcp add --transport http mnemon https://mnemon.example.com/mcp` (or equivalent for your client).
 2. Browser opens to authorize. Log in.
-3. Grant scopes and wings appropriate for that device's trust level.
+3. Grant wing access appropriate for that device's trust level.
 4. Verify connection. Done.
 
 The DB now has one new row in `oauth_clients`, one in `oauth_access_tokens`, and one in `mcp_token_restrictions` (if you set wing restrictions).
@@ -671,18 +665,11 @@ The drop_api_keys migration in this rework is a good example of a destructive ch
 - Token expired → refresh via the OAuth refresh endpoint or re-authorize
 - Token revoked → check Filament admin under Active Tokens
 
-### `403`-style MCP error: "Missing required scope"
+### `403`-style MCP error: "Missing required scope: mcp:use"
 
-The token doesn't have the scope the tool requires. Check the scope table:
+The token does not have the `mcp:use` scope, or the token is missing/expired. All tools require this scope.
 
-| Scope | Tools |
-|---|---|
-| `palace.read` | brain_status, palace_wake_up, drawer_search, drawer_get |
-| `palace.write` | drawer_add |
-| `wiki.read` | wiki_history, wiki_graph, context_get, context_list |
-| `wiki.write` | wiki_lint, wiki_compile, context_set |
-
-To fix: re-authorize and grant the missing scope.
+To fix: re-authorize the agent (re-run `claude mcp add` and complete the consent flow). If the token was manually created, ensure it was issued with `['mcp:use']`.
 
 ### MCP error: "Token does not have access to wing"
 
@@ -803,10 +790,11 @@ For sensitive personal content, run Mnemon on a server only you control.
 **Q: How do I extend Mnemon with a new MCP tool?**
 
 1. Create `app/Mcp/Tools/MyNewTool.php` extending `Laravel\Mcp\Server\Tool`
-2. Set `protected string $name = 'my_new_tool';` and `protected string $scope = 'palace.read';` (or wherever it fits)
-3. Implement `handle(Request): Response` and `schema(JsonSchema): array`
-4. Register in `app/Mcp/Servers/MnemonServer.php::$tools`
-5. Write a Feature test in `tests/Feature/Mcp/Tools/MyNewToolTest.php` using the `MakesMcpRequests` trait
+2. Set `protected string $name = 'my_new_tool';` — no `$scope` property needed (all tools use `mcp:use`)
+3. Add `use RequiresScope;` and call `if ($err = $this->requireScope($request)) return $err;` at the top of `handle()`
+4. Implement `handle(Request): Response` and `schema(JsonSchema): array`
+5. Register in `app/Mcp/Servers/MnemonServer.php::$tools`
+6. Write a Feature test in `tests/Feature/Mcp/Tools/MyNewToolTest.php` using the `MakesMcpRequests` trait
 
 See `app/Mcp/Tools/DrawerSearchTool.php` for a complete reference.
 

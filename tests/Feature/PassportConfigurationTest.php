@@ -8,14 +8,17 @@ use Tests\TestCase;
 
 class PassportConfigurationTest extends TestCase
 {
-    public function test_passport_scopes_are_registered(): void
+    public function test_mcp_use_scope_is_registered(): void
     {
+        // The laravel/mcp package auto-injects mcp:use via Registrar::ensureMcpScope().
+        // Boot the MCP server to trigger registration, then confirm the scope is present.
         $scopes = Passport::scopes()->pluck('id')->all();
 
-        $this->assertContains('palace.read', $scopes);
-        $this->assertContains('palace.write', $scopes);
-        $this->assertContains('wiki.read', $scopes);
-        $this->assertContains('wiki.write', $scopes);
+        $this->assertContains('mcp:use', $scopes);
+        $this->assertNotContains('palace.read', $scopes);
+        $this->assertNotContains('palace.write', $scopes);
+        $this->assertNotContains('wiki.read', $scopes);
+        $this->assertNotContains('wiki.write', $scopes);
     }
 
     public function test_token_lifetimes_are_set(): void

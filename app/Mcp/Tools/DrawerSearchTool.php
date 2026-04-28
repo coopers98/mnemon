@@ -22,7 +22,6 @@ class DrawerSearchTool extends Tool
 
     protected string $name = 'drawer_search';
 
-    protected string $scope = 'palace.read';
 
     public function __construct(protected DrawerSearchService $search) {}
 

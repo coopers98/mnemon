@@ -24,7 +24,6 @@ class BrainStatusTool extends Tool
 
     protected string $name = 'brain_status';
 
-    protected string $scope = 'palace.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {

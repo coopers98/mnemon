@@ -22,7 +22,6 @@ class ContextGetTool extends Tool
 
     protected string $name = 'context_get';
 
-    protected string $scope = 'wiki.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {
@@ -60,8 +59,7 @@ class ContextGetTool extends Tool
             'word_count' => $page->content ? str_word_count($page->content) : 0,
         ];
 
-        $token = $request->user()?->currentAccessToken();
-        if ($token?->can('palace.read') && ! empty($page->sources)) {
+        if (! empty($page->sources)) {
             $payload['source_details'] = Drawer::whereIn('id', $page->sources)->get()->map(fn ($d) => [
                 'id' => $d->id,
                 'content_preview' => mb_substr($d->content, 0, 200),

@@ -28,7 +28,7 @@ trait MakesMcpRequests
         $this->passportClientCreated = true;
     }
 
-    private function mcpRequest(string $method, array $params, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    private function mcpRequest(string $method, array $params, array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         $this->ensurePassportClient();
 
@@ -53,7 +53,7 @@ trait MakesMcpRequests
         ]);
     }
 
-    protected function mcpCall(string $tool, array $arguments, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    protected function mcpCall(string $tool, array $arguments, array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('tools/call', [
             'name' => $tool,
@@ -61,22 +61,22 @@ trait MakesMcpRequests
         ], $scopes, $wingPatterns);
     }
 
-    protected function mcpResourceList(array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    protected function mcpResourceList(array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('resources/templates/list', [], $scopes, $wingPatterns);
     }
 
-    protected function mcpResourceRead(string $uri, array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    protected function mcpResourceRead(string $uri, array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('resources/read', ['uri' => $uri], $scopes, $wingPatterns);
     }
 
-    protected function mcpPromptList(array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    protected function mcpPromptList(array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('prompts/list', [], $scopes, $wingPatterns);
     }
 
-    protected function mcpPromptGet(string $name, array $args = [], array $scopes = ['*'], ?array $wingPatterns = null): TestResponse
+    protected function mcpPromptGet(string $name, array $args = [], array $scopes = ['mcp:use'], ?array $wingPatterns = null): TestResponse
     {
         return $this->mcpRequest('prompts/get', [
             'name' => $name,

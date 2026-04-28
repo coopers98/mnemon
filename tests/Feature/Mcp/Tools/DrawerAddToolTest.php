@@ -18,7 +18,7 @@ class DrawerAddToolTest extends TestCase
             'wing' => 'work',
             'room' => 'notes',
             'content' => 'meeting notes',
-        ], ['palace.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $drawer = Drawer::first();
@@ -33,7 +33,7 @@ class DrawerAddToolTest extends TestCase
             'room' => 'notes',
             'content' => 'foo',
             'source' => 'manual-entry',
-        ], ['palace.write']);
+        ], ['mcp:use']);
 
         $this->assertEquals('manual-entry', Drawer::first()->source);
     }
@@ -44,16 +44,16 @@ class DrawerAddToolTest extends TestCase
             'wing' => 'personal',
             'room' => 'notes',
             'content' => 'foo',
-        ], ['palace.write'], wingPatterns: ['work:*']);
+        ], ['mcp:use'], wingPatterns: ['work:*']);
 
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
         $this->assertEquals(0, Drawer::count());
     }
 
-    public function test_rejects_missing_scope(): void
+    public function test_rejects_token_without_mcp_use_scope(): void
     {
-        $r = $this->mcpCall('drawer_add', ['wing' => 'work', 'room' => 'notes', 'content' => 'foo'], ['palace.read']);
+        $r = $this->mcpCall('drawer_add', ['wing' => 'work', 'room' => 'notes', 'content' => 'foo'], []);
         $body = $r->json();
         $this->assertTrue($body['result']['isError'] ?? false);
     }
@@ -64,7 +64,7 @@ class DrawerAddToolTest extends TestCase
             'wing' => 'work',
             'room' => 'notes',
             'content' => 'My API key is sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz',
-        ], ['palace.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $stored = Drawer::first()->content;
@@ -85,7 +85,7 @@ class DrawerAddToolTest extends TestCase
             'wing' => 'work',
             'room' => 'notes',
             'content' => 'some content',
-        ], ['palace.write']);
+        ], ['mcp:use']);
 
         $r->assertStatus(200);
         $this->assertEquals(1, $page->fresh()->pending_drawers_since_compile);

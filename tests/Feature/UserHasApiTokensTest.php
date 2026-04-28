@@ -27,9 +27,9 @@ class UserHasApiTokensTest extends TestCase
     public function test_user_can_create_personal_access_token(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('test', ['palace.read']);
+        $token = $user->createToken('test', ['mcp:use']);
 
         $this->assertNotNull($token->accessToken);
-        $this->assertTrue($token->token->can('palace.read'));
+        $this->assertTrue($token->token->can('mcp:use'));
     }
 }

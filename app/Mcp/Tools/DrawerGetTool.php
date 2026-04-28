@@ -22,7 +22,6 @@ class DrawerGetTool extends Tool
 
     protected string $name = 'drawer_get';
 
-    protected string $scope = 'palace.read';
 
     public function handle(Request $request): Response|ResponseFactory
     {

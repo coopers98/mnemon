@@ -16,6 +16,11 @@ class Room extends Model
         'name',
         'slug',
         'wing_id',
+        'metadata',
+    ];
+
+    protected $casts = [
+        'metadata' => 'array',
     ];
 
     protected static function booted(): void

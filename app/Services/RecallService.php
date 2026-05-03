@@ -40,13 +40,20 @@ class RecallService
             ->values()
             ->all();
 
-        $drawers = collect($drawerHits)
+        // Min-max normalize drawer scores so the top hit becomes 1.0, matching
+        // how WikiSearchService normalizes its own scores. Without this, drawer
+        // hybrid scores top out around 0.4 (semantic weight unused without
+        // embeddings), and the confidence_floor would never be met.
+        $rawDrawers = collect($drawerHits);
+        $maxDrawerScore = (float) max(0.0001, $rawDrawers->max(fn ($d) => (float) ($d['score'] ?? 0)));
+
+        $drawers = $rawDrawers
             ->map(fn ($d) => [
                 'id' => $d['id'],
                 'wing' => $d['wing_slug'] ?? $d['wing'],
                 'room' => $d['room_slug'] ?? $d['room'],
                 'snippet' => mb_substr($d['content'], 0, 240),
-                'confidence' => (float) ($d['score'] ?? 0),
+                'confidence' => min(1.0, ((float) ($d['score'] ?? 0)) / $maxDrawerScore),
             ])
             ->filter(fn ($d) => $d['confidence'] >= $floor)
             ->sortByDesc('confidence')

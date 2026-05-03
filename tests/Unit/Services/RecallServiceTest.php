@@ -54,17 +54,22 @@ class RecallServiceTest extends TestCase
 
     public function test_excerpts_long_wiki_pages(): void
     {
-        $service = app(RecallService::class);
+        // Lower the floor to surface the page reliably in the SQLite test env
+        // where fulltext-only scoring may not clear the production 0.45 default.
+        config(['mnemon.recall.confidence_floor' => 0.0]);
+
         WikiPage::factory()->create([
             'name' => 'concept:big',
             'title' => 'Big',
             'content' => str_repeat('lorem ipsum dolor sit amet ', 500),
         ]);
 
-        $result = $service->run('big concept', 1500, null, null);
+        $service = app(RecallService::class);
+        // Query against words that appear in the content body (SQLite LIKE search
+        // only checks the content column, not name/title).
+        $result = $service->run('lorem ipsum', 1500, null, null);
 
-        if (! empty($result['wiki'])) {
-            $this->assertStringContainsString('[truncated', $result['wiki'][0]['content']);
-        }
+        $this->assertNotEmpty($result['wiki'], 'expected the long wiki page to surface');
+        $this->assertStringContainsString('[truncated', $result['wiki'][0]['content']);
     }
 }

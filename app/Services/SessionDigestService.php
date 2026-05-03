@@ -40,6 +40,7 @@ class SessionDigestService
         $recentDrawers = Drawer::whereIn('id', $recentDrawerIds)->get(['id', 'content']);
 
         $proposals = $this->llm->digest($transcript, [
+            'turn_range' => $turnRange,
             'existing_wings' => collect($existingWings)->pluck('slug')->all(),
             'existing_rooms_per_wing' => $existingRooms->groupBy('wing_id')
                 ->map(fn ($rs) => $rs->pluck('slug')->all())->all(),

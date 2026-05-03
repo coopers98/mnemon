@@ -59,6 +59,7 @@ class SessionDigestServiceTest extends TestCase
         $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
 
         $this->assertEmpty($result['persisted']);
+        $this->assertEmpty($result['pending_wings']);
     }
 
     public function test_propose_new_wing_queues_for_review(): void
@@ -103,6 +104,62 @@ class SessionDigestServiceTest extends TestCase
         $room = Room::where('slug', 'novel-room')->where('wing_id', $work->id)->first();
         $this->assertNotNull($room);
         $this->assertTrue($room->metadata['auto_created'] ?? false);
+    }
+
+    public function test_llm_context_includes_recent_drawers_existing_wings_and_turn_range(): void
+    {
+        // Seed environment so context fields are non-empty.
+        $work = Wing::factory()->create(['slug' => 'work']);
+        $personal = Wing::factory()->create(['slug' => 'personal']);
+        Room::factory()->create(['slug' => 'meetings', 'wing_id' => $work->id]);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $personal->id]);
+        $existing = Drawer::factory()->create([
+            'room_id' => Room::where('slug', 'meetings')->where('wing_id', $work->id)->first()->id,
+            'content' => str_repeat('a', 500), // longer than 200 to verify truncation
+        ]);
+
+        $captured = new \stdClass();
+        $captured->context = null;
+        $driver = new class($captured) {
+            public function __construct(public \stdClass $captured) {}
+            public function digest(string $transcript, array $context): array
+            {
+                $this->captured->context = $context;
+                return [];
+            }
+        };
+
+        $service = new SessionDigestService($driver, app(\App\Services\DrawerWriteService::class));
+
+        $service->run(
+            sessionId: 'sess-x',
+            harness: 'claude-code',
+            turnRange: ['start' => 4, 'end' => 9],
+            transcript: 'whatever',
+            recentDrawerIds: [$existing->id],
+            allowedWingPatterns: null,
+        );
+
+        $ctx = $captured->context;
+        $this->assertNotNull($ctx, 'LLM context should have been captured');
+
+        // turn_range round-trips intact
+        $this->assertEquals(['start' => 4, 'end' => 9], $ctx['turn_range']);
+
+        // existing_wings — both seeded slugs are present
+        $this->assertContains('work', $ctx['existing_wings']);
+        $this->assertContains('personal', $ctx['existing_wings']);
+
+        // existing_rooms_per_wing keyed by wing id
+        $this->assertIsArray($ctx['existing_rooms_per_wing']);
+        $allRooms = collect($ctx['existing_rooms_per_wing'])->flatten()->all();
+        $this->assertContains('meetings', $allRooms);
+        $this->assertContains('notes', $allRooms);
+
+        // recent_drawers shape: id + truncated snippet
+        $this->assertCount(1, $ctx['recent_drawers']);
+        $this->assertEquals($existing->id, $ctx['recent_drawers'][0]['id']);
+        $this->assertEquals(200, mb_strlen($ctx['recent_drawers'][0]['snippet']));
     }
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService

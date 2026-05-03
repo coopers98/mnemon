@@ -6,6 +6,7 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use App\Services\DrawerWriteService;
 use App\Services\SessionDigestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -53,7 +54,7 @@ class SessionDigestServiceTest extends TestCase
     {
         $service = $this->makeServiceWithMockLlm([
             ['content' => 'noisy', 'wing_slug' => 'work', 'room_slug' => 'notes',
-             'confidence' => 0.3, 'propose_new_wing' => false, 'propose_new_room' => false],
+                'confidence' => 0.3, 'propose_new_wing' => false, 'propose_new_room' => false],
         ]);
 
         $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
@@ -118,18 +119,21 @@ class SessionDigestServiceTest extends TestCase
             'content' => str_repeat('a', 500), // longer than 200 to verify truncation
         ]);
 
-        $captured = new \stdClass();
+        $captured = new \stdClass;
         $captured->context = null;
-        $driver = new class($captured) {
+        $driver = new class($captured)
+        {
             public function __construct(public \stdClass $captured) {}
+
             public function digest(string $transcript, array $context): array
             {
                 $this->captured->context = $context;
+
                 return [];
             }
         };
 
-        $service = new SessionDigestService($driver, app(\App\Services\DrawerWriteService::class));
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
 
         $service->run(
             sessionId: 'sess-x',
@@ -164,14 +168,16 @@ class SessionDigestServiceTest extends TestCase
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService
     {
-        $driver = new class($proposals) {
+        $driver = new class($proposals)
+        {
             public function __construct(public array $proposals) {}
+
             public function digest(string $transcript, array $context): array
             {
                 return $this->proposals;
             }
         };
 
-        return new SessionDigestService($driver, app(\App\Services\DrawerWriteService::class));
+        return new SessionDigestService($driver, app(DrawerWriteService::class));
     }
 }

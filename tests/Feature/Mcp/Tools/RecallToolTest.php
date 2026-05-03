@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Mcp\Tools;
 
+use App\Models\BrainSession;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
@@ -82,7 +83,7 @@ class RecallToolTest extends TestCase
     {
         $this->mcpCall('recall', ['prompt' => 'anything'], ['mcp:use']);
 
-        $session = \App\Models\BrainSession::latest('id')->first();
+        $session = BrainSession::latest('id')->first();
         $this->assertEquals('recall', $session->tool_name);
     }
 }

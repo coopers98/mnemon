@@ -22,7 +22,6 @@ class WikiHistoryTool extends Tool
 
     protected string $name = 'wiki_history';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

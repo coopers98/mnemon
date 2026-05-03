@@ -26,7 +26,6 @@ class WikiCompileTool extends Tool
 
     protected string $name = 'wiki_compile';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

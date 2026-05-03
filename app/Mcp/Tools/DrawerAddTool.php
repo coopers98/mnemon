@@ -21,7 +21,6 @@ class DrawerAddTool extends Tool
 
     protected string $name = 'drawer_add';
 
-
     public function __construct(protected DrawerWriteService $writer) {}
 
     public function handle(Request $request): Response|ResponseFactory

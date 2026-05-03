@@ -8,7 +8,10 @@ use App\Models\WikiPage;
 use App\Models\Wing;
 use App\Observers\DrawerObserver;
 use App\Observers\WikiPageObserver;
+use App\Services\Digest\OpenAiDigestDriver;
+use App\Services\DrawerWriteService;
 use App\Services\EmbeddingManager;
+use App\Services\SessionDigestService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -26,15 +29,15 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(EmbeddingManager::class);
 
-        $this->app->bind(\App\Services\SessionDigestService::class, function ($app) {
+        $this->app->bind(SessionDigestService::class, function ($app) {
             $driver = match (config('mnemon.digest.driver', 'openai')) {
-                'openai' => new \App\Services\Digest\OpenAiDigestDriver,
+                'openai' => new OpenAiDigestDriver,
                 default => throw new \RuntimeException('Unknown digest driver: '.config('mnemon.digest.driver')),
             };
 
-            return new \App\Services\SessionDigestService(
+            return new SessionDigestService(
                 $driver,
-                $app->make(\App\Services\DrawerWriteService::class),
+                $app->make(DrawerWriteService::class),
             );
         });
     }

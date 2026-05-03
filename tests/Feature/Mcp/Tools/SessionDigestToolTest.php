@@ -23,7 +23,7 @@ class SessionDigestToolTest extends TestCase
 
         $this->mockDigestService([
             ['content' => 'a real note', 'wing_slug' => 'work', 'room_slug' => 'notes',
-             'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
         ]);
 
         $response = $this->mcpCall('session_digest', [
@@ -45,7 +45,7 @@ class SessionDigestToolTest extends TestCase
         Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
         $this->mockDigestService([
             ['content' => 'note', 'wing_slug' => 'work', 'room_slug' => 'notes',
-             'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
         ]);
 
         $this->mcpCall('session_digest', [
@@ -75,8 +75,10 @@ class SessionDigestToolTest extends TestCase
     private function mockDigestService(array $proposals): void
     {
         $this->app->bind(SessionDigestService::class, function ($app) use ($proposals) {
-            $llm = new class($proposals) {
+            $llm = new class($proposals)
+            {
                 public function __construct(public array $p) {}
+
                 public function digest(string $t, array $c): array
                 {
                     return $this->p;

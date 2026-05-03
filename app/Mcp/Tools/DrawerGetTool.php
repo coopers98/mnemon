@@ -22,7 +22,6 @@ class DrawerGetTool extends Tool
 
     protected string $name = 'drawer_get';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

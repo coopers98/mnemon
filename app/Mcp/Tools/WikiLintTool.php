@@ -21,7 +21,6 @@ class WikiLintTool extends Tool
 
     protected string $name = 'wiki_lint';
 
-
     private const VALID_FOCUS = ['stale', 'orphans', 'empty', 'low_confidence', 'low_quality', 'all'];
 
     public function __construct(private readonly WikiLintAutoFixer $autoFixer) {}

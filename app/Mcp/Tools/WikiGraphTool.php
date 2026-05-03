@@ -23,7 +23,6 @@ class WikiGraphTool extends Tool
 
     protected string $name = 'wiki_graph';
 
-
     public function __construct(private readonly KnowledgeGraphService $graphService) {}
 
     public function handle(Request $request): Response|ResponseFactory

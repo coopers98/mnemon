@@ -25,7 +25,6 @@ class ContextSetTool extends Tool
 
     protected string $name = 'context_set';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

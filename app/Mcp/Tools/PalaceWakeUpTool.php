@@ -24,7 +24,6 @@ class PalaceWakeUpTool extends Tool
 
     protected string $name = 'palace_wake_up';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

@@ -24,7 +24,6 @@ class BrainStatusTool extends Tool
 
     protected string $name = 'brain_status';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

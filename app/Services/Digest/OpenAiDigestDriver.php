@@ -20,9 +20,9 @@ class OpenAiDigestDriver
 
         $system = "You are Mnemon's session digester. Read a Claude Code transcript and extract drawers worth storing. ".
             "Respond with strict JSON: {\"proposals\":[{\"content\":\"…\",\"wing_slug\":\"…\",\"room_slug\":\"…\",\"confidence\":0.0-1.0,\"propose_new_wing\":bool,\"propose_new_room\":bool,\"rationale\":\"…\"}]}.\n".
-            "Existing wings: ".json_encode($context['existing_wings'] ?? [])."\n".
-            "Existing rooms per wing (wing_id keys): ".json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
-            "Drawers already captured this session (avoid duplicates): ".json_encode($context['recent_drawers'] ?? []);
+            'Existing wings: '.json_encode($context['existing_wings'] ?? [])."\n".
+            'Existing rooms per wing (wing_id keys): '.json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
+            'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []);
 
         $response = Http::withToken($apiKey)
             ->timeout(20)

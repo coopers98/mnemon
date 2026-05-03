@@ -21,7 +21,6 @@ class ContextListTool extends Tool
 
     protected string $name = 'context_list';
 
-
     public function handle(Request $request): Response|ResponseFactory
     {
         if ($err = $this->requireScope($request)) {

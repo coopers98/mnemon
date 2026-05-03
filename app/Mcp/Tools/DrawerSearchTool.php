@@ -22,7 +22,6 @@ class DrawerSearchTool extends Tool
 
     protected string $name = 'drawer_search';
 
-
     public function __construct(protected DrawerSearchService $search) {}
 
     public function handle(Request $request): Response|ResponseFactory

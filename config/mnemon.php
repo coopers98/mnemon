@@ -52,4 +52,15 @@ return [
         ],
         'soft_delete_threshold' => 0.05, // delete drawers below this score
     ],
+
+    'recall' => [
+        'confidence_floor' => env('MNEMON_RECALL_FLOOR', 0.45),
+        'default_token_budget' => 1500,
+    ],
+
+    'digest' => [
+        'driver' => env('MNEMON_DIGEST_DRIVER', 'openai'),
+        'confidence_floor' => env('MNEMON_DIGEST_FLOOR', 0.5),
+        'openai_model' => env('MNEMON_DIGEST_OPENAI_MODEL', 'gpt-4o-mini'),
+    ],
 ];

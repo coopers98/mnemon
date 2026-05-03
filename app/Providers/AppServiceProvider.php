@@ -25,6 +25,18 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(EmbeddingManager::class);
+
+        $this->app->bind(\App\Services\SessionDigestService::class, function ($app) {
+            $driver = match (config('mnemon.digest.driver', 'openai')) {
+                'openai' => new \App\Services\Digest\OpenAiDigestDriver,
+                default => throw new \RuntimeException('Unknown digest driver: '.config('mnemon.digest.driver')),
+            };
+
+            return new \App\Services\SessionDigestService(
+                $driver,
+                $app->make(\App\Services\DrawerWriteService::class),
+            );
+        });
     }
 
     /**

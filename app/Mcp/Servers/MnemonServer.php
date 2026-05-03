@@ -16,6 +16,7 @@ use App\Mcp\Tools\DrawerAddTool;
 use App\Mcp\Tools\DrawerGetTool;
 use App\Mcp\Tools\DrawerSearchTool;
 use App\Mcp\Tools\PalaceWakeUpTool;
+use App\Mcp\Tools\RecallTool;
 use App\Mcp\Tools\WikiCompileTool;
 use App\Mcp\Tools\WikiGraphTool;
 use App\Mcp\Tools\WikiHistoryTool;
@@ -36,6 +37,7 @@ class MnemonServer extends Server
         DrawerAddTool::class,
         BrainStatusTool::class,
         PalaceWakeUpTool::class,
+        RecallTool::class,
         ContextGetTool::class,
         ContextSetTool::class,
         ContextListTool::class,

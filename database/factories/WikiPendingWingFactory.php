@@ -5,6 +5,9 @@ namespace Database\Factories;
 use App\Models\WikiPendingWing;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
+/**
+ * @extends Factory<WikiPendingWing>
+ */
 class WikiPendingWingFactory extends Factory
 {
     protected $model = WikiPendingWing::class;
@@ -20,7 +23,7 @@ class WikiPendingWingFactory extends Factory
                 'room_slug' => 'notes',
                 'source' => 'claude-code:session_digest',
             ],
-            'status' => 'pending',
+            'status' => WikiPendingWing::STATUS_PENDING,
         ];
     }
 }

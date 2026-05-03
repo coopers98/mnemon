@@ -22,6 +22,12 @@ Primary consumer: OpenClaw (dogfood), then Laravel developers via Composer packa
 
 ---
 
+## Harness adapters
+
+Mnemon's MCP server is the universal interface; **harness adapters** wrap it for specific clients to make memory automatic rather than agent-discretionary. The first adapter is Claude Code (three shell hooks calling `recall`, `session_digest`, and `palace_wake_up`). Cursor, ChatGPT, and others reuse the same MCP tools but require their own integration mechanism per harness.
+
+---
+
 ## 2. Users & Access
 
 **Phase 1: Single user with OAuth-scoped tokens.** Filament admin protected by a single admin user.

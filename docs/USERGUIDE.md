@@ -422,6 +422,46 @@ The DB now has one new row in `oauth_clients`, one in `oauth_access_tokens`, and
 
 ---
 
+## Automatic memory in Claude Code
+
+Mnemon's MCP tools work for any agent that thinks to call them. For Claude Code specifically, you can install hooks that capture and recall on the agent's behalf.
+
+### Install
+
+```bash
+php artisan mnemon:install-claude-code-hooks
+```
+
+The command:
+1. Reads your existing OAuth bearer token from `~/.claude.json`.
+2. Verifies it against `/mcp`.
+3. Copies hook scripts to `~/.claude/hooks/`.
+4. Registers them in `~/.claude/settings.json`.
+
+### What each hook does
+
+- **SessionStart (`mnemon-wake.sh`)** — calls `palace_wake_up`; injects a `<system-reminder>` summarizing recent drawers, active wings, and pending wiki updates.
+- **UserPromptSubmit (`mnemon-recall.sh`)** — gated by length/stopword/recent-fire checks; on a substantive prompt, calls `recall` and injects up to ~1500 tokens of relevant wiki + drawer context. Budget: 800ms; failures are silent.
+- **Stop (`mnemon-capture.sh`)** — sanitizes the transcript (strips tool I/O + thinking + secret patterns), then dispatches a detached background worker that calls `session_digest`. Drawers with confidence ≥ 0.5 auto-persist; proposals for new wings queue for review at `/admin/wiki-pending-wings`.
+
+### `@nomemo` — turn it off mid-session
+
+Type `@nomemo` at the start of any prompt to suppress both recall and capture for the rest of the session. The next session starts fresh.
+
+### Reviewing captured drawers
+
+In Filament: `/admin` → Drawers → filter by `source = "claude-code:session_digest"`.
+For new-wing proposals: `/admin` → Access Control → Pending Wings.
+
+### Troubleshooting
+
+- **No recall is firing.** Check `~/.mnemon/sessions/<session_id>.json` exists. If `nomemo: true` or `disabled: true`, that session is suppressed. Start a new Claude Code session.
+- **Capture isn't producing drawers.** Tail `~/.mnemon/capture-errors.log`. Common: `OPENAI_API_KEY` missing or rate-limited.
+- **401 errors in capture log.** Token expired. Re-run `php artisan mnemon:install-claude-code-hooks --force` after refreshing the OAuth flow in Claude Code.
+- **`@nomemo` accidentally turned on.** Delete `~/.mnemon/sessions/<session_id>.json` to reset.
+
+---
+
 ## Bulk loading
 
 ### From OpenClaw

@@ -110,6 +110,28 @@ All tools require scope `mcp:use`. Wing restrictions on the token provide per-ag
 
 Wing restrictions on a token short-circuit before the tool even runs — a token restricted to `project:atlas` can never see a drawer in `personal`.
 
+---
+
+## Layer 2 — automatic memory in Claude Code
+
+The MCP server exposes Mnemon to any agent that asks. **Layer 2** is automatic capture and recall for Claude Code: every prompt is silently primed with relevant palace context, and every session quietly digests to drawers in the background.
+
+Install with:
+
+```bash
+php artisan mnemon:install-claude-code-hooks
+```
+
+This adds three hooks to `~/.claude/hooks/`:
+
+- `mnemon-wake.sh` (SessionStart) — injects recent palace state at session start.
+- `mnemon-recall.sh` (UserPromptSubmit) — injects relevant wiki + drawer context per prompt, gated to skip chitchat.
+- `mnemon-capture.sh` (Stop) — digests the session transcript to drawer proposals; high-confidence ones auto-persist; new wings queue for admin review.
+
+See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#automatic-memory-in-claude-code) for the full walkthrough.
+
+---
+
 ### OpenClaw integration
 
 Mnemon integrates with [OpenClaw](https://openclaw.com) for automatic memory synchronisation:

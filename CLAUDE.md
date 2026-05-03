@@ -54,7 +54,9 @@ Endpoint: `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Built on [`laravel/mcp`](
 
 Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant the token and restrict which wings it can access.
 
-Single scope: **`mcp:use`** — required for all 12 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_token_restrictions`) are the real per-agent isolation mechanism.
+Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_token_restrictions`) are the real per-agent isolation mechanism.
+
+**Layer 2 tools (automatic memory for Claude Code):** `recall` (per-prompt context injection, called by `mnemon-recall.sh`) and `session_digest` (end-of-session transcript digestion, called by `mnemon-capture.sh`) extend the original 12 tools.
 
 Access tokens expire after 1 hour; refresh tokens after 90 days.
 
@@ -83,7 +85,9 @@ app/
     Prompts/       — MCP prompt handlers
     Concerns/      — Shared traits (RequiresScope, RequiresWingAccess, ResolvesAgentSource, etc.)
     Support/       — BrainSessionLogger and other support classes
-  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, McpTokenRestriction)
+  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, McpTokenRestriction, WikiPendingWing)
+  Console/
+    Commands/      — Artisan commands (includes InstallClaudeCodeHooks.php for Layer 2 setup)
   Providers/
     Filament/      — Filament panel providers
 config/

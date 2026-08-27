@@ -102,6 +102,25 @@ No MCP client can connect. OpenClaw, the only integrated agent, is not an MCP
 client — it uses curl against the REST endpoint plus server-side artisan import
 commands.
 
+### D7 — Wing slugs diverge by creation path
+
+`Wing::booted()` generates slugs with `Str::slug($name)`, which strips namespace
+colons entirely. `DrawerAddTool.php:47` and `WikiCompileTool.php:36` use
+`Str::slug(str_replace(':', '-', $name))`, which converts them to dashes.
+Verified output for the same inputs:
+
+| Name | `Wing::booted()` | `drawer_add` |
+|---|---|---|
+| `project:atlas` | `projectatlas` | `project-atlas` |
+| `person:jane-doe` | `personjane-doe` | `person-jane-doe` |
+| `Project: Atlas` | `project-atlas` | `project-atlas` |
+
+A wing created through Filament or a seeder therefore gets a different slug from
+the same wing created by an agent, producing two wings for one conceptual
+namespace — and no restriction pattern can cover both. This is entangled with
+D2: fixing the wildcard convention is pointless while the slug it must match is
+non-deterministic.
+
 ## Sequence
 
 | # | Piece | Contents | Gates |

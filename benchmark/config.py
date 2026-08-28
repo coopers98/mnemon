@@ -11,22 +11,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-MNEMON_URL = os.environ.get(
-    "MNEMON_URL", "https://mnemon.example.com/api/mcp/call"
-)
+MNEMON_URL = os.environ.get("MNEMON_URL", "https://mnemon.example.com/mcp")
 
-# API key: env var wins, then a file (default /tmp/.mnemon-api-key).
-MNEMON_KEY_FILE = os.environ.get("MNEMON_KEY_FILE", "/tmp/.mnemon-api-key")
+# OAuth bearer token: env var wins, then a file (default /tmp/.mnemon-token).
+MNEMON_TOKEN_FILE = os.environ.get("MNEMON_TOKEN_FILE", "/tmp/.mnemon-token")
 
 
-def mnemon_api_key() -> str:
-    key = os.environ.get("MNEMON_API_KEY")
-    if key:
-        return key.strip()
-    path = Path(MNEMON_KEY_FILE)
+def mnemon_token() -> str:
+    """Personal access token with the `mcp:use` scope.
+
+    Mint one with `php artisan tinker`:
+        $user->createToken('Benchmark', ['mcp:use'])->accessToken
+    """
+    token = os.environ.get("MNEMON_TOKEN")
+    if token:
+        return token.strip()
+    path = Path(MNEMON_TOKEN_FILE)
     if not path.exists():
         raise RuntimeError(
-            f"No API key. Set MNEMON_API_KEY or write the key to {MNEMON_KEY_FILE}."
+            f"No token. Set MNEMON_TOKEN or write it to {MNEMON_TOKEN_FILE}. "
+            "See benchmark/mnemon_client.py for how to mint one."
         )
     return path.read_text().strip()
 
@@ -53,18 +57,19 @@ SEARCH_WORKERS = int(os.environ.get("SEARCH_WORKERS", "8"))
 MAX_DRAWER_CHARS = int(os.environ.get("MAX_DRAWER_CHARS", "30000"))
 
 # Search params.
-SEARCH_LIMIT = int(os.environ.get("SEARCH_LIMIT", "10"))  # capped server-side at 20
-SEARCH_MODE = os.environ.get("SEARCH_MODE", "hybrid")  # semantic | fulltext | hybrid
+SEARCH_LIMIT = int(os.environ.get("SEARCH_LIMIT", "10"))  # server accepts 1-50
+# NOTE: retrieval mode is no longer caller-selectable — `mode` was dropped from
+# drawer_search when the tools were rewritten against laravel/mcp.
 
 # QA evaluation (Phase 4) — optional.
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 QA_MODEL = os.environ.get("QA_MODEL", "gpt-4o")
 
-# SSH host for cleanup (uses tinker on the production server).
-SSH_HOST = os.environ.get("MNEMON_SSH_HOST", "forge@198.51.100.10")
-SSH_APP_PATH = os.environ.get(
-    "MNEMON_SSH_APP_PATH", "/home/forge/mnemon.example.com/current"
-)
+# SSH target for cleanup (runs tinker on the deployed server). No defaults —
+# this file is version-controlled and the repository is going public, so the
+# host and deploy path must come from the environment.
+SSH_HOST = os.environ.get("MNEMON_SSH_HOST", "")
+SSH_APP_PATH = os.environ.get("MNEMON_SSH_APP_PATH", "")
 
 # Slugger that mirrors Laravel's Str::slug behavior for our colon-style names.
 # Mnemon does: Str::slug(str_replace(':', '-', $wingName))

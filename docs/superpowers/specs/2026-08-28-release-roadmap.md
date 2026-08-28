@@ -143,6 +143,10 @@ that hard-errors.
 
 ### D11 — full-text search has different semantics on each engine, and production is the strict one
 
+**Status: resolved** (round 1 `e1c7b67`, round 2 below). Two follow-ups are
+deliberately left open and called out at the end: PostgreSQL has no substring
+match, and the unselective full-text query is still a sequential scan.
+
 Found by the PostgreSQL CI leg on its first run, and reproduced against a local
 `pgvector/pgvector:pg17` container.
 
@@ -176,11 +180,11 @@ Three tests fail on PostgreSQL for this reason and pass on SQLite:
 Filament search page searches drawers — so `PalaceSearchService` had failing
 coverage too, not just `WikiSearchService`.)
 
-**Status: resolved.** Both engines now implement the same semantics, differing
-only in the match primitive: membership is OR across the distinct query words,
-and the score is the number of distinct query words present, normalized by the
-total word count. On PostgreSQL that is one bound `plainto_tsquery` per word
-instead of one for the whole query, summed in a CASE expression:
+**Round 1 (`e1c7b67`) — matching.** Both engines were given the same
+semantics, differing only in the match primitive: membership is OR across the
+distinct query words, and the raw score is the number of distinct query words
+present. On PostgreSQL that is one bound `plainto_tsquery` per word instead of
+one for the whole query, summed in a CASE expression:
 
 ```sql
 -- membership
@@ -193,18 +197,82 @@ instead of one for the whole query, summed in a CASE expression:
 `ts_rank` was rejected: it ranks by lexeme frequency, not by how many query
 words hit, so it does not reproduce the ordering the SQLite path defines.
 `websearch_to_tsquery` was rejected because it also ANDs unquoted words. Every
-word is a binding — nothing user-supplied reaches the SQL text — and both paths
-share one `queryWords()` tokenizer so they cannot drift.
+word is a binding — nothing user-supplied reaches the SQL text.
 
-Stop words are the one remaining divergence, and it is deliberate:
-`plainto_tsquery('english','about')` is an empty tsquery and `@@` against it is
-false for every row, so on PostgreSQL a stop word never contributes a hit and a
-query made only of stop words returns an empty collection — it carries no
-searchable term. SQLite's LIKE has no stop-word notion and matches them
-literally. This is the same class of difference as PostgreSQL's stemming
-("engineers" matches "engineer", which LIKE cannot do): PostgreSQL is strictly
-more capable, not differently broken. Both behaviours are pinned by a test on
-each service.
+**Round 1 fixed the matching and left `recall` still empty.** Round 1
+normalized the score by the *total* word count, and `RecallService` filters the
+wiki leg against `mnemon.recall.confidence_floor` — 0.45, with no
+`MNEMON_RECALL_FLOOR` in `.env.example` to move it. A conversational prompt
+scored 0.167–0.333 and was filtered out entirely, so `recall` returned
+`found => true` with an empty `wiki` array: D11's original symptom, unchanged.
+Measured on the container at floor 0.45, `what is the atlas project about` was
+also a *regression* — it matched at 1.0 before `e1c7b67` and 0.333 after. No
+test caught any of this because every `recall` test lowered the floor to 0.1 or
+0.0.
+
+**Round 2 — scoring, stop words, safety.** The denominator is now the number of
+*searchable* terms, not the number of words typed. Stop words are dropped from
+the query before it reaches SQL (`TokenizesSearchQueries`, holding PostgreSQL
+17's own 127-entry `english.stop` list verbatim), so "what do we know about
+dorothy" is scored as two terms, not six: a page that says "dorothy" scores 0.5
+and clears the shipped floor. A query where every term hits still scores exactly
+1.0, unchanged. Both services share the one tokenizer, so they cannot drift, and
+`RecallServiceTest` now runs at the shipped floor with no config override.
+
+A query that is *nothing but* stop words — a person named Will, an "IT" wing, a
+project called "Down", or the degenerate "what do we" — has no dictionary form
+at all and used to return nothing on PostgreSQL. It now falls through to the
+substring primitive on both engines, so the two agree.
+
+Two safety defects in the round-1 form were fixed at the same time: `%` and `_`
+were interpolated into the LIKE pattern unescaped (a query of `%` returned every
+row at score 1.0 on SQLite), and the word count reaching the engine was
+unbounded (SQLite raises "Expression tree is too large" at 997 distinct words,
+PostgreSQL "stack depth limit exceeded" at ~4,063 — and `recall` passes the raw
+user prompt). Terms are now escaped with `ESCAPE '!'` — deliberately not a
+backslash, which breaks PDO's placeholder scanner — and capped at 32, keeping
+the longest words rather than an arbitrary prefix.
+
+**The engines are not ordered by capability.** An earlier draft of this entry,
+and of both service docblocks, claimed PostgreSQL was "strictly more capable".
+It is not, and the trade runs in both directions:
+
+```
+PostgreSQL wins (stemming)      "engineers"  matches "engineer"
+SQLite wins (substring)         auth      -> "authentication"
+                                compiler  -> "WikiPageCompiler"
+                                dorothy   -> "dorothy.vaughan@example.com"
+                                1234      -> "ISSUE-1234"
+```
+
+PostgreSQL's `@@` matches whole lexemes, so none of the four SQLite cases match
+there. Closing that gap on PostgreSQL — a trigram index, or matching substrings
+alongside lexemes — is a design question of its own and is **open**.
+
+**Indexing.** `to_tsvector('english', content)` had no index on either table, so
+every full-text search was a sequential scan that evaluated `to_tsvector` once
+per query term per row, on a path `recall` runs on every user prompt. A
+functional GIN index on both tables (`2026_08_28_200000_add_fulltext_indexes`,
+PostgreSQL-guarded) fixes the selective case. Measured with `EXPLAIN ANALYZE` on
+50,000 rows, prompt `what do we know about dorothy`:
+
+| | terms in SQL | no index | GIN index |
+|---|---|---|---|
+| before round 2 | 6 | 5,326 ms | 843 ms |
+| after round 2 | 2 | 1,699 ms | **288 ms** |
+
+End-to-end `recall` against 50,000 drawers and 50,000 wiki pages: 4,066 ms →
+630 ms. Index size is ~4.5 MB per table at 50,000 rows.
+
+The index does **not** help an unselective query — six content words matching
+half the corpus stays at ~4,800 ms, because the planner correctly rejects a
+BitmapOr covering half the table and the seq scan is dominated by evaluating
+`to_tsvector` per row per term. A `tsvector` column
+`GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`, indexed instead
+of the expression, takes that same query to **47 ms** (~100x) and the selective
+one to 32 ms, because the vector is never recomputed. That is a schema change
+with a table rewrite and roughly a doubling of text storage, so it is **open**
+rather than done here.
 
 ## Findings from the 2026-08-28 session, already fixed
 

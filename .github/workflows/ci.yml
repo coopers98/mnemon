@@ -5,10 +5,18 @@ on:
     branches: [main]
   pull_request:
 
+# This repo is about to be public: give the default token no more than it
+# needs. Neither job writes anything back.
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: tests (${{ matrix.database }})
     runs-on: ubuntu-latest
+    # A hung leg (a service container that never becomes healthy, a test that
+    # blocks on a socket) should fail in minutes, not burn the six-hour default.
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -37,7 +45,10 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: pdo_pgsql, pgsql, intl, zip, bcmath, gd
+          # sqlite3/pdo_sqlite are in setup-php's Ubuntu defaults today, but
+          # the sqlite leg is the one every contributor depends on — it should
+          # not rest on an undocumented default.
+          extensions: pdo_pgsql, pgsql, sqlite3, pdo_sqlite, intl, zip, bcmath, gd
           coverage: none
 
       - name: Install dependencies
@@ -84,6 +95,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
+          extensions: sqlite3, pdo_sqlite, intl, zip, bcmath, gd
           coverage: none
 
       - name: Install dependencies

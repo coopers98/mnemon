@@ -29,9 +29,30 @@ php artisan config:clear
 php artisan view:clear
 php artisan cache:clear || true
 
-if [ -z "${APP_KEY}" ]; then
+# APP_KEY must survive container restarts. .dockerignore excludes storage/
+# from the image, and compose's env_file: only injects environment
+# variables — there is no writable .env inside the container for
+# `key:generate --force` to persist a key into; it would land in the
+# container's ephemeral layer and be gone on the next boot. So Mnemon
+# persists the key itself in the storage volume instead. Precedence:
+#   1. An operator-supplied APP_KEY in the environment always wins and is
+#      never overwritten.
+#   2. Otherwise, reuse the key already persisted at storage/app_key.
+#   3. Otherwise, generate one with `key:generate --show` (prints, does not
+#      write), persist it, and use it.
+# Do NOT change this back to `key:generate --force` — without persistence,
+# every restart with no operator-supplied key would silently mint a new
+# one, invalidating every session and anything encrypted under the old key.
+if [ -n "${APP_KEY}" ]; then
+    export APP_KEY
+elif [ -f storage/app_key ]; then
+    export APP_KEY="$(cat storage/app_key)"
+else
     echo "[mnemon] generating APP_KEY"
-    php artisan key:generate --force
+    APP_KEY="$(php artisan key:generate --show)"
+    printf '%s\n' "${APP_KEY}" > storage/app_key
+    chmod 600 storage/app_key
+    export APP_KEY
 fi
 
 php artisan migrate --force

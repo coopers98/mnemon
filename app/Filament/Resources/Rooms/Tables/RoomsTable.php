@@ -8,6 +8,7 @@ use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class RoomsTable
 {
@@ -36,7 +37,15 @@ class RoomsTable
                 TextColumn::make('last_activity_at')
                     ->label('Last activity')
                     ->dateTime()
-                    ->sortable()
+                    // `last_activity_at` is MAX(drawers.created_at) and is NULL for a
+                    // room that has never held a drawer. PostgreSQL puts NULLs first on
+                    // DESC; SQLite puts them last. A room with no drawers is not the
+                    // most recently active one, so pin NULLs to the "oldest" end on both
+                    // engines. Postgres will not accept a select alias inside an ORDER BY
+                    // expression, so NULLS FIRST/LAST is the only portable spelling here.
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderByRaw(
+                        'last_activity_at '.($direction === 'desc' ? 'desc nulls last' : 'asc nulls first')
+                    ))
                     ->placeholder('—'),
             ])
             ->defaultSort('last_activity_at', 'desc')

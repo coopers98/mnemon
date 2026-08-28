@@ -300,23 +300,31 @@ different scales, so the floor is effectively stricter for wiki than for
 drawers. Deciding whether both should be absolute, both relative, or separately
 configured is a product question about what `confidence` is supposed to mean.
 
-### D14 — the contact form emails a hardcoded personal address
+### D14 — the contact form emailed a hardcoded personal address — FIXED
 
-`app/Http/Controllers/ContactController.php:24` is
-`Mail::to('coopersellers@gmail.com')->send(...)`. It is the only occurrence and
-there is no config key behind it. The contact form ships on the public landing
-page (`resources/views/landing/index.blade.php:591`) in every install, so on an
-MIT self-hosted release every operator's instance mails the project author's
-personal address with their own visitors' submissions, the operator never learns
-anyone contacted them, and the address sits in a public repository to be
-scraped.
+`app/Http/Controllers/ContactController.php` hardcoded a `Mail::to(...)` call to
+the project author's personal address, with no config key behind it. The contact
+form ships on the public landing page
+(`resources/views/landing/index.blade.php:591`) in every install, so on an MIT
+self-hosted release every operator's instance would have mailed that address
+with their own visitors' submissions, and the operator would never have learned
+anyone contacted them.
 
-Submissions are not lost — `ContactController::store` writes a
+Submissions were never at risk — `ContactController::store` writes a
 `ContactSubmission` row *before* attempting the send and catches failures — so
-this is a misdirection and disclosure problem, not a data-loss one.
+this was a misdirection and disclosure problem, not a data-loss one.
 
-Being fixed in install-story group 2, Task 7: a `MNEMON_CONTACT_TO` config key
+Fixed in install-story group 2, Task 7: a `MNEMON_CONTACT_TO` config key
 defaulting to null, sending only when set, with no fallback recipient.
+
+A note on this entry's own history, because the lesson generalises. As first
+written it quoted the offending address literally, while arguing that the
+address must not "sit in a public repository to be scraped" — so the defect
+report reproduced the exact exposure it described, and moved it from code, where
+a grep of `app/` would find it, into documentation, where that grep would not.
+The original claim that the controller held "the only occurrence" was true when
+written and false the moment this entry was committed. Redacted. When recording
+a disclosure defect, describe the value; do not quote it.
 
 ### D15 — a malformed `client_id` returns 500 instead of a 4xx
 
@@ -371,11 +379,18 @@ all three require a valid `mcp:use` token — so this is a lower bar than the
 one the superseded roadmap set, and it is a judgement rather than a hard rule.
 The wiki limitation ships documented rather than fixed.
 
-Three things are hard requirements regardless: a `LICENSE` file must exist
-before the repository is public, the GitHub OAuth token currently embedded in
-the `origin` remote URL must be rotated, and D14 must land — publishing a
-repository that mails every operator's contact submissions to a personal Gmail
-address is not a defect to document, it is one to fix first.
+Three things were hard requirements regardless. **D14 has landed** — the contact
+recipient is now configurable and unset by default. Two remain open, and both
+are outside what an implementation branch can close:
+
+- A `LICENSE` file must exist before the repository is public. MIT is the
+  decided license; the file does not yet exist.
+- The GitHub OAuth token embedded in the `origin` remote URL must be rotated.
+
+Before flipping the repository public, grep the full tracked tree — not just
+`app/` — for personal addresses, tokens, and internal hostnames. This document
+itself carried the author's personal email for several commits precisely because
+the earlier check was scoped to application code.
 
 ## Documentation
 

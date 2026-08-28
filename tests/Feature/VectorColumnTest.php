@@ -24,6 +24,12 @@ class VectorColumnTest extends TestCase
             $this->markTestSkipped('vector columns only exist on PostgreSQL');
         }
 
+        // Avoid embedding-driver hits during drawer creation in tests. The
+        // explicit UPDATE below supplies the real vector this test proves
+        // round-trips, so disabling the driver here changes nothing about
+        // what's being asserted.
+        config(['mnemon.embedding.driver' => 'none']);
+
         $wing = Wing::create(['name' => 'work', 'slug' => 'work']);
         $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
         $drawer = Drawer::create(['content' => 'a note', 'room_id' => $room->id]);

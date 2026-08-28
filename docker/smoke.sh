@@ -3,6 +3,14 @@
 # changed nothing it should not have — including the persisted APP_KEY,
 # whose silent rotation would invalidate every session and anything
 # encrypted under the old key. Run from the repository root.
+#
+# Uses a dedicated Compose project name (-p mnemon-smoke) rather than the
+# default, which Compose derives from the directory name ("mnemon") — the
+# same namespace a self-hoster's own `docker compose up` uses from this
+# same checkout. Without an explicit project name this script would adopt
+# a running self-hosted stack's containers, assert against its live data,
+# and destroy every mnemon_* volume in the cleanup trap below. See the
+# `$COMPOSE down -v` right before `up` for the other half of this fix.
 set -eu
 
 ENVFILE=.env.smoke
@@ -12,22 +20,39 @@ cp .env.docker.example "$ENVFILE"
 # env_file at the template instead of a developer's real .env.
 export MNEMON_ENV_FILE="$ENVFILE"
 
+PROJECT=mnemon-smoke
+COMPOSE="docker compose -p $PROJECT --env-file $ENVFILE"
+
 # A DOMAIN here would make every CI run order real certificates.
 sed -i 's/^DOMAIN=.*/DOMAIN=/' "$ENVFILE"
 
+# The hardcoded http://127.0.0.1:8080 check below only matches the template's
+# defaults; force them so a developer's real .env.docker.example edits (or a
+# future change to the template) can't silently desync the two.
+sed -i 's/^HTTP_BIND=.*/HTTP_BIND=127.0.0.1:8080/' "$ENVFILE"
+sed -i 's/^HTTPS_BIND=.*/HTTPS_BIND=127.0.0.1:8443/' "$ENVFILE"
+
 cleanup() {
-    docker compose --env-file "$ENVFILE" down -v >/dev/null 2>&1 || true
+    $COMPOSE down -v >/dev/null 2>&1 || true
     rm -f "$ENVFILE"
 }
 trap cleanup EXIT
 
-docker compose --env-file "$ENVFILE" up -d --build
+# Tear down before starting, not just after: a project-scoped volume left
+# over from an interrupted previous run (trap didn't fire, CI runner
+# reused) would let the first-boot assertions below — USERS1 = 1, the
+# admin-password read — pass against that leftover state instead of
+# genuinely exercising the code this script exists to test. Every run
+# must provably start from nothing.
+$COMPOSE down -v >/dev/null 2>&1 || true
+
+$COMPOSE up -d --build
 
 echo "waiting for app health…"
 i=0
-until [ "$(docker compose --env-file "$ENVFILE" ps app --format '{{.Health}}')" = "healthy" ]; do
+until [ "$($COMPOSE ps app --format '{{.Health}}')" = "healthy" ]; do
     i=$((i + 1))
-    [ "$i" -gt 60 ] && { echo "app never became healthy"; docker compose --env-file "$ENVFILE" logs app; exit 1; }
+    [ "$i" -gt 60 ] && { echo "app never became healthy"; $COMPOSE logs app; exit 1; }
     sleep 5
 done
 
@@ -35,7 +60,7 @@ curl -fsS -o /dev/null http://127.0.0.1:8080/up
 echo "health OK"
 
 echo "checking built assets…"
-docker compose --env-file "$ENVFILE" exec -T app sh -c '
+$COMPOSE exec -T app sh -c '
     set -e
     test -f public/build/manifest.json || { echo "FAIL: no Vite manifest — the asset stage did not run"; exit 1; }
     php -r "
@@ -57,23 +82,23 @@ docker compose --env-file "$ENVFILE" exec -T app sh -c '
 '
 echo "assets OK"
 
-PW1=$(docker compose --env-file "$ENVFILE" exec -T app sh -c 'cat storage/admin-password.txt')
-KEY1=$(docker compose --env-file "$ENVFILE" exec -T app sh -c 'cat storage/app_key')
-USERS1=$(docker compose --env-file "$ENVFILE" exec -T app php artisan tinker --execute='echo App\Models\User::count();' | tail -1)
+PW1=$($COMPOSE exec -T app sh -c 'cat storage/admin-password.txt')
+KEY1=$($COMPOSE exec -T app sh -c 'cat storage/app_key')
+USERS1=$($COMPOSE exec -T app php artisan tinker --execute='echo App\Models\User::count();' | tail -1)
 [ "$USERS1" = "1" ] || { echo "FAIL: expected 1 user, got $USERS1"; exit 1; }
 
 echo "restarting to prove the bootstrap is idempotent…"
-docker compose --env-file "$ENVFILE" restart app
+$COMPOSE restart app
 i=0
-until [ "$(docker compose --env-file "$ENVFILE" ps app --format '{{.Health}}')" = "healthy" ]; do
+until [ "$($COMPOSE ps app --format '{{.Health}}')" = "healthy" ]; do
     i=$((i + 1))
-    [ "$i" -gt 60 ] && { echo "app never became healthy after restart"; docker compose --env-file "$ENVFILE" logs app; exit 1; }
+    [ "$i" -gt 60 ] && { echo "app never became healthy after restart"; $COMPOSE logs app; exit 1; }
     sleep 5
 done
 
-PW2=$(docker compose --env-file "$ENVFILE" exec -T app sh -c 'cat storage/admin-password.txt')
-KEY2=$(docker compose --env-file "$ENVFILE" exec -T app sh -c 'cat storage/app_key')
-USERS2=$(docker compose --env-file "$ENVFILE" exec -T app php artisan tinker --execute='echo App\Models\User::count();' | tail -1)
+PW2=$($COMPOSE exec -T app sh -c 'cat storage/admin-password.txt')
+KEY2=$($COMPOSE exec -T app sh -c 'cat storage/app_key')
+USERS2=$($COMPOSE exec -T app php artisan tinker --execute='echo App\Models\User::count();' | tail -1)
 
 [ "$PW1" = "$PW2" ] || { echo "FAIL: admin password rotated on restart"; exit 1; }
 [ "$USERS2" = "1" ] || { echo "FAIL: user count changed to $USERS2 on restart"; exit 1; }

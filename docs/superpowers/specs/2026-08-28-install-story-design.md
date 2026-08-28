@@ -140,12 +140,13 @@ means `artisan tinker`. Printing to stdout is not sufficient: nobody watches
 key and add `embedded_count` / `unembedded_count` alongside it, so embedding
 coverage is visible rather than inferred.
 
-**Semantic search under `driver=none` returns an empty result set with no
-error.** `PalaceSearchService.php:63-68` logs a server-side warning the user
-never sees, so an agent asking for semantic retrieval reads the response as "the
-palace is empty". With `none` becoming the default, this stops being an edge
-case. Return an explanatory error or degrade to full-text with a notice in the
-tool response.
+**~~Semantic search under `driver=none` returns a silent empty result set.~~
+Withdrawn on verification.** The review flagged `PalaceSearchService.php:63-68`
+as user-reachable. It is not: nothing in `app/` calls `search()` with
+`mode='semantic'`, `DrawerSearchService.php:29` hard-codes `mode: 'hybrid'`, and
+`hybridSearch` skips the semantic leg cleanly under `NullDriver`
+(`PalaceSearchService.php:141-145`). The early-return is unreachable defensive
+code, not a defect. No task.
 
 ## New defect: D10 — the Ollama driver cannot store an embedding
 

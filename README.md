@@ -6,6 +6,47 @@ Built on Laravel 13, PostgreSQL + pgvector, and Filament v5. Deployed at [mnemon
 
 ---
 
+## Quickstart
+
+```bash
+git clone https://github.com/coopers98/mnemon.git
+cd mnemon
+cp .env.docker.example .env
+docker compose up -d
+```
+
+Then open `http://localhost:8080`. The admin password is generated on first
+boot and written to `storage/admin-password.txt` inside the `app` container:
+
+```bash
+docker compose exec app cat storage/admin-password.txt
+```
+
+There is no password reset flow — save it somewhere safe.
+
+By default the stack binds to loopback only (`127.0.0.1:8080` / `127.0.0.1:8443`),
+so a local trial is never exposed to the network. To serve on a real hostname with
+automatic HTTPS from Let's Encrypt instead:
+
+1. Point a DNS **A/AAAA record for the hostname at this host before you start the
+   stack.** Let's Encrypt validates over HTTP-01, so a name that doesn't resolve
+   yet fails issuance and Caddy serves nothing on that hostname.
+2. Set `DOMAIN` in `.env` to that hostname.
+3. Set `HTTP_BIND=0.0.0.0:80` and `HTTPS_BIND=0.0.0.0:443` in `.env`. These
+   default to loopback so a "just trying it" run doesn't serve your knowledge
+   base to the internet — leaving them at the defaults while `DOMAIN` is set is
+   the single most likely reason certificate issuance fails.
+
+Leave `DOMAIN` blank if you're running behind a reverse proxy that already
+terminates TLS — that's the correct configuration for that setup, not just the
+local-trial fallback.
+
+See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#getting-started) for the native
+(non-Docker) install, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for running the
+test suite.
+
+---
+
 ## What this is
 
 Mnemon has two layers:
@@ -61,6 +102,10 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 **Palace browser** at `/palace` — explore wings, rooms, and drawers visually.
 
 **Landing page** at `/` — overview and entry point.
+
+Use the [Quickstart](#quickstart) above to get a running instance fastest. The
+steps below are the native (non-Docker) install — useful for developing on
+Mnemon itself, or if you'd rather manage PHP and Postgres yourself:
 
 ```bash
 composer install
@@ -144,13 +189,20 @@ OpenClaw's `memory_search` can route queries to Mnemon alongside local files, gi
 
 ### As an embedding backend
 
-Three drivers ship out of the box. Configure via `MNEMON_EMBEDDING_DRIVER`:
+Configure via `MNEMON_EMBEDDING_DRIVER`:
 
 | Driver | Model | Dimensions | Notes |
 |---|---|---|---|
-| `openai` | `text-embedding-3-small` | 1536 | Default. Needs `OPENAI_API_KEY`. |
-| `ollama` | `nomic-embed-text` | 768 | For local-only setups. Needs an Ollama daemon. |
+| `openai` | `text-embedding-3-small` | 1536 | The application default (`config/mnemon.php`). Needs `OPENAI_API_KEY`. The Docker Quickstart overrides this to `none` in `.env.docker.example`, so trying Mnemon needs no account and spends nothing. |
 | `none` | — | — | Disables embeddings; search falls back to full-text + temporal only. |
+
+A third driver, `ollama` (`nomic-embed-text`, 768 dimensions), is implemented
+but currently unusable: the `drawers` and `wiki_pages` tables define
+`embedding` as a fixed `vector(1536)` column, so a 768-dimension vector fails
+to write. Selecting `ollama` will error the first time anything tries to
+store an embedding. This is tracked as defect D10 and is not fixed in this
+release — if you need fully local embeddings, `none` (no semantic ranking,
+full-text + temporal only) is the working option today.
 
 Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings under the new model.
 
@@ -222,6 +274,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
+- **The `ollama` embedding driver can't store an embedding.** The `embedding` column is a fixed `vector(1536)`, and `nomic-embed-text` produces 768-dimension vectors — writes fail. Tracked as D10, not fixed in this release. See [As an embedding backend](#as-an-embedding-backend).
 - **Word count is ASCII-only.** `getWordCountAttribute()` uses PHP's `str_word_count`. Multi-byte content under-counts. Documented; will be revisited if it ever matters.
 - **Source filter dropdowns are cached for 60s.** Newly added drawer sources or new MCP tool names take up to a minute to appear in the BrainSession/Drawer filter dropdowns.
 - **`brain_sessions.source` is non-nullable.** The audit log requires every invocation to identify itself with a key name; anonymous calls are rejected upstream by the auth middleware.
@@ -234,6 +287,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Documentation
 
 - [`docs/USERGUIDE.md`](docs/USERGUIDE.md) — **day-to-day playbook**: setup, connecting agents, OAuth, multi-device, troubleshooting, FAQ
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — running the test suite (SQLite and Postgres), formatting, the Docker smoke test
 - [`CLAUDE.md`](CLAUDE.md) — agent / contributor conventions (canonical for AI work)
 - [`AGENTS.md`](AGENTS.md) — pointer for non-Claude agents
 - [`docs/FRD.md`](docs/FRD.md) — functional requirements

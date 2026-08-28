@@ -172,17 +172,39 @@ Three tests fail on PostgreSQL for this reason and pass on SQLite:
 `RecallToolTest` (same payload assertion), and
 `SearchPageTest::test_results_are_sorted_by_score`.
 
-**Deliberately not fixed here.** Choosing the right semantics is a product
-decision, not a patch: `websearch_to_tsquery` gives OR-ish behaviour with
-quoted-phrase support, an explicit `' | '`-joined `tsquery` gives pure OR, and
-ranking by `ts_rank` means the two engines should agree on ordering as well as
-on membership. It also needs a view on whether SQLite's OR-any-word behaviour
-or PostgreSQL's AND-all-words behaviour is the one users should get. That
-deserves its own design pass rather than being tacked onto the install story.
+(The third of those, `SearchPageTest`, exercises the **palace** path — the
+Filament search page searches drawers — so `PalaceSearchService` had failing
+coverage too, not just `WikiSearchService`.)
 
-An abandoned first attempt at a fix — hand-building a `tsquery` from tokenised
-words — was preserved as a patch during the session but not committed; it is
-not a reviewed design.
+**Status: resolved.** Both engines now implement the same semantics, differing
+only in the match primitive: membership is OR across the distinct query words,
+and the score is the number of distinct query words present, normalized by the
+total word count. On PostgreSQL that is one bound `plainto_tsquery` per word
+instead of one for the whole query, summed in a CASE expression:
+
+```sql
+-- membership
+(to_tsvector('english', content) @@ plainto_tsquery('english', ?)) OR (…) …
+-- score
+( CASE WHEN to_tsvector('english', content) @@ plainto_tsquery('english', ?)
+       THEN 1 ELSE 0 END + … )
+```
+
+`ts_rank` was rejected: it ranks by lexeme frequency, not by how many query
+words hit, so it does not reproduce the ordering the SQLite path defines.
+`websearch_to_tsquery` was rejected because it also ANDs unquoted words. Every
+word is a binding — nothing user-supplied reaches the SQL text — and both paths
+share one `queryWords()` tokenizer so they cannot drift.
+
+Stop words are the one remaining divergence, and it is deliberate:
+`plainto_tsquery('english','about')` is an empty tsquery and `@@` against it is
+false for every row, so on PostgreSQL a stop word never contributes a hit and a
+query made only of stop words returns an empty collection — it carries no
+searchable term. SQLite's LIKE has no stop-word notion and matches them
+literally. This is the same class of difference as PostgreSQL's stemming
+("engineers" matches "engineer", which LIKE cannot do): PostgreSQL is strictly
+more capable, not differently broken. Both behaviours are pinned by a test on
+each service.
 
 ## Findings from the 2026-08-28 session, already fixed
 

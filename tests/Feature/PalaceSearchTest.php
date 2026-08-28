@@ -7,6 +7,7 @@ use App\Models\Room;
 use App\Models\Wing;
 use App\Services\PalaceSearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -205,5 +206,100 @@ class PalaceSearchTest extends TestCase
         $results = $service->search('shared concept');
 
         $this->assertCount(2, $results);
+    }
+
+    /**
+     * D11: membership is OR across query words, same contract as
+     * WikiSearchService. Reverting to a whole-query `plainto_tsquery` makes this
+     * return nothing on PostgreSQL.
+     */
+    public function test_fulltext_matches_drawers_containing_any_query_word(): void
+    {
+        $this->createDrawer('Dorothy is the lead engineer on the Atlas project.');
+        $this->createDrawer('Cora is a recital optimization system for dance studios.');
+
+        $service = app(PalaceSearchService::class);
+        $results = $service->search('what do we know about dorothy', mode: 'fulltext');
+
+        $this->assertCount(1, $results);
+        $this->assertStringContainsString('Dorothy', $results->first()->content);
+    }
+
+    /**
+     * D11: score is the number of distinct query words present, normalized by
+     * the total number of query words — identical on both engines.
+     */
+    public function test_fulltext_scores_drawers_by_distinct_query_word_hits(): void
+    {
+        $this->createDrawer('alpha bravo charlie together');
+        $this->createDrawer('alpha on its own');
+        $this->createDrawer('bravo on its own');
+
+        $service = app(PalaceSearchService::class);
+        $results = $service->search('alpha bravo', mode: 'fulltext');
+
+        $this->assertCount(3, $results);
+        $this->assertStringContainsString('charlie', $results->first()->content);
+        $this->assertSame([1.0, 0.5, 0.5], $results->pluck('score')->all());
+    }
+
+    /**
+     * D11: hybrid mode inherits the fixed fulltext membership on PostgreSQL —
+     * this is the path the Filament search page and `recall` actually use.
+     */
+    public function test_hybrid_matches_drawers_containing_any_query_word(): void
+    {
+        $this->createDrawer('Dorothy is the lead engineer on the Atlas project.');
+        $this->createDrawer('Cora is a recital optimization system for dance studios.');
+
+        $service = app(PalaceSearchService::class);
+        $results = $service->search('what do we know about dorothy', mode: 'hybrid');
+
+        $this->assertCount(1, $results);
+        $this->assertStringContainsString('Dorothy', $results->first()->content);
+    }
+
+    /**
+     * D11 empty case — see WikiSearchTest for the reasoning. A query made only
+     * of stop words yields an empty tsquery per word on PostgreSQL, which
+     * matches nothing; SQLite's LIKE matches the words literally.
+     */
+    public function test_stop_words_only_query_returns_nothing_on_postgres(): void
+    {
+        $this->createDrawer('We do know what this drawer is about.');
+
+        $service = app(PalaceSearchService::class);
+        $results = $service->search('what do we', mode: 'fulltext');
+
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            $this->assertTrue(
+                $results->isEmpty(),
+                'a stop-words-only query has no searchable term on PostgreSQL'
+            );
+        } else {
+            $this->assertCount(1, $results, 'SQLite LIKE matches stop words literally');
+        }
+    }
+
+    /**
+     * D11 safety: the per-word form builds N SQL fragments from a user-supplied
+     * string, so every word must be a binding. A payload shaped like a tsquery /
+     * SQL break-out must not become a tautology that returns every row, and must
+     * not raise a syntax error on either engine.
+     */
+    public function test_query_with_sql_and_tsquery_metacharacters_is_bound_not_interpolated(): void
+    {
+        $this->createDrawer('Zephyr calibration ledger.');
+        $this->createDrawer('Quokka bandwidth ledger.');
+
+        $service = app(PalaceSearchService::class);
+
+        $this->assertCount(0, $service->search("' OR 1=1 --", mode: 'fulltext'));
+        $this->assertCount(0, $service->search('!&|:*', mode: 'fulltext'));
+        // A real word alongside the payload still matches only what it should.
+        // (The word is whitespace-separated: Postgres' tsquery parser strips
+        // punctuation from a token, SQLite's LIKE does not — an engine
+        // difference in tokenization, not in matching semantics.)
+        $this->assertCount(1, $service->search("zephyr ' OR 1=1 --", mode: 'fulltext'));
     }
 }

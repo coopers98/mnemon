@@ -1,6 +1,42 @@
 #!/bin/sh
 set -e
 
+# APP_KEY is resolved here, before the bootstrap gate below, so every
+# container — not just the one running the bootstrap — has a working key:
+# encrypt()/decrypt() (Crypt, encrypted casts, signed URLs) must work in
+# `scheduler` too, even though only `app` is allowed to generate a new key.
+# Precedence:
+#   1. An operator-supplied APP_KEY in the environment always wins and is
+#      never overwritten.
+#   2. Otherwise, reuse the key already persisted at storage/app_key (shared
+#      with `app` via the same `storage` volume — by the time `scheduler`
+#      starts, `app` has already written it, since `scheduler` waits on
+#      `app`'s healthcheck).
+#   3. Otherwise, leave it unresolved here — the bootstrap block below
+#      generates and persists one, and only `app` ever reaches that block.
+# .dockerignore excludes storage/ from the image, and compose's env_file:
+# only injects environment variables — there is no writable .env inside the
+# container for `key:generate --force` to persist a key into; it would land
+# in the container's ephemeral layer and be gone on the next boot. So
+# Mnemon persists the key itself in the storage volume instead.
+# Do NOT change this back to `key:generate --force` — without persistence,
+# every restart with no operator-supplied key would silently mint a new
+# one, invalidating every session and anything encrypted under the old key.
+if [ -n "${APP_KEY}" ]; then
+    export APP_KEY
+elif [ -f storage/app_key ]; then
+    export APP_KEY="$(cat storage/app_key)"
+fi
+
+# APP_URL is resolved from DOMAIN here too, above the gate, for the same
+# reason: any container may need to generate a correct URL, not just the
+# one serving Caddy. CADDY_SITE_ADDRESS is Caddy-specific and stays below,
+# scoped to the container that actually runs it.
+if [ -n "${DOMAIN}" ]; then
+    export APP_URL="https://${DOMAIN}"
+    export SESSION_SECURE_COOKIE=true
+fi
+
 # Only the app container runs the bootstrap. If the scheduler ran it too,
 # first boot would race: two key:generate (split-brain APP_KEY), two
 # migrate --force, two passport:keys, two admin seeds.
@@ -8,14 +44,32 @@ if [ "${MNEMON_BOOTSTRAP:-0}" != "1" ]; then
     exec "$@"
 fi
 
-# Derive the served address and APP_URL from DOMAIN so Passport's OAuth
-# metadata does not advertise localhost while Caddy serves a real hostname.
+# Derive the served address from DOMAIN so Caddy serves the real hostname
+# instead of the bare :80 default. Only meaningful here in the app
+# container, which is the only one running Caddy/FrankenPHP.
 if [ -n "${DOMAIN}" ]; then
     export CADDY_SITE_ADDRESS="${DOMAIN}"
-    export APP_URL="https://${DOMAIN}"
-    export SESSION_SECURE_COOKIE=true
 else
     export CADDY_SITE_ADDRESS=":80"
+fi
+
+# DOMAIN set with loopback binds is a silent total outage: ACME's HTTP-01
+# challenge needs port 80 reachable from the internet and TLS needs 443
+# published, but the container still reports healthy (the healthcheck hits
+# the internal :2020 address, not the public one) and every status signal
+# stays green while certificate issuance fails and the site is unreachable
+# at the real hostname. Warn loudly rather than refuse — an exotic setup
+# (something else publishing these ports itself) might be legitimate.
+if [ -n "${DOMAIN}" ]; then
+    loopback_bind() {
+        case "$1" in
+            ""|127.*|localhost|localhost:*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+    if loopback_bind "${HTTP_BIND:-}" || loopback_bind "${HTTPS_BIND:-}"; then
+        echo "[mnemon] WARNING: DOMAIN=${DOMAIN} is set, but HTTP_BIND=${HTTP_BIND:-<unset, defaults to 127.0.0.1:8080>} / HTTPS_BIND=${HTTPS_BIND:-<unset, defaults to 127.0.0.1:8443>} bind only to loopback — Let's Encrypt cannot reach port 80 for the HTTP-01 challenge and nothing outside this host can reach 443. Certificate issuance will fail and https://${DOMAIN} will be unreachable. Set HTTP_BIND and HTTPS_BIND to public binds (e.g. 0.0.0.0:80 and 0.0.0.0:443) in your env file."
+    fi
 fi
 
 echo "[mnemon] waiting for the database at ${DB_HOST:-<unset>}:${DB_PORT:-<unset>}…"
@@ -28,31 +82,34 @@ until php -r 'exit(@fsockopen(getenv("DB_HOST"), (int) getenv("DB_PORT")) ? 0 : 
     fi
 done
 
+# A named `storage` volume shadows the image's storage/ skeleton once it
+# exists (Docker only auto-populates a volume from the image on that
+# volume's very first use), so a directory added to the Dockerfile's
+# skeleton in a later release never appears after an upgrade onto an
+# existing volume. Recreate it here, in the same spirit as the cache
+# clearing below — both exist to survive an image upgrade landing on a
+# volume created by an older image. mkdir -p is a no-op when already
+# present, so this is safe on every boot, not just an upgrade.
+mkdir -p \
+    storage/app/public \
+    storage/app/private \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/testing \
+    storage/framework/views \
+    storage/logs
+
 # Stale compiled config surviving an image upgrade is a classic self-hosted
 # failure, so clear before anything reads config.
 php artisan config:clear
 php artisan view:clear
 php artisan cache:clear || true
 
-# APP_KEY must survive container restarts. .dockerignore excludes storage/
-# from the image, and compose's env_file: only injects environment
-# variables — there is no writable .env inside the container for
-# `key:generate --force` to persist a key into; it would land in the
-# container's ephemeral layer and be gone on the next boot. So Mnemon
-# persists the key itself in the storage volume instead. Precedence:
-#   1. An operator-supplied APP_KEY in the environment always wins and is
-#      never overwritten.
-#   2. Otherwise, reuse the key already persisted at storage/app_key.
-#   3. Otherwise, generate one with `key:generate --show` (prints, does not
-#      write), persist it, and use it.
-# Do NOT change this back to `key:generate --force` — without persistence,
-# every restart with no operator-supplied key would silently mint a new
-# one, invalidating every session and anything encrypted under the old key.
-if [ -n "${APP_KEY}" ]; then
-    export APP_KEY
-elif [ -f storage/app_key ]; then
-    export APP_KEY="$(cat storage/app_key)"
-else
+# Generation only: precedence 1 (operator-supplied) and 2 (persisted) were
+# already resolved above the bootstrap gate, for every container. This is
+# precedence 3, reached only here, only in `app` — generate with
+# `key:generate --show` (prints, does not write), persist it, and use it.
+if [ -z "${APP_KEY:-}" ]; then
     echo "[mnemon] generating APP_KEY"
     APP_KEY="$(php artisan key:generate --show)"
     touch storage/app_key

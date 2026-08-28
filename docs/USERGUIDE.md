@@ -153,13 +153,15 @@ Wing access:
 
 All tools use the single `mcp:use` scope — there are no scope checkboxes. The real authorization decision is **which wings** this agent can see.
 
+On a fresh install there are no wings yet — nothing has been written to the palace, so the per-wing checkboxes shown above won't appear at all, only the "All wings" toggle. Your first token is necessarily unrestricted; once you've created wings, later tokens can be scoped to specific ones (see [Multi-device](#multi-device)).
+
 For your first agent, the simplest grant is **"All wings" (the master toggle)** — full access. You can mint additional, more restricted tokens for specific agent installs later (see [Multi-device](#multi-device)).
 
 Click **Authorize**. The browser closes. Claude Code shows `mnemon: connected`.
 
 ### Step 4: Test it
 
-In Claude Code, run `/mcp`. You should see Mnemon listed with 12 tools, 3 resources, 3 prompts. Then ask Claude something that should trigger a tool call:
+In Claude Code, run `/mcp`. You should see Mnemon listed with 14 tools, 3 resources, 3 prompts. Then ask Claude something that should trigger a tool call:
 
 > "Add a drawer to the work wing in a 'notes' room with content 'first ever drawer in mnemon, hello world'"
 
@@ -647,13 +649,13 @@ Set the env vars to the contents (one-line, can be plain or base64 — Passport 
 
 OAuth 2.1 requires `https://` for non-localhost redirect URIs. If `APP_URL` is `http://`, the OAuth flow will reject DCR client registrations with `https://` redirects.
 
-Configure your reverse proxy (Forge nginx, Cloudflare, etc.) to:
-
-- Terminate TLS
-- Forward `X-Forwarded-Proto: https` to PHP
-- Trust the proxy in `config/trustedproxy.php` (or `App\Http\Middleware\TrustProxies`)
-
-If consent flows redirect to `http://` URLs by mistake, your trusted-proxies config is wrong.
+**Running behind a TLS-terminating reverse proxy is not yet supported.** There is no
+`TrustProxies` configuration anywhere in this codebase, so Mnemon does not process
+`X-Forwarded-*` headers — a proxy terminating TLS in front of the app would still see
+Mnemon advertise `http://` URLs (OAuth discovery, Vite asset URLs), and a browser blocks
+the resulting mixed content on the consent screen. Until proxy trust is implemented,
+terminate TLS in the same process that serves Mnemon (for example the Docker `DOMAIN`
+path, which handles this via Caddy) rather than behind a separate reverse proxy.
 
 #### Migrations on deploy
 
@@ -691,7 +693,10 @@ relevant for running it in production rather than as a local trial.
   separately from the [Forge/Vapor/VPS](#forge--vapor--vps) instructions above. There is
   no queue worker service — nothing in the app implements `ShouldQueue` today.
 
-Three named volumes persist state across `docker compose down` (but not `down -v`):
+Three named volumes persist state across `docker compose down` (but not `down -v`).
+Compose prefixes volume names with the project name, so `docker volume ls` (or
+`docker volume inspect`) shows them as `mnemon_pgdata`, `mnemon_storage`, and
+`mnemon_caddy_data` — use the prefixed names in any `docker volume` command you run:
 
 - **`pgdata`** — the Postgres data directory.
 - **`storage`** — `storage/`, including the generated `APP_KEY` (`storage/app_key`), the
@@ -706,8 +711,10 @@ overwritten.
 
 For a real hostname with automatic HTTPS, see the [Quickstart](../README.md#quickstart)
 in the README — set `DOMAIN`, and set `HTTP_BIND=0.0.0.0:80` / `HTTPS_BIND=0.0.0.0:443`
-so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. Leave `DOMAIN`
-blank if a reverse proxy in front of the stack already terminates TLS.
+so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. Running behind
+a separate TLS-terminating reverse proxy is **not yet supported** — Mnemon does not
+process `X-Forwarded-*` headers, so OAuth discovery and asset URLs would still be
+advertised as `http://` behind one. Use the `DOMAIN` path above instead.
 
 ---
 
@@ -793,6 +800,35 @@ Symptom: `drawer_add` errors with timeout / 401 / 429.
   (see [Re-embedding](#re-embedding)).
 
 Workaround during an OpenAI outage: temporarily set `MNEMON_EMBEDDING_DRIVER=none`. New drawers won't get embeddings; semantic search degrades to full-text. Re-enable and `mnemon:reembed` once the driver recovers.
+
+### Changed `DB_PASSWORD` in `.env` and now the app crash-loops (Docker)
+
+```
+FATAL: password authentication failed for user "mnemon"
+```
+
+...while `docker compose ps` still shows `db` as healthy. This happens because
+PostgreSQL only reads `POSTGRES_PASSWORD` (from `DB_PASSWORD` in your env file)
+when **initialising an empty data directory** — on an existing `pgdata` volume
+the role keeps whatever password it was created with, so editing `DB_PASSWORD`
+after first boot silently does nothing for Postgres while the app keeps trying
+the new value. `pg_isready` (what the `db` healthcheck runs) doesn't
+authenticate, so the healthcheck stays green throughout.
+
+Two ways to fix it:
+
+1. **Change the role's actual password to match** — run this once, then keep
+   `DB_PASSWORD` in your env file in sync with whatever you set:
+   ```bash
+   docker compose exec db psql -U mnemon -c "ALTER ROLE mnemon WITH PASSWORD 'the-new-password';"
+   ```
+2. **Start over** — `docker compose down -v` deletes the `pgdata` volume (and
+   `storage`/`caddy_data` too) so the next `up` initialises fresh with whatever
+   `DB_PASSWORD` is currently in your env file. **This destroys all data** —
+   drawers, wiki pages, OAuth clients, everything.
+
+Avoid this entirely by setting `DB_PASSWORD` to its real value **before** the
+first `docker compose up`, not after.
 
 ### `pgvector` not installed
 

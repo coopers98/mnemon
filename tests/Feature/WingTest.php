@@ -52,4 +52,21 @@ class WingTest extends TestCase
 
         Wing::create(['name' => 'Another Wing', 'slug' => 'test-wing']);
     }
+
+    public function test_slugify_converts_namespace_colons_to_dashes(): void
+    {
+        $this->assertSame('project-atlas', Wing::slugify('project:atlas'));
+        $this->assertSame('person-jane-doe', Wing::slugify('person:jane-doe'));
+        $this->assertSame('work', Wing::slugify('Work'));
+    }
+
+    public function test_wing_creation_produces_the_slug_wiki_compile_looks_up(): void
+    {
+        // wiki_compile derives its lookup slug from a page name such as
+        // "project:atlas". A wing created from the same name must land on the
+        // same slug, or the page can never find its wing.
+        $wing = Wing::create(['name' => 'project:atlas']);
+
+        $this->assertSame('project-atlas', $wing->slug);
+    }
 }

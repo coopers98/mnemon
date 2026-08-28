@@ -12,7 +12,6 @@ use App\Models\WikiPage;
 use App\Models\Wing;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -42,7 +41,7 @@ class WikiCompileTool extends Tool
         $limit = (int) ($params['limit'] ?? 20);
 
         // Convert wiki page name to wing slug: e.g. "project:atlas" → "project-atlas"
-        $wingSlug = Str::slug(str_replace(':', '-', $name));
+        $wingSlug = Wing::slugify($name);
 
         if ($err = $this->requireWingAccess($request, $wingSlug)) {
             return $err;

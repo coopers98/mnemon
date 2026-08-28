@@ -18,11 +18,24 @@ class Wing extends Model
         'description',
     ];
 
+    /**
+     * The single canonical wing-slug function.
+     *
+     * Namespace colons ("project:atlas") become dashes before slugging, so
+     * every path that derives a wing slug agrees. Str::slug alone strips the
+     * colon entirely, which produced "projectatlas" here while wiki_compile
+     * looked up "project-atlas".
+     */
+    public static function slugify(string $name): string
+    {
+        return Str::slug(str_replace(':', '-', $name));
+    }
+
     protected static function booted(): void
     {
         static::creating(function (Wing $wing) {
             if (! $wing->slug) {
-                $wing->slug = Str::slug($wing->name);
+                $wing->slug = static::slugify($wing->name);
             }
         });
     }

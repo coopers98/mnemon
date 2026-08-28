@@ -16,6 +16,8 @@ class BrainSession extends Model
         'access_token_id',
         'input',
         'result_count',
+        'outcome',
+        'error',
     ];
 
     protected $casts = [

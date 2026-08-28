@@ -29,3 +29,5 @@ Thumbs.db
 /benchmark/data/
 /benchmark/results/
 /benchmark/state/
+__pycache__/
+*.pyc

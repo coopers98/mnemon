@@ -123,6 +123,24 @@ association — a schema change with a migration story for existing pages.
 **Decision: documented as a known limitation for launch, not fixed.** It must
 be stated plainly in the README rather than implied away.
 
+### D10 — the Ollama embedding driver cannot store an embedding
+
+`drawers.embedding` and `wiki_pages.embedding` are hard-coded `vector(1536)`
+(`2026_04_24_100002:24`, `2026_04_24_100003:25`), while `nomic-embed-text`
+declares 768 dimensions (`config/mnemon.php:14`). Postgres rejects a 768-d value
+into that column, so under `MNEMON_EMBEDDING_DRIVER=ollama` every `drawer_add`
+fails at save, `mnemon:reembed` fails on its first write, and every semantic
+query fails on dimension mismatch. Nothing ever ALTERs the column.
+
+`README.md:149-155` advertises Ollama as a supported driver. It is not — this is
+a live defect, found while designing Piece 2.
+
+Fixing it means either a `mnemon:reembed --resize` that recreates the column at
+the active driver's dimension, or an untyped `vector` column with a dimension
+check in application code. Both deserve their own design, so Piece 2 cuts the
+Ollama compose profile and corrects the README rather than shipping an option
+that hard-errors.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

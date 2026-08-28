@@ -300,6 +300,32 @@ different scales, so the floor is effectively stricter for wiki than for
 drawers. Deciding whether both should be absolute, both relative, or separately
 configured is a product question about what `confidence` is supposed to mean.
 
+### D14 — the contact form emails a hardcoded personal address
+
+`app/Http/Controllers/ContactController.php:24` is
+`Mail::to('coopersellers@gmail.com')->send(...)`. It is the only occurrence and
+there is no config key behind it. The contact form ships on the public landing
+page (`resources/views/landing/index.blade.php:591`) in every install, so on an
+MIT self-hosted release every operator's instance mails the project author's
+personal address with their own visitors' submissions, the operator never learns
+anyone contacted them, and the address sits in a public repository to be
+scraped.
+
+Submissions are not lost — `ContactController::store` writes a
+`ContactSubmission` row *before* attempting the send and catches failures — so
+this is a misdirection and disclosure problem, not a data-loss one.
+
+Being fixed in install-story group 2, Task 7: a `MNEMON_CONTACT_TO` config key
+defaulting to null, sending only when set, with no fallback recipient.
+
+### D15 — a malformed `client_id` returns 500 instead of a 4xx
+
+`GET /oauth/authorize?client_id=x` returns a 500. The value is cast to UUID
+against `oauth_clients.id` and PostgreSQL raises on the malformed input before
+any validation runs, so an unauthenticated request can trip a server error.
+Pre-existing and unrelated to the Docker work; found while smoke-testing the
+compose stack. Deliberately out of scope for group 2.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs
@@ -345,9 +371,11 @@ all three require a valid `mcp:use` token — so this is a lower bar than the
 one the superseded roadmap set, and it is a judgement rather than a hard rule.
 The wiki limitation ships documented rather than fixed.
 
-Two things are hard requirements regardless: a `LICENSE` file must exist
-before the repository is public, and the GitHub OAuth token currently embedded
-in the `origin` remote URL must be rotated.
+Three things are hard requirements regardless: a `LICENSE` file must exist
+before the repository is public, the GitHub OAuth token currently embedded in
+the `origin` remote URL must be rotated, and D14 must land — publishing a
+repository that mails every operator's contact submissions to a personal Gmail
+address is not a defect to document, it is one to fix first.
 
 ## Documentation
 

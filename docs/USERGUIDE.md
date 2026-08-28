@@ -352,7 +352,7 @@ Claude calls `context_get` (wiki page lookup by name) first; if the wiki has a p
 
 Claude calls `context_list` and filters by `last_compiled_at`. The `FindStaleWikiPagesPrompt` automates this.
 
-You can also let it run automatically — `mnemon:auto-compile-stale` is on a 6-hour schedule (see [Scheduled maintenance](#scheduled-maintenance)).
+You can also let it run automatically — `mnemon:auto-compile-stale` is on a 4-hour schedule (see [Scheduled maintenance](#scheduled-maintenance)).
 
 ### Use the knowledge graph
 
@@ -498,7 +498,7 @@ Mnemon ships three OpenClaw integration commands:
 ```bash
 php artisan mnemon:import-memory      # bulk import OpenClaw memory files
 php artisan mnemon:ingest-sessions    # ingest session transcripts as drawers
-php artisan mnemon:sync-openclaw      # bidirectional sync (also runs daily)
+php artisan mnemon:sync-openclaw      # bidirectional sync (manual only — not scheduled)
 ```
 
 See `docs/OPENCLAW-INTEGRATION.md` for the full setup.
@@ -572,11 +572,13 @@ The schedule (defined in `routes/console.php` or `app/Console/Kernel.php`) cover
 
 | Schedule | Command | Purpose |
 |---|---|---|
-| Daily | `mnemon:decay-confidence` | Apply time-based confidence decay |
+| Daily, 03:00 | `mnemon:decay-confidence` | Apply time-based confidence decay |
 | Every 6h | `mnemon:auto-lint` | Run wiki_lint with auto-fix; repair stale/orphan/low-confidence pages |
-| Every 6h | `mnemon:auto-compile-stale` | Recompile wiki pages flagged stale |
-| Daily | `mnemon:apply-retention` | Enforce retention policies (archive past half-lives) |
-| Daily | `mnemon:sync-openclaw` | Sync with OpenClaw |
+| Every 4h | `mnemon:auto-compile-stale` | Recompile wiki pages flagged stale |
+| Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforce retention policies (archive past half-lives) |
+
+Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` exists as an
+artisan command but is **not** scheduled — run it manually when you want it.
 
 You can also run any of these manually:
 

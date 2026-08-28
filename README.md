@@ -259,11 +259,13 @@ Mnemon runs several automated maintenance tasks to keep the knowledge base healt
 
 | Schedule | Command | What it does |
 |---|---|---|
-| Daily | `mnemon:decay-confidence` | Applies time-based confidence decay to drawers and wiki pages |
+| Daily, 03:00 | `mnemon:decay-confidence` | Applies time-based confidence decay to drawers and wiki pages |
 | Every 6 hours | `mnemon:auto-lint` | Runs wiki_lint with auto-fix enabled; repairs stale, orphan, and low-confidence pages |
-| Every 6 hours | `mnemon:auto-compile-stale` | Gathers drawers and recompiles wiki pages flagged as stale |
-| Daily | `mnemon:apply-retention` | Enforces retention policies; archives or removes content past its configured half-life |
-| Daily | `mnemon:sync-openclaw` | Syncs memory between Mnemon and OpenClaw |
+| Every 4 hours | `mnemon:auto-compile-stale` | Gathers drawers and recompiles wiki pages flagged as stale |
+| Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforces retention policies; archives or removes content past its configured half-life |
+
+Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` is a manual
+convenience wrapper, not a scheduled task — run it yourself when you want it.
 
 ---
 

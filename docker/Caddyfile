@@ -12,3 +12,16 @@
 	encode zstd gzip
 	php_server
 }
+
+# Internal-only health address, not published in compose's ports:. When
+# CADDY_SITE_ADDRESS is a hostname (DOMAIN set), the site block above serves
+# HTTPS with an automatic HTTP->HTTPS redirect on port 80 for ALL requests
+# regardless of Host header — so `curl http://localhost/up` gets back a 308
+# instead of ever reaching php_server. `curl -f` does not treat a 3xx as a
+# failure, so a healthcheck against port 80 would report "healthy" without
+# ever exercising the app. This dedicated address exists in both modes and
+# always reaches php_server directly.
+:2020 {
+	root * /app/public
+	php_server
+}

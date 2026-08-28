@@ -1,6 +1,10 @@
+# Do NOT add `auto_https off` here: it is a global switch with no per-site
+# override, so it would also disable HTTPS for the CADDY_SITE_ADDRESS
+# hostname site below, leaving TLS handshakes failing and plaintext getting
+# `400 Client sent an HTTP request to an HTTPS server`. The bare `:80`
+# default site provisions nothing regardless, since it has no hostname.
 {
 	frankenphp
-	auto_https off
 }
 
 {$CADDY_SITE_ADDRESS::80} {

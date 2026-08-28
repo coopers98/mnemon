@@ -18,9 +18,14 @@ else
     export CADDY_SITE_ADDRESS=":80"
 fi
 
-echo "[mnemon] waiting for the database…"
+echo "[mnemon] waiting for the database at ${DB_HOST:-<unset>}:${DB_PORT:-<unset>}…"
+waited=0
 until php -r 'exit(@fsockopen(getenv("DB_HOST"), (int) getenv("DB_PORT")) ? 0 : 1);'; do
     sleep 1
+    waited=$((waited + 1))
+    if [ $((waited % 15)) -eq 0 ]; then
+        echo "[mnemon] still waiting for ${DB_HOST:-<unset>}:${DB_PORT:-<unset>} after ${waited}s — check DB_HOST/DB_PORT and that the db service is healthy"
+    fi
 done
 
 # Stale compiled config surviving an image upgrade is a classic self-hosted
@@ -50,8 +55,9 @@ elif [ -f storage/app_key ]; then
 else
     echo "[mnemon] generating APP_KEY"
     APP_KEY="$(php artisan key:generate --show)"
-    printf '%s\n' "${APP_KEY}" > storage/app_key
+    touch storage/app_key
     chmod 600 storage/app_key
+    printf '%s\n' "${APP_KEY}" > storage/app_key
     export APP_KEY
 fi
 

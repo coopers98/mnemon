@@ -203,4 +203,44 @@ class ContextSetToolTest extends TestCase
             'revision' => 1,
         ]);
     }
+
+    // ─── D8: wing enforcement on the sources array ────────────────────────────
+
+    private function drawerInWing(string $wingSlug, string $content): Drawer
+    {
+        $wing = Wing::create(['name' => $wingSlug, 'slug' => $wingSlug]);
+        $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
+
+        return Drawer::create(['content' => $content, 'room_id' => $room->id, 'tier' => 'raw']);
+    }
+
+    public function test_does_not_consolidate_drawers_outside_the_token_wings(): void
+    {
+        $mine = $this->drawerInWing('work', 'work note');
+        $theirs = $this->drawerInWing('personal', 'private note');
+
+        $this->mcpCall('context_set', [
+            'name' => 'concept:leak',
+            'content' => 'A page.',
+            'sources' => [$mine->id, $theirs->id],
+        ], ['mcp:use'], ['work']);
+
+        // The forbidden drawer must not have been promoted.
+        $this->assertSame('raw', $theirs->fresh()->tier);
+    }
+
+    public function test_source_ids_outside_the_token_wings_are_not_an_existence_oracle(): void
+    {
+        $theirs = $this->drawerInWing('personal', 'private note');
+
+        $r = $this->mcpCall('context_set', [
+            'name' => 'concept:probe',
+            'content' => 'A page.',
+            'sources' => [$theirs->id],
+        ], ['mcp:use'], ['work']);
+
+        // A drawer the token cannot see must be indistinguishable from one that
+        // does not exist, or the error reveals which IDs are real.
+        $this->assertTrue($r->json('result.isError') ?? false);
+    }
 }

@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Concerns\ResolvesAgentSource;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
@@ -21,7 +22,7 @@ use Laravel\Mcp\Server\Tool;
 #[Description('Upsert a wiki page with optimistic locking and revision audit.')]
 class ContextSetTool extends Tool
 {
-    use RequiresScope, ResolvesAgentSource;
+    use RequiresScope, RequiresWingAccess, ResolvesAgentSource;
 
     protected string $name = 'context_set';
 
@@ -64,8 +65,25 @@ class ContextSetTool extends Tool
                 }
             }
             $sources = array_values(array_unique($sources));
-            $existingCount = Drawer::whereIn('id', $sources)->count();
-            if ($existingCount !== count($sources)) {
+
+            // Count only drawers this token may see. A drawer in a forbidden
+            // wing must be indistinguishable from one that does not exist —
+            // otherwise the error below is an existence oracle across wings.
+            // Everything downstream (the consolidation update) relies on this
+            // check having narrowed $sources to visible drawers.
+            $sourceQuery = Drawer::whereIn('id', $sources);
+            $patterns = $this->wingPatternsFor($request);
+            if ($patterns !== null) {
+                $sourceQuery->whereHas('room.wing', function ($q) use ($patterns) {
+                    $q->where(function ($inner) use ($patterns) {
+                        foreach ($patterns as $p) {
+                            $inner->orWhere('slug', 'like', str_replace('*', '%', $p));
+                        }
+                    });
+                });
+            }
+
+            if ($sourceQuery->count() !== count($sources)) {
                 return Response::error('One or more source drawer IDs do not exist.');
             }
         }

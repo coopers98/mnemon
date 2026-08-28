@@ -24,3 +24,8 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Benchmark data and output — setup.sh re-downloads the dataset on demand
+/benchmark/data/
+/benchmark/results/
+/benchmark/state/

@@ -45,6 +45,24 @@ class AdminUserSeederTest extends TestCase
         $this->assertTrue(Hash::check($password, $admin->password));
     }
 
+    public function test_generated_password_file_is_not_world_readable(): void
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $this->markTestSkipped('POSIX file permissions are not meaningful on Windows.');
+        }
+
+        $this->seed(AdminUserSeeder::class);
+
+        $path = storage_path('admin-password.txt');
+        $mode = fileperms($path) & 0777;
+
+        $this->assertSame(
+            0600,
+            $mode,
+            sprintf('expected mode 0600, got %o — the credential file must never be group/world readable', $mode)
+        );
+    }
+
     public function test_reseeding_does_not_replace_an_existing_admin(): void
     {
         $this->seed(AdminUserSeeder::class);

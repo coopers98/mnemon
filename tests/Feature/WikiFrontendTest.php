@@ -141,7 +141,7 @@ class WikiFrontendTest extends TestCase
         $response = $this->actingAs($this->user)->get('/wiki/person:cooper/history');
 
         $response->assertStatus(200);
-        $response->assertSee('Revision History');
+        $response->assertSee('Revision history');
     }
 
     public function test_wiki_search_returns_results(): void

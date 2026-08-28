@@ -36,7 +36,7 @@ class AdminUserSeeder extends Seeder
         chmod($path, 0600);
 
         $this->command?->info('Admin user created: admin@mnemon.local');
-        $this->command?->info("Password written to {$path} — store it somewhere safe and delete the file.");
+        $this->command?->info("Password written to {$path} (gitignored) — store it somewhere safe and delete the file.");
         $this->command?->warn('There is no password reset flow. Losing it means resetting via `php artisan tinker`.');
     }
 }

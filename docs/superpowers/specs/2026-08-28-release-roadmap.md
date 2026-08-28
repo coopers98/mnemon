@@ -141,6 +141,49 @@ check in application code. Both deserve their own design, so Piece 2 cuts the
 Ollama compose profile and corrects the README rather than shipping an option
 that hard-errors.
 
+### D11 — full-text search has different semantics on each engine, and production is the strict one
+
+Found by the PostgreSQL CI leg on its first run, and reproduced against a local
+`pgvector/pgvector:pg17` container.
+
+`WikiSearchService` (and `PalaceSearchService` alongside it) take two different
+paths. On SQLite it splits the query into words and ORs
+`LOWER(content) LIKE '%word%'` per word — **any** word matching is a hit. On
+PostgreSQL it uses `to_tsvector(...) @@ plainto_tsquery('english', ?)`, and
+`plainto_tsquery` **ANDs** every surviving lexeme.
+
+Verified directly:
+
+```
+plainto_tsquery('english','what do we know about dorothy')  ->  'know' & 'dorothi'
+… @@ to_tsvector('Dorothy is the lead engineer on the Atlas project.')  ->  false
+… plainto_tsquery('english','dorothy')                       ->  true
+… websearch_to_tsquery('english','dorothy')                  ->  true
+```
+
+So a natural-language query returns **nothing** on PostgreSQL unless every
+non-stop-word appears in the document, while the same query returns matches on
+SQLite. This is not a test artifact: `recall` is the Layer 2 automatic-memory
+tool driven by the Claude Code hooks, and conversational queries are precisely
+its input. On the production driver it would silently surface no wiki context.
+
+Three tests fail on PostgreSQL for this reason and pass on SQLite:
+`RecallServiceTest::test_returns_mixed_payload_within_budget`,
+`RecallToolTest` (same payload assertion), and
+`SearchPageTest::test_results_are_sorted_by_score`.
+
+**Deliberately not fixed here.** Choosing the right semantics is a product
+decision, not a patch: `websearch_to_tsquery` gives OR-ish behaviour with
+quoted-phrase support, an explicit `' | '`-joined `tsquery` gives pure OR, and
+ranking by `ts_rank` means the two engines should agree on ordering as well as
+on membership. It also needs a view on whether SQLite's OR-any-word behaviour
+or PostgreSQL's AND-all-words behaviour is the one users should get. That
+deserves its own design pass rather than being tacked onto the install story.
+
+An abandoned first attempt at a fix — hand-building a `tsquery` from tokenised
+words — was preserved as a patch during the session but not committed; it is
+not a reviewed design.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

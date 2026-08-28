@@ -5,10 +5,8 @@ vendor
 benchmark/data
 benchmark/results
 benchmark/state
-storage/logs
-storage/framework/cache
-storage/framework/sessions
-storage/framework/views
+storage
+bootstrap/cache
 .env
 .env.*
 !.env.docker.example

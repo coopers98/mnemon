@@ -73,7 +73,7 @@ php artisan passport:install          # generates oauth-private.key / oauth-publ
 php artisan serve
 ```
 
-The seeder prints the admin email and password. The default is `admin@mnemon.local` with a generated password — capture it from the seeder output.
+The seeder writes the admin credentials to `storage/admin-password.txt` (mode 0600) rather than printing them. The default email is `admin@mnemon.local` — read the generated password from that file, then store it somewhere safe and delete the file. There is no password reset flow; losing it means resetting the user via `php artisan tinker`. Re-running the seeder (e.g. on every container boot) leaves an existing admin untouched.
 
 Visit `http://localhost:8000/admin` and log in. You should see the dashboard with empty wing/drawer counts.
 

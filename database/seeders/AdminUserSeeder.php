@@ -22,7 +22,7 @@ class AdminUserSeeder extends Seeder
         }
 
         $password = Str::password(24);
-        $path = storage_path('admin-password.txt');
+        $path = config('mnemon.admin_password_path');
 
         // Create the file restrictive-first, then write: file_put_contents()
         // on a brand-new path creates it at the process umask (commonly 644,

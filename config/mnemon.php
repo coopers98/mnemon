@@ -1,6 +1,13 @@
 <?php
 
 return [
+    // Where AdminUserSeeder writes the generated admin password. Injectable so
+    // tests never touch — and never delete — the real file: storage_path() is
+    // not redirected under APP_ENV=testing, so the default is the same file a
+    // native install produces, and there is no password reset flow to recover
+    // from clobbering it.
+    'admin_password_path' => storage_path('admin-password.txt'),
+
     'embedding' => [
         'driver' => env('MNEMON_EMBEDDING_DRIVER', 'openai'),
         'drivers' => [

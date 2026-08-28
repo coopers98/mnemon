@@ -47,13 +47,21 @@ class BrainStatusToolTest extends TestCase
 
     public function test_reports_embedding_coverage(): void
     {
+        $w = Wing::factory()->create();
+        $room = Room::factory()->create(['wing_id' => $w->id]);
+        Drawer::factory()->count(3)->create(['room_id' => $room->id]);
+
         $r = $this->mcpCall('brain_status', [], ['mcp:use']);
 
         $embedding = $r->json('result.structuredContent.embedding');
 
-        // With driver=none nothing is embedded, but the counts must be present
-        // and numeric so coverage is visible rather than inferred.
-        $this->assertIsInt($embedding['embedded_drawers']);
-        $this->assertIsInt($embedding['unembedded_drawers']);
+        // With driver=none (and on SQLite, where the embedding column does
+        // not exist at all) nothing is embedded. Asserting concrete values
+        // here — not just assertIsInt — is what makes this test fail if the
+        // Schema::hasColumn guard regresses: without it, SQLite's
+        // quoted-identifier quirk makes whereNotNull('embedding') match
+        // every row, reporting embedded_drawers === 3 instead of 0.
+        $this->assertSame(0, $embedding['embedded_drawers']);
+        $this->assertSame(3, $embedding['unembedded_drawers']);
     }
 }

@@ -20,6 +20,25 @@
 - Do not change tool signatures or the MCP wire contract.
 - **Out of scope, do not touch:** `config/mnemon.php`'s `MNEMON_EMBEDDING_DRIVER` default (native installs keep `openai`), the Ollama compose profile (D10 — the driver cannot store an embedding), and the D12 stored-`tsvector` change.
 
+
+## Corrections applied during execution
+
+Four things in the task text below were found to be wrong while executing it. The
+task text is left as written so the record stays honest; these are the rulings that
+superseded it. Anyone re-running this plan should apply them.
+
+| Where | What is wrong | What replaced it |
+|---|---|---|
+| Task 2, the Caddyfile | `auto_https off` sits in the global options block. It is a global switch with no per-site override, so setting `DOMAIN` binds `:443` and never provisions a certificate — TLS handshakes fail and plaintext gets `400`. Not degraded HTTPS; a total outage. | The directive is deleted. A bare `:80` has no hostname, so Caddy provisions nothing there regardless. |
+| Task 2, Step 5 Command 1 | Sourcing the entrypoint inside an arg-less `sh -c` zeroes `$@`, so `exec "$@"` cannot work and the command hangs no matter what `MNEMON_BOOTSTRAP` is set to. It is a bug in the test command, not the entrypoint. | Invoke the real `ENTRYPOINT` + `CMD` instead. |
+| Task 3, the compose file | Publishes only `127.0.0.1:8080:80` and declares no volume for `/data`. ACME needs port 80 reachable and TLS needs 443 published, so the documented `DOMAIN` path could not work; and Caddy's certificates live in `/data/caddy`, so they were destroyed on every `down`. | Interpolated `${HTTP_BIND:-127.0.0.1:8080}` / `${HTTPS_BIND:-127.0.0.1:8443}` binds, plus a `caddy_data` named volume. `env_file` became `${MNEMON_ENV_FILE:-.env}` so the smoke script can point it at a template instead of a developer's real `.env`. |
+| Task 4, the asset guard | Requests `/oauth/authorize?client_id=x`, which returns 500, and greps the body for `ViteManifestNotFound`. `curl -f` suppresses the body on an HTTP error, so the grep runs on an empty file and the check passes unconditionally. A valid `client_id` would not help either — that route needs an authenticated session. | Assert inside the container that `public/build/manifest.json` exists **and** every file it references exists. |
+| Task 4, Step 3 | The prescribed fault (make the entrypoint's seed unconditional) does not reproduce a failure: `AdminUserSeeder` has its own existence guard keyed on email, so the reseed no-ops. | Wipe the admin user in the entrypoint, then reseed unconditionally — that genuinely exercises the rotated-password branch. |
+
+The common shape is worth naming: every one of these was an assertion or a recipe that
+could not observe the thing it claimed to check. None were visible by reading the plan
+against itself; all were obvious the moment the code was run.
+
 ## File structure
 
 | File | Responsibility |

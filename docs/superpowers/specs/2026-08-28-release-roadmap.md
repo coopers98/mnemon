@@ -63,8 +63,8 @@ now takes a slug directly rather than slugifying a display name — but a wing
 created through Filament or a seeder with a colon in its name is unreachable
 by `wiki_compile`, and a restriction pattern cannot cover both spellings.
 
-Fix: one canonical `Wing::slugify()` used by the model event and every
-lookup, matching the dashed form the tools already assume.
+**Status: resolved.** `Wing::slugify()` is now the single definition, used by
+the model creating event and by `wiki_compile`'s lookup.
 
 ### D8 — `context_set` mutates and probes with no wing check
 
@@ -80,9 +80,14 @@ lookup, matching the dashed form the tools already assume.
 
 This matters more than it would have under the old model: with scopes
 collapsed to `mcp:use`, wing restrictions are the *only* isolation, and this
-tool ignores them. Fixing it needs a decision on whether unauthorised source
-IDs should error or be silently dropped — silently dropping avoids the oracle,
-erroring is friendlier to a legitimate caller.
+tool ignored them.
+
+**Status: resolved.** The existence check now counts only drawers the token may
+see, so a forbidden drawer is indistinguishable from a missing one — the oracle
+is closed while the existing error message is kept. The error-vs-drop question
+resolved itself: computing existence over the visible set gives the friendly
+error *and* no disclosure. The consolidation update relies on that check having
+narrowed sources to visible drawers, which the code notes.
 
 ### D4 — the audit trail still records only successes
 
@@ -95,6 +100,12 @@ The rework spec's audit section (`2026-04-26-mcp-rework-design.md`) designed
 the OAuth provenance columns but did not revisit this, so it is a genuine gap
 rather than a deliberate omission. An agent probing tools it lacks wing access
 for leaves no trace.
+
+**Status: resolved.** `brain_sessions` gained `outcome` (indexed, default
+`success`) and a nullable `error`; `BrainSessionLogger::logDenial()` writes the
+row before the error Response, reusing the same OAuth provenance rendering; both
+guards call it. Only authenticated callers reach a tool guard, so this adds no
+unauthenticated write path into the audit table.
 
 ### Known limitation — wing restrictions are palace-layer only
 
@@ -139,7 +150,7 @@ be stated plainly in the README rather than implied away.
 
 | # | Piece | Contents | Gates |
 |---|---|---|---|
-| 1 | **Authorization & audit correctness** | D7, D8, D4. Small, security-relevant, no new dependencies. | Piece 4 |
+| ~~1~~ | ~~**Authorization & audit correctness**~~ | ~~D7, D8, D4.~~ **Done** — see the status blocks above. | — |
 | 2 | **Install story** | Docker Compose with pgvector; keyless default embedding driver; `passport:keys` documented or automated; **`pdo_pgsql` + a PostgreSQL CI service**. | Pieces 3, 4 |
 | 3 | **Benchmark** | Finish the LongMemEval harness in `benchmark/` and publish a number. Note when publishing that it exercises the palace layer only, not the wiki. | Piece 4 |
 | 4 | **Truth-up pass** | README and landing page against the shipped product; `LICENSE` added; docs pruned and restructured; repository made public. | Piece 6 |
@@ -151,7 +162,8 @@ done. Piece 1 is what remains of that work.
 
 ## Gate on making the repository public
 
-D7, D8 and D4 should land before the flip. None is an unauthenticated bypass —
+D7, D8 and D4 have landed. The original condition was that they should land
+before the flip; None is an unauthenticated bypass —
 all three require a valid `mcp:use` token — so this is a lower bar than the
 one the superseded roadmap set, and it is a judgement rather than a hard rule.
 The wiki limitation ships documented rather than fixed.

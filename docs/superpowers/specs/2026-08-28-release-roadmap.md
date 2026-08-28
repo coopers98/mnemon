@@ -123,6 +123,183 @@ association — a schema change with a migration story for existing pages.
 **Decision: documented as a known limitation for launch, not fixed.** It must
 be stated plainly in the README rather than implied away.
 
+### D10 — the Ollama embedding driver cannot store an embedding
+
+`drawers.embedding` and `wiki_pages.embedding` are hard-coded `vector(1536)`
+(`2026_04_24_100002:24`, `2026_04_24_100003:25`), while `nomic-embed-text`
+declares 768 dimensions (`config/mnemon.php:14`). Postgres rejects a 768-d value
+into that column, so under `MNEMON_EMBEDDING_DRIVER=ollama` every `drawer_add`
+fails at save, `mnemon:reembed` fails on its first write, and every semantic
+query fails on dimension mismatch. Nothing ever ALTERs the column.
+
+`README.md:149-155` advertises Ollama as a supported driver. It is not — this is
+a live defect, found while designing Piece 2.
+
+Fixing it means either a `mnemon:reembed --resize` that recreates the column at
+the active driver's dimension, or an untyped `vector` column with a dimension
+check in application code. Both deserve their own design, so Piece 2 cuts the
+Ollama compose profile and corrects the README rather than shipping an option
+that hard-errors.
+
+### D11 — full-text search has different semantics on each engine, and production is the strict one
+
+**Status: resolved** (round 1 `e1c7b67`, round 2 below). Two follow-ups are
+deliberately left open and called out at the end: PostgreSQL has no substring
+match, and the unselective full-text query is still a sequential scan.
+
+Found by the PostgreSQL CI leg on its first run, and reproduced against a local
+`pgvector/pgvector:pg17` container.
+
+`WikiSearchService` (and `PalaceSearchService` alongside it) take two different
+paths. On SQLite it splits the query into words and ORs
+`LOWER(content) LIKE '%word%'` per word — **any** word matching is a hit. On
+PostgreSQL it uses `to_tsvector(...) @@ plainto_tsquery('english', ?)`, and
+`plainto_tsquery` **ANDs** every surviving lexeme.
+
+Verified directly:
+
+```
+plainto_tsquery('english','what do we know about dorothy')  ->  'know' & 'dorothi'
+… @@ to_tsvector('Dorothy is the lead engineer on the Atlas project.')  ->  false
+… plainto_tsquery('english','dorothy')                       ->  true
+… websearch_to_tsquery('english','dorothy')                  ->  true
+```
+
+So a natural-language query returns **nothing** on PostgreSQL unless every
+non-stop-word appears in the document, while the same query returns matches on
+SQLite. This is not a test artifact: `recall` is the Layer 2 automatic-memory
+tool driven by the Claude Code hooks, and conversational queries are precisely
+its input. On the production driver it would silently surface no wiki context.
+
+Three tests fail on PostgreSQL for this reason and pass on SQLite:
+`RecallServiceTest::test_returns_mixed_payload_within_budget`,
+`RecallToolTest` (same payload assertion), and
+`SearchPageTest::test_results_are_sorted_by_score`.
+
+(The third of those, `SearchPageTest`, exercises the **palace** path — the
+Filament search page searches drawers — so `PalaceSearchService` had failing
+coverage too, not just `WikiSearchService`.)
+
+**Round 1 (`e1c7b67`) — matching.** Both engines were given the same
+semantics, differing only in the match primitive: membership is OR across the
+distinct query words, and the raw score is the number of distinct query words
+present. On PostgreSQL that is one bound `plainto_tsquery` per word instead of
+one for the whole query, summed in a CASE expression:
+
+```sql
+-- membership
+(to_tsvector('english', content) @@ plainto_tsquery('english', ?)) OR (…) …
+-- score
+( CASE WHEN to_tsvector('english', content) @@ plainto_tsquery('english', ?)
+       THEN 1 ELSE 0 END + … )
+```
+
+`ts_rank` was rejected: it ranks by lexeme frequency, not by how many query
+words hit, so it does not reproduce the ordering the SQLite path defines.
+`websearch_to_tsquery` was rejected because it also ANDs unquoted words. Every
+word is a binding — nothing user-supplied reaches the SQL text.
+
+**Round 1 fixed the matching and left `recall` still empty.** Round 1
+normalized the score by the *total* word count, and `RecallService` filters the
+wiki leg against `mnemon.recall.confidence_floor` — 0.45, with no
+`MNEMON_RECALL_FLOOR` in `.env.example` to move it. A conversational prompt
+scored 0.167–0.333 and was filtered out entirely, so `recall` returned
+`found => true` with an empty `wiki` array: D11's original symptom, unchanged.
+Measured on the container at floor 0.45, `what is the atlas project about` was
+also a *regression* — it matched at 1.0 before `e1c7b67` and 0.333 after. No
+test caught any of this because every `recall` test lowered the floor to 0.1 or
+0.0.
+
+**Round 2 — scoring, stop words, safety.** The denominator is now the number of
+*searchable* terms, not the number of words typed. Stop words are dropped from
+the query before it reaches SQL (`TokenizesSearchQueries`, holding PostgreSQL
+17's own 127-entry `english.stop` list verbatim), so "what do we know about
+dorothy" is scored as two terms, not six: a page that says "dorothy" scores 0.5
+and clears the shipped floor. A query where every term hits still scores exactly
+1.0, unchanged. Both services share the one tokenizer, so they cannot drift, and
+`RecallServiceTest` now runs at the shipped floor with no config override.
+
+A query that is *nothing but* stop words — a person named Will, an "IT" wing, a
+project called "Down", or the degenerate "what do we" — has no dictionary form
+at all and used to return nothing on PostgreSQL. It now falls through to the
+substring primitive on both engines, so the two agree.
+
+Two safety defects in the round-1 form were fixed at the same time: `%` and `_`
+were interpolated into the LIKE pattern unescaped (a query of `%` returned every
+row at score 1.0 on SQLite), and the word count reaching the engine was
+unbounded (SQLite raises "Expression tree is too large" at 997 distinct words,
+PostgreSQL "stack depth limit exceeded" at ~4,063 — and `recall` passes the raw
+user prompt). Terms are now escaped with `ESCAPE '!'` — deliberately not a
+backslash, which breaks PDO's placeholder scanner — and capped at 32, keeping
+the longest words rather than an arbitrary prefix.
+
+**The engines are not ordered by capability.** An earlier draft of this entry,
+and of both service docblocks, claimed PostgreSQL was "strictly more capable".
+It is not, and the trade runs in both directions:
+
+```
+PostgreSQL wins (stemming)      "engineers"  matches "engineer"
+SQLite wins (substring)         auth      -> "authentication"
+                                compiler  -> "WikiPageCompiler"
+                                dorothy   -> "dorothy.vaughan@example.com"
+                                1234      -> "ISSUE-1234"
+```
+
+PostgreSQL's `@@` matches whole lexemes, so none of the four SQLite cases match
+there. Closing that gap on PostgreSQL — a trigram index, or matching substrings
+alongside lexemes — is a design question of its own and is **open**.
+
+**Indexing.** `to_tsvector('english', content)` had no index on either table, so
+every full-text search was a sequential scan that evaluated `to_tsvector` once
+per query term per row, on a path `recall` runs on every user prompt. A
+functional GIN index on both tables (`2026_08_28_200000_add_fulltext_indexes`,
+PostgreSQL-guarded) fixes the selective case. Measured with `EXPLAIN ANALYZE` on
+50,000 rows, prompt `what do we know about dorothy`:
+
+| | terms in SQL | no index | GIN index |
+|---|---|---|---|
+| before round 2 | 6 | 5,326 ms | 843 ms |
+| after round 2 | 2 | 1,699 ms | **288 ms** |
+
+End-to-end `recall` against 50,000 drawers and 50,000 wiki pages: 4,066 ms →
+630 ms. Index size is ~4.5 MB per table at 50,000 rows.
+
+The index does **not** help an unselective query — six content words matching
+half the corpus stays at ~4,800 ms, because the planner correctly rejects a
+BitmapOr covering half the table and the seq scan is dominated by evaluating
+`to_tsvector` per row per term. A `tsvector` column
+`GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`, indexed instead
+of the expression, takes that same query to **47 ms** (~100x) and the selective
+one to 32 ms, because the vector is never recomputed. That is a schema change
+with a table rewrite and roughly a doubling of text storage, so it is **open**
+rather than done here.
+
+### D12 — full-text search is a sequential scan on PostgreSQL
+
+Surfaced while fixing D11 and measured against a live `pgvector/pgvector:pg17`
+container at 50k rows. A functional GIN index on `to_tsvector('english', content)`
+was added, and **the planner correctly declines it** for the unselective queries
+`recall` issues — the scan stays around 4.8 s. A *stored generated* `tsvector`
+column measures roughly **47 ms**, about 100x faster, because the expression is
+materialised rather than recomputed per row.
+
+That is a schema change (a generated column plus an index on it, and a decision
+about whether the same applies to `drawers` and `wiki_pages` alike), so it is
+recorded rather than rushed. Note this is **not** a regression introduced by
+D11 — the pre-D11 query was also a seq scan at a comparable cost. But `recall`
+runs on every user prompt through the Claude Code hooks, so it is the hot path
+in the product.
+
+### D13 — wiki and drawer confidences are not comparable
+
+`RecallService` filters both legs against a single `confidence_floor`, but the
+wiki leg's score is now an **absolute** fraction of searchable terms matched
+while the drawer leg is **min-max normalised** so its top hit is always 1.0. The
+code comments are accurate as of D11's fix, but one bar is being applied to two
+different scales, so the floor is effectively stricter for wiki than for
+drawers. Deciding whether both should be absolute, both relative, or separately
+configured is a product question about what `confidence` is supposed to mean.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

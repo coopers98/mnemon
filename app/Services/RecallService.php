@@ -40,10 +40,17 @@ class RecallService
             ->values()
             ->all();
 
-        // Min-max normalize drawer scores so the top hit becomes 1.0, matching
-        // how WikiSearchService normalizes its own scores. Without this, drawer
-        // hybrid scores top out around 0.4 (semantic weight unused without
-        // embeddings), and the confidence_floor would never be met.
+        // The two legs are scored on different scales, so they are normalized
+        // differently. WikiSearchService already returns an absolute 0-1
+        // fraction — how many of the query's searchable terms the page
+        // contains — so the floor is applied to it directly. Drawer scores come
+        // out of PalaceSearchService::hybridSearch() as a weighted blend
+        // (0.6 semantic + 0.3 fulltext + 0.1 temporal) that structurally cannot
+        // reach the floor without embeddings: the semantic weight goes unused
+        // and the blend tops out around 0.4. They are therefore normalized
+        // against the best drawer in this result set, which makes the floor a
+        // RELATIVE cut for drawers — keep what is within 45% of the best hit —
+        // rather than the absolute bar it is for wiki pages.
         $rawDrawers = collect($drawerHits);
         $maxDrawerScore = (float) max(0.0001, $rawDrawers->max(fn ($d) => (float) ($d['score'] ?? 0)));
 

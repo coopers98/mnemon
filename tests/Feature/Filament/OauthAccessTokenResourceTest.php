@@ -7,9 +7,9 @@ use App\Filament\Resources\OauthAccessTokens\Pages\ListOauthAccessTokens;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 use Livewire\Livewire;
+use RuntimeException;
 use Tests\TestCase;
 
 class OauthAccessTokenResourceTest extends TestCase
@@ -23,9 +23,12 @@ class OauthAccessTokenResourceTest extends TestCase
         $this->actingAs(User::factory()->create());
 
         // Ensure a personal access client exists for token issuance.
-        if (! Client::where('personal_access_client', true)->exists()) {
-            app(ClientRepository::class)
-                ->createPersonalAccessGrantClient('Test Client', 'users');
+        $clients = app(ClientRepository::class);
+
+        try {
+            $clients->personalAccessClient('users');
+        } catch (RuntimeException) {
+            $clients->createPersonalAccessGrantClient('Test Client', 'users');
         }
     }
 

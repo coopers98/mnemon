@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# This repo is about to be public: give the default token no more than it
+# needs. Neither job writes anything back.
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    # A hung leg (a service container that never becomes healthy, a test that
+    # blocks on a socket) should fail in minutes, not burn the six-hour default.
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, pgsql]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: mnemon
+          POSTGRES_PASSWORD: mnemon
+          POSTGRES_DB: mnemon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          # sqlite3/pdo_sqlite are in setup-php's Ubuntu defaults today, but
+          # the sqlite leg is the one every contributor depends on — it should
+          # not rest on an undocumented default.
+          extensions: pdo_pgsql, pgsql, sqlite3, pdo_sqlite, intl, zip, bcmath, gd
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Run tests
+        # phpunit.xml pins DB_CONNECTION=sqlite. PHPUnit's <env> does not
+        # override an already-exported variable unless force="true", so
+        # exporting here is what selects the driver.
+        #
+        # CI_REQUIRE_PGSQL turns the driver-guarded skips in
+        # tests/Feature/VectorColumnTest.php into failures on this leg. Without
+        # it, a broken DB_CONNECTION override would silently run SQLite twice
+        # and still exit 0, because skipped tests pass.
+        env:
+          DB_CONNECTION: ${{ matrix.database }}
+          DB_DATABASE: ${{ matrix.database == 'pgsql' && 'mnemon_test' || ':memory:' }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_USERNAME: mnemon
+          DB_PASSWORD: mnemon
+          CI_REQUIRE_PGSQL: ${{ matrix.database == 'pgsql' }}
+          # The observers only embed on PostgreSQL, so until this matrix existed
+          # nothing in the suite could reach a network embedding provider. On
+          # the pgsql leg they can: .env.example (copied above) sets
+          # MNEMON_EMBEDDING_DRIVER=openai, which would POST every fixture the
+          # suite creates to api.openai.com with an empty bearer token. `none`
+          # is also the spec's locked default — zero accounts, zero spend.
+          MNEMON_EMBEDDING_DRIVER: none
+        run: php artisan test --compact
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: sqlite3, pdo_sqlite, intl, zip, bcmath, gd
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Check formatting
+        run: ./vendor/bin/pint --test

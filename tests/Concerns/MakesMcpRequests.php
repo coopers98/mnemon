@@ -5,8 +5,8 @@ namespace Tests\Concerns;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use Illuminate\Testing\TestResponse;
-use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
+use RuntimeException;
 
 trait MakesMcpRequests
 {
@@ -21,7 +21,9 @@ trait MakesMcpRequests
         /** @var ClientRepository $clients */
         $clients = app(ClientRepository::class);
 
-        if (! Client::where('personal_access_client', true)->exists()) {
+        try {
+            $clients->personalAccessClient('users');
+        } catch (RuntimeException) {
             $clients->createPersonalAccessGrantClient('Test Client', 'users');
         }
 

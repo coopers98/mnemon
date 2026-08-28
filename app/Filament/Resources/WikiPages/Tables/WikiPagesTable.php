@@ -11,6 +11,7 @@ use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class WikiPagesTable
 {
@@ -76,11 +77,16 @@ class WikiPagesTable
                 TextColumn::make('last_compiled_at')
                     ->label('Last compiled')
                     ->dateTime()
-                    ->sortable()
+                    // SQLite treats NULL as the smallest value, so a never-compiled page
+                    // lands last on the default DESC sort. PostgreSQL defaults to NULLS
+                    // FIRST on DESC, which would float never-compiled pages to the top of
+                    // the list. Spell the placement out so both engines agree that "never
+                    // compiled" sorts as the oldest.
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderByRaw(
+                        'wiki_pages.last_compiled_at '.($direction === 'desc' ? 'desc nulls last' : 'asc nulls first')
+                    ))
                     ->placeholder('Never'),
             ])
-            // Verified empirically: modern SQLite (3.50+) and PostgreSQL both place NULLs
-            // last on a DESC sort, so never-compiled pages naturally fall to the bottom.
             ->defaultSort('last_compiled_at', 'desc')
             ->filters([
                 SelectFilter::make('type')

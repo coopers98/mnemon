@@ -22,6 +22,13 @@
 # ever exercising the app. This dedicated address exists in both modes and
 # always reaches php_server directly.
 :2020 {
+	# bind, not the `127.0.0.1:2020` site-address form: Caddy adapts that form to
+	# a listener on `:2020` (all interfaces) plus a Host matcher, which any
+	# container on the compose network defeats by sending `Host: 127.0.0.1`.
+	# `bind` is what actually restricts the listener to loopback, so :2020 is
+	# reachable only from inside this container — which is where the Docker
+	# healthcheck runs.
+	bind 127.0.0.1
 	root * /app/public
 	php_server
 }

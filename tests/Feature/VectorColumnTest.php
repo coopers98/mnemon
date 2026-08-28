@@ -18,11 +18,36 @@ class VectorColumnTest extends TestCase
         return DB::connection()->getDriverName() === 'pgsql';
     }
 
+    /**
+     * Skip on SQLite — unless we are supposed to be on PostgreSQL, in which
+     * case fail loudly.
+     *
+     * A skipped test exits 0. If the workflow's `DB_CONNECTION` override ever
+     * stops taking effect — a `force="true"` appearing in `phpunit.xml`, a
+     * change in how Collision/Artisan hands env vars to PHPUnit, a bootstrap
+     * file that sets the variable itself — the pgsql matrix leg would run
+     * SQLite twice and report green forever, which is exactly the false
+     * confidence this CI exists to prevent. `CI_REQUIRE_PGSQL` is set to the
+     * string "true" only on the pgsql leg; Laravel's `env()` maps "false" to
+     * boolean false and an unset variable to null, so the sqlite leg and every
+     * local run still skip normally.
+     */
+    private function requirePostgres(): void
+    {
+        if ($this->isPostgres()) {
+            return;
+        }
+
+        if (env('CI_REQUIRE_PGSQL')) {
+            $this->fail('the pgsql matrix leg is not on PostgreSQL — the DB_CONNECTION override is broken');
+        }
+
+        $this->markTestSkipped('vector columns only exist on PostgreSQL');
+    }
+
     public function test_a_real_vector_round_trips_through_the_embedding_column(): void
     {
-        if (! $this->isPostgres()) {
-            $this->markTestSkipped('vector columns only exist on PostgreSQL');
-        }
+        $this->requirePostgres();
 
         // Avoid embedding-driver hits during drawer creation in tests. The
         // explicit UPDATE below supplies the real vector this test proves
@@ -49,9 +74,7 @@ class VectorColumnTest extends TestCase
 
     public function test_the_active_driver_dimensions_match_the_column_width(): void
     {
-        if (! $this->isPostgres()) {
-            $this->markTestSkipped('vector columns only exist on PostgreSQL');
-        }
+        $this->requirePostgres();
 
         $driver = config('mnemon.embedding.driver');
         $declared = config("mnemon.embedding.drivers.{$driver}.dimensions");

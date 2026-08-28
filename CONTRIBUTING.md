@@ -1,5 +1,20 @@
 # Contributing
 
+## Requirements
+
+**PHP 8.4 or newer.** `composer.json` requires `^8.4`, and `composer install`
+fails the platform check on older versions — Ubuntu 24.04 ships PHP 8.3 by
+default, so this catches most first-time contributors:
+
+```
+$ composer check-platform-reqs
+php  8.3.6  lcobucci/clock requires php (~8.4.0 || ~8.5.0)  failed
+```
+
+Note that an existing `vendor/` directory will keep working on 8.3, because
+Laravel does not enforce composer's platform floor at runtime — so a passing
+test suite is not evidence that your PHP is new enough.
+
 ## Running the tests
 
 ```bash

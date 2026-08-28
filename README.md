@@ -41,7 +41,7 @@ Leave `DOMAIN` blank if you're running behind a reverse proxy that already
 terminates TLS — that's the correct configuration for that setup, not just the
 local-trial fallback.
 
-See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#getting-started) for the native
+See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#native-install-the-alternative-to-docker) for the native
 (non-Docker) install, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for running the
 test suite.
 

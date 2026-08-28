@@ -65,6 +65,13 @@ jobs:
           DB_USERNAME: mnemon
           DB_PASSWORD: mnemon
           CI_REQUIRE_PGSQL: ${{ matrix.database == 'pgsql' }}
+          # The observers only embed on PostgreSQL, so until this matrix existed
+          # nothing in the suite could reach a network embedding provider. On
+          # the pgsql leg they can: .env.example (copied above) sets
+          # MNEMON_EMBEDDING_DRIVER=openai, which would POST every fixture the
+          # suite creates to api.openai.com with an empty bearer token. `none`
+          # is also the spec's locked default — zero accounts, zero spend.
+          MNEMON_EMBEDDING_DRIVER: none
         run: php artisan test --compact
 
   lint:

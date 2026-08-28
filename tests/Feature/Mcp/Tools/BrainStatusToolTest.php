@@ -15,6 +15,12 @@ class BrainStatusToolTest extends TestCase
 
     public function test_returns_aggregate_counts(): void
     {
+        // Avoid embedding-driver hits during drawer creation. The observers
+        // only embed on PostgreSQL, so this was inert until CI grew a pgsql
+        // leg; there it would POST three fixtures to the configured provider
+        // for a test that only counts rows.
+        config(['mnemon.embedding.driver' => 'none']);
+
         $w = Wing::factory()->create();
         $r = Room::factory()->create(['wing_id' => $w->id]);
         Drawer::factory()->count(3)->create(['room_id' => $r->id]);
@@ -47,6 +53,14 @@ class BrainStatusToolTest extends TestCase
 
     public function test_reports_embedding_coverage(): void
     {
+        // Pin the driver rather than inheriting it. On PostgreSQL with a
+        // network driver these three drawers would be sent to the provider,
+        // and `embedded_drawers === 0` below would then be true only because
+        // the unauthenticated request failed — an assertion that flips red the
+        // day someone adds a working API key to CI, for a reason nobody would
+        // guess.
+        config(['mnemon.embedding.driver' => 'none']);
+
         $w = Wing::factory()->create();
         $room = Room::factory()->create(['wing_id' => $w->id]);
         Drawer::factory()->count(3)->create(['room_id' => $room->id]);

@@ -4,6 +4,7 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -15,6 +16,28 @@ abstract class TestCase extends BaseTestCase
 
         $this->ensurePassportKeys();
         $this->withoutVite();
+        $this->preventOutboundHttp();
+    }
+
+    /**
+     * No test may reach the network.
+     *
+     * Until CI grew a PostgreSQL leg this was accidental: the embedding
+     * observers bail out unless the connection is pgsql, so on SQLite nothing
+     * could call a provider. On pgsql they can, and so can
+     * `PalaceSearchService::semanticSearch()`, which embeds the *query*. A
+     * misconfigured driver would then turn a hundred-odd fixture creations
+     * into live POSTs to api.openai.com — slow, flaky, and billable.
+     *
+     * `Http::fake()` in an individual test still wins; this only rejects
+     * requests nothing has stubbed. Note the embedding drivers catch and log
+     * every exception, so a stray request there is blocked and logged rather
+     * than surfaced as a failure — the network call is still prevented, which
+     * is the point.
+     */
+    private function preventOutboundHttp(): void
+    {
+        Http::preventStrayRequests();
     }
 
     /**

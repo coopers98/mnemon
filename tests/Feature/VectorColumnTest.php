@@ -72,21 +72,23 @@ class VectorColumnTest extends TestCase
         $this->assertEqualsWithDelta(0.0, (float) $distance->d, 0.0001);
     }
 
-    public function test_the_active_driver_dimensions_match_the_column_width(): void
+    public function test_the_shipped_default_driver_dimensions_match_the_column_width(): void
     {
-        $this->requirePostgres();
-
-        $driver = config('mnemon.embedding.driver');
-        $declared = config("mnemon.embedding.drivers.{$driver}.dimensions");
-
-        if ($declared === null) {
-            $this->markTestSkipped("driver '{$driver}' declares no dimensions");
-        }
-
+        // Deliberately not the *active* driver: tests and CI run with
+        // `none`, which declares no dimensions, so reading the ambient driver
+        // made this a permanent skip that still looked like a passing guard.
+        // This assertion needs no database either — it compares two constants
+        // — so it runs on the SQLite leg too, where contributors will see it.
+        //
         // The column width is fixed by migration. A driver whose vectors are a
         // different size cannot store anything — this is defect D10, and this
         // assertion is what would have caught it without reading two files.
-        $this->assertSame(1536, $declared,
-            "driver '{$driver}' declares {$declared} dimensions but drawers.embedding is vector(1536)");
+        // `ollama` is excluded on purpose rather than asserted: it declares
+        // 768 dimensions and therefore *cannot* satisfy this, which is D10
+        // itself. Fixing the schema is out of scope for this piece; the
+        // Ollama option is being withdrawn instead, so asserting it here
+        // would only encode a known-broken pairing as a red test.
+        $this->assertSame(1536, config('mnemon.embedding.drivers.openai.dimensions'),
+            'the shipped default driver must declare 1536 dimensions — drawers.embedding is vector(1536)');
     }
 }

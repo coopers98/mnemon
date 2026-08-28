@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -76,10 +77,7 @@ class BrainStatusTool extends Tool
             'last_write' => $lastWrite ? $lastWrite->toIso8601String() : null,
             'stale_wiki_pages' => $staleWikiPages,
             'pending_update_pages' => $pendingUpdatePages,
-            'embedding' => [
-                'driver' => config('mnemon.embedding.driver'),
-                'dimensions' => config('mnemon.embedding.dimensions'),
-            ],
+            'embedding' => $this->embeddingStatus(),
         ];
 
         BrainSessionLogger::log($request, 'brain_status', [], 1);
@@ -90,5 +88,29 @@ class BrainStatusTool extends Tool
     public function schema(JsonSchema $s): array
     {
         return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function embeddingStatus(): array
+    {
+        $driver = config('mnemon.embedding.driver');
+
+        // The dimensions live under the driver, not at the top of the
+        // embedding config — reading the top-level key always returned null.
+        $dimensions = config("mnemon.embedding.drivers.{$driver}.dimensions");
+
+        // The embedding column only exists on PostgreSQL (added via raw
+        // DB::statement in the migrations); SQLite never gets the column.
+        $hasColumn = Schema::hasColumn('drawers', 'embedding');
+        $embedded = $hasColumn ? Drawer::whereNotNull('embedding')->count() : 0;
+
+        return [
+            'driver' => $driver,
+            'dimensions' => $dimensions,
+            'embedded_drawers' => $embedded,
+            'unembedded_drawers' => Drawer::count() - $embedded,
+        ];
     }
 }

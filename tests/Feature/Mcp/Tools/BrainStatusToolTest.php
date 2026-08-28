@@ -32,4 +32,28 @@ class BrainStatusToolTest extends TestCase
         $r = $this->mcpCall('brain_status', [], []);
         $this->assertTrue($r->json('result.isError') ?? false);
     }
+
+    public function test_reports_the_active_drivers_dimensions_not_null(): void
+    {
+        config(['mnemon.embedding.driver' => 'openai']);
+
+        $r = $this->mcpCall('brain_status', [], ['mcp:use']);
+
+        $embedding = $r->json('result.structuredContent.embedding');
+
+        $this->assertSame('openai', $embedding['driver']);
+        $this->assertSame(1536, $embedding['dimensions']);
+    }
+
+    public function test_reports_embedding_coverage(): void
+    {
+        $r = $this->mcpCall('brain_status', [], ['mcp:use']);
+
+        $embedding = $r->json('result.structuredContent.embedding');
+
+        // With driver=none nothing is embedded, but the counts must be present
+        // and numeric so coverage is visible rather than inferred.
+        $this->assertIsInt($embedding['embedded_drawers']);
+        $this->assertIsInt($embedding['unembedded_drawers']);
+    }
 }

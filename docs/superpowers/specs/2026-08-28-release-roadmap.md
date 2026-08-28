@@ -334,6 +334,27 @@ any validation runs, so an unauthenticated request can trip a server error.
 Pre-existing and unrelated to the Docker work; found while smoke-testing the
 compose stack. Deliberately out of scope for group 2.
 
+### D16 — no TLS-terminating reverse proxy support
+
+README, `.env.docker.example`, and `docs/USERGUIDE.md` previously told
+operators that leaving `DOMAIN` blank was "the correct configuration" behind
+a TLS-terminating reverse proxy. There is no trusted-proxy configuration
+anywhere in the codebase — `grep -rn 'trustProxies|TrustProxies|forceScheme|X-Forwarded' app/ bootstrap/ config/`
+returns nothing — and live testing confirms `X-Forwarded-Proto: https` is
+ignored: OAuth discovery advertises `http://` endpoints and `@vite` emits
+`http://` asset URLs, which a browser blocks as mixed content on the consent
+screen. Corrected in the final fix round of install-story group 2: the docs
+now say plainly that running behind a reverse proxy is not yet supported and
+point operators at the `DOMAIN` path instead.
+
+Supporting it for real means wiring Laravel's `trustProxies` (or the
+equivalent Symfony `TrustedProxy` configuration) for the proxy's address,
+setting `SESSION_SECURE_COOKIE=true` and a correct `APP_URL`, and testing the
+consent screen and Vite asset URLs behind an actual TLS-terminating proxy —
+untested proxy trust has security consequences (header spoofing if the
+trusted range is too broad) that deserve their own change with its own
+tests, not a doc-driven addition in a release branch.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs
@@ -380,11 +401,11 @@ one the superseded roadmap set, and it is a judgement rather than a hard rule.
 The wiki limitation ships documented rather than fixed.
 
 Three things were hard requirements regardless. **D14 has landed** — the contact
-recipient is now configurable and unset by default. Two remain open, and both
-are outside what an implementation branch can close:
+recipient is now configurable and unset by default. **The `LICENSE` file has
+also landed** — MIT, `Copyright (c) 2026 Cooper Sellers`, committed in
+`70d24d5`, present throughout this branch. One item remains open, and it is
+outside what an implementation branch can close:
 
-- A `LICENSE` file must exist before the repository is public. MIT is the
-  decided license; the file does not yet exist.
 - The GitHub OAuth token embedded in the `origin` remote URL must be rotated.
 
 Before flipping the repository public, grep the full tracked tree — not just

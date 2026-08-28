@@ -346,12 +346,27 @@ must not re-implement any of this.
   `caddy_data` named volume (certs used to die on every `down`), and
   `${MNEMON_ENV_FILE:-.env}` so tooling can point compose at a template
   instead of a real `.env`.
-- **`docker/smoke.sh`.** Boots the stack, asserts `/up` and a rendering OAuth
-  consent screen, restarts it, and asserts `APP_KEY` and the admin password
-  survive the restart unchanged (rotating the admin user first so the
-  reseed-guard branch is genuinely exercised, not a no-op).
-- **`compose` CI job.** Runs `docker/smoke.sh` in CI, proving the guard
-  catches the asset-stage failure it exists for.
+- **`docker/smoke.sh`.** Boots the stack in its own `mnemon-smoke` Compose
+  project — never the default `mnemon` namespace a self-hoster's own
+  `docker compose up` uses from the same checkout — and runs `down -v`
+  before `up` so every run starts from nothing; leftover state from a prior
+  run would otherwise let the first-boot assertions below pass without the
+  code they exist to test. Asserts `/up` responds, that
+  `public/build/manifest.json` and every asset file it references exist
+  inside the running container, and that exactly one user exists after
+  first boot; then restarts `app` and asserts `APP_KEY` and the admin
+  password are unchanged. It does **not** assert a rendering OAuth consent
+  screen — no such assertion exists — and it does not rotate the admin user
+  as part of its own logic; an earlier review pass gutted
+  `AdminUserSeeder::run()` as a one-off fault injection to confirm the
+  assertions could actually fail, then restored it. That was a review-time
+  check, not something the shipped script does.
+- **`compose` CI job.** Runs `docker/smoke.sh` on every PR. It does not
+  itself "prove" anything beyond running the script and failing the build
+  if it exits non-zero — the claim that it "proves the guard catches the
+  asset-stage failure" described a review-time fault injection (temporarily
+  breaking the asset stage and confirming the script failed), not something
+  the CI job re-demonstrates on each run.
 - **Documentation truth-up.** README Docker quickstart as the primary install
   path (native install demoted, not deleted), `docs/USERGUIDE.md`,
   `CONTRIBUTING.md` (PHP 8.4 floor stated explicitly).

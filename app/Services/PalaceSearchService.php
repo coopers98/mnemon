@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Services\Concerns\TokenizesSearchQueries;
 use App\Services\Embeddings\NullDriver;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\Log;
 
 class PalaceSearchService
 {
+    use TokenizesSearchQueries;
+
     public function __construct(
         protected EmbeddingManager $embeddingManager,
     ) {}
@@ -100,7 +103,31 @@ class PalaceSearchService
     }
 
     /**
-     * Full-text search. Uses tsvector on Postgres, LIKE fallback on SQLite.
+     * Full-text search.
+     *
+     * One implementation for both engines; only the match primitive differs.
+     * Membership is OR across the searchable terms — a drawer matches if ANY
+     * term matches — and the raw score is the number of distinct terms present,
+     * over the number of searchable terms. PostgreSQL uses
+     * `to_tsvector @@ plainto_tsquery` per term, SQLite uses
+     * `LOWER(content) LIKE '%term%' ESCAPE '!'`. Terms come from the shared
+     * `TokenizesSearchQueries` tokenizer, so the two paths cannot drift, and
+     * every term is a binding.
+     *
+     * The per-term form matters. Applying `plainto_tsquery` to the WHOLE query
+     * ANDs every surviving lexeme ("what do we know about dorothy" becomes
+     * 'know' & 'dorothi'), so a drawer about Dorothy that never says "know"
+     * matched nothing — the D11 defect, and it reaches `recall` through
+     * hybridSearch(). `websearch_to_tsquery` ANDs unquoted words too and does
+     * not help.
+     *
+     * The engines are NOT ordered by capability; they trade in both directions.
+     * PostgreSQL stems, so "engineers" matches "engineer" where LIKE cannot.
+     * SQLite matches substrings, so `auth` matches "authentication" and `1234`
+     * matches "ISSUE-1234" where PostgreSQL's whole-lexeme `@@` cannot. Neither
+     * is a superset of the other; the one case where PostgreSQL would otherwise
+     * return nothing at all — a query of nothing but stop words — is handled by
+     * falling through to the substring primitive (see `searchTerms()`).
      */
     protected function fulltextSearch(
         string $query,
@@ -109,11 +136,39 @@ class PalaceSearchService
         int $limit,
         ?string $tier = null,
     ): Collection {
-        if ($this->isPostgres()) {
-            return $this->postgresFulltext($query, $wing, $room, $limit, $tier);
+        ['terms' => $terms, 'literal' => $literal] = $this->searchTerms($query);
+
+        if ($terms === []) {
+            return collect();
         }
 
-        return $this->sqliteFulltext($query, $wing, $room, $limit, $tier);
+        $fragments = $this->matchFragments(
+            'drawers.content',
+            $terms,
+            $this->isPostgres() && ! $literal,
+        );
+
+        $rows = $this->baseQuery($wing, $room, $tier)
+            ->selectRaw("
+                drawers.id,
+                drawers.content,
+                drawers.source,
+                drawers.metadata,
+                drawers.tier,
+                drawers.retention_score,
+                drawers.created_at,
+                wings.name AS wing,
+                wings.slug AS wing_slug,
+                rooms.name AS room,
+                rooms.slug AS room_slug,
+                {$fragments['score']} AS raw_score
+            ", $fragments['bindings'])
+            ->whereRaw($fragments['match'], $fragments['bindings'])
+            ->orderByRaw("{$fragments['score']} DESC", $fragments['bindings'])
+            ->limit($limit)
+            ->get();
+
+        return $this->normalizeAndWrap($rows, 'raw_score', count($terms));
     }
 
     /**
@@ -135,7 +190,7 @@ class PalaceSearchService
             $semanticWeight = (float) ($weights['semantic'] ?? 0.6);
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->postgresFulltext($query, $wing, $room, $limit * 3, $tier);
+            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier);
             $ftById = $fulltextResults->keyBy('id');
 
             if (! ($driver instanceof NullDriver)) {
@@ -183,7 +238,7 @@ class PalaceSearchService
             // SQLite: fulltext + temporal only
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->sqliteFulltext($query, $wing, $room, $limit * 3, $tier);
+            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier);
 
             $combined = $fulltextResults->map(function ($row) use ($fulltextWeight, $temporalWeight, $boostDays) {
                 $ftScore = (float) $row->score;
@@ -218,157 +273,6 @@ class PalaceSearchService
     }
 
     /**
-     * PostgreSQL full-text search.
-     *
-     * Deliberately mirrors sqliteFulltext(): membership is OR across the query
-     * words — a drawer matches if ANY word matches — and the raw score is the
-     * number of distinct query words present. Only the match primitive differs:
-     * Postgres uses `to_tsvector @@ plainto_tsquery` per word, SQLite uses
-     * `LOWER(content) LIKE '%word%'`.
-     *
-     * The per-word form matters. Applying plainto_tsquery to the WHOLE query
-     * ANDs every surviving lexeme ("what do we know about dorothy" becomes
-     * 'know' & 'dorothi'), so a drawer about Dorothy that never says "know"
-     * matched nothing — the same D11 defect as WikiSearchService, and it reaches
-     * `recall` through hybridSearch(). websearch_to_tsquery ANDs unquoted words
-     * too and does not help.
-     *
-     * Postgres keeps its advantage here: lexemes are stemmed, so "engineers"
-     * matches "engineer" where SQLite's LIKE would not. That asymmetry makes
-     * Postgres strictly more capable, not differently broken.
-     *
-     * Stop words: plainto_tsquery('english', 'about') is an EMPTY tsquery, and
-     * `@@` against an empty tsquery is false for every row. Stop words therefore
-     * never contribute a hit, and a query made only of stop words matches
-     * nothing and returns an empty collection. That is deliberate — such a query
-     * carries no searchable term. (Postgres logs a NOTICE per empty tsquery;
-     * PDO does not surface it.)
-     */
-    protected function postgresFulltext(
-        string $query,
-        ?string $wing,
-        ?string $room,
-        int $limit,
-        ?string $tier = null,
-    ): Collection {
-        $words = $this->queryWords($query);
-
-        if (empty($words)) {
-            return collect();
-        }
-
-        $base = $this->baseQuery($wing, $room, $tier);
-
-        // One bound tsquery per word: OR for membership, summed for the score.
-        $conditions = [];
-        $selectBindings = [];
-        $whereConditions = [];
-        $whereBindings = [];
-        foreach ($words as $word) {
-            $conditions[] = "CASE WHEN to_tsvector('english', drawers.content) @@ plainto_tsquery('english', ?) THEN 1 ELSE 0 END";
-            $selectBindings[] = $word;
-            $whereConditions[] = "to_tsvector('english', drawers.content) @@ plainto_tsquery('english', ?)";
-            $whereBindings[] = $word;
-        }
-
-        $scoreSql = '('.implode(' + ', $conditions).')';
-        $matchSql = '('.implode(' OR ', $whereConditions).')';
-
-        $rows = $base
-            ->selectRaw("
-                drawers.id,
-                drawers.content,
-                drawers.source,
-                drawers.metadata,
-                drawers.tier,
-                drawers.retention_score,
-                drawers.created_at,
-                wings.name AS wing,
-                wings.slug AS wing_slug,
-                rooms.name AS room,
-                rooms.slug AS room_slug,
-                {$scoreSql} AS raw_score
-            ", $selectBindings)
-            ->whereRaw($matchSql, $whereBindings)
-            ->orderByRaw("{$scoreSql} DESC", $selectBindings)
-            ->limit($limit)
-            ->get();
-
-        return $this->normalizeAndWrap($rows, 'raw_score', count($words));
-    }
-
-    /**
-     * SQLite full-text fallback. Counterpart of postgresFulltext(): same OR
-     * membership and same word-hit score, with LIKE as the match primitive.
-     */
-    protected function sqliteFulltext(
-        string $query,
-        ?string $wing,
-        ?string $room,
-        int $limit,
-        ?string $tier = null,
-    ): Collection {
-        $words = $this->queryWords($query);
-
-        if (empty($words)) {
-            return collect();
-        }
-
-        $base = $this->baseQuery($wing, $room, $tier);
-
-        // Build LIKE conditions for each word and count matches per word
-        $conditions = [];
-        $selectBindings = [];
-        $whereConditions = [];
-        $whereBindings = [];
-        foreach ($words as $word) {
-            $conditions[] = 'CASE WHEN LOWER(drawers.content) LIKE ? THEN 1 ELSE 0 END';
-            $selectBindings[] = '%'.$word.'%';
-            $whereConditions[] = 'LOWER(drawers.content) LIKE ?';
-            $whereBindings[] = '%'.$word.'%';
-        }
-
-        $scoreSql = '('.implode(' + ', $conditions).')';
-        $matchSql = '('.implode(' OR ', $whereConditions).')';
-
-        $rows = $base
-            ->selectRaw("
-                drawers.id,
-                drawers.content,
-                drawers.source,
-                drawers.metadata,
-                drawers.tier,
-                drawers.retention_score,
-                drawers.created_at,
-                wings.name AS wing,
-                wings.slug AS wing_slug,
-                rooms.name AS room,
-                rooms.slug AS room_slug,
-                {$scoreSql} AS raw_score
-            ", $selectBindings)
-            ->whereRaw($matchSql, $whereBindings)
-            ->orderByRaw("{$scoreSql} DESC", $selectBindings)
-            ->limit($limit)
-            ->get();
-
-        return $this->normalizeAndWrap($rows, 'raw_score', count($words));
-    }
-
-    /**
-     * Split a query into distinct lowercase words. Shared by both engines so the
-     * two full-text paths tokenize identically.
-     *
-     * @return array<int, string>
-     */
-    protected function queryWords(string $query): array
-    {
-        return array_values(array_filter(
-            array_unique(explode(' ', preg_replace('/\s+/', ' ', strtolower(trim($query))))),
-            fn ($w) => strlen($w) > 0
-        ));
-    }
-
-    /**
      * Build the base query with joins and optional wing/room/tier scoping.
      */
     protected function baseQuery(?string $wing, ?string $room, ?string $tier = null): Builder
@@ -395,6 +299,13 @@ class PalaceSearchService
 
     /**
      * Normalize raw scores to 0-1 and wrap in objects with a `score` key.
+     *
+     * `$maxPossible` is the full-text denominator: the number of *searchable*
+     * terms, not the number of words the user typed. Stop words cannot be hit
+     * on PostgreSQL, so counting them would score a conversational prompt
+     * against words that can never match — see `TokenizesSearchQueries`. Passed
+     * null (semantic search) the scores are normalized against the best row
+     * instead, since cosine similarity has no natural maximum.
      */
     protected function normalizeAndWrap(Collection $rows, string $scoreKey, ?float $maxPossible = null): Collection
     {

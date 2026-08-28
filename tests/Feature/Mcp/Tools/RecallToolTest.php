@@ -26,8 +26,6 @@ class RecallToolTest extends TestCase
 
     public function test_returns_mixed_payload_for_relevant_prompt(): void
     {
-        config(['mnemon.recall.confidence_floor' => 0.0]);
-
         $wing = Wing::factory()->create(['slug' => 'work']);
         $room = Room::factory()->create(['wing_id' => $wing->id]);
         Drawer::factory()->create([

@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\WikiPage;
 use App\Services\WikiSearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class WikiSearchTest extends TestCase
@@ -176,14 +175,13 @@ class WikiSearchTest extends TestCase
     }
 
     /**
-     * D11 empty case. PostgreSQL's `plainto_tsquery` yields an empty tsquery for
-     * a stop word, and `@@` against an empty tsquery is false for every row, so a
-     * query made only of stop words carries no searchable term and returns
-     * nothing. SQLite's LIKE primitive has no notion of stop words and matches
-     * them literally. This divergence is deliberate and documented in the
-     * service; it is the same class of difference as PostgreSQL's stemming.
+     * D11 round 2. A query made only of stop words has no dictionary form on
+     * PostgreSQL — `plainto_tsquery('english','what')` is an EMPTY tsquery and
+     * `@@` against it is false for every row — so it used to return nothing
+     * there while matching on SQLite. It now falls through to the substring
+     * primitive on both engines, so the two agree.
      */
-    public function test_stop_words_only_query_returns_nothing_on_postgres(): void
+    public function test_stop_words_only_query_matches_literally_on_both_engines(): void
     {
         WikiPage::create([
             'name' => 'concept:stop-words',
@@ -193,16 +191,86 @@ class WikiSearchTest extends TestCase
         ]);
 
         $service = app(WikiSearchService::class);
-        $results = $service->search('what do we');
 
-        if (DB::connection()->getDriverName() === 'pgsql') {
-            $this->assertTrue(
-                $results->isEmpty(),
-                'a stop-words-only query has no searchable term on PostgreSQL'
-            );
-        } else {
-            $this->assertCount(1, $results, 'SQLite LIKE matches stop words literally');
+        $this->assertCount(
+            1,
+            $service->search('what do we'),
+            'a stop-words-only query is matched literally, identically on both engines'
+        );
+    }
+
+    /**
+     * D11 round 2, the case that motivates the literal fallback: in a second
+     * brain, English stop words are real search terms — a person named Will, an
+     * "IT" wing, a project called "Down". On PostgreSQL every one of these
+     * reduced to an empty tsquery and returned nothing at all.
+     */
+    public function test_single_stop_word_term_still_finds_its_page(): void
+    {
+        WikiPage::create([
+            'name' => 'person:will-babbage',
+            'type' => 'person',
+            'title' => 'Will Babbage',
+            'content' => 'Will Babbage runs the IT wing and owns project Down. No one else does.',
+        ]);
+        WikiPage::create([
+            'name' => 'concept:unrelated',
+            'type' => 'concept',
+            'title' => 'Unrelated',
+            'content' => 'Quokka bandwidth ledger.',
+        ]);
+
+        $service = app(WikiSearchService::class);
+
+        foreach (['will', 'it', 'down', 'no'] as $term) {
+            $results = $service->search($term);
+
+            $this->assertCount(1, $results, "single stop-word term [{$term}] must still search");
+            $this->assertSame('person:will-babbage', $results->first()->name);
+            $this->assertSame(1.0, $results->first()->score);
         }
+    }
+
+    /**
+     * D11 round 2: the word count that reaches the SQL is capped. Uncapped, a
+     * pasted document is a hard failure — SQLite raises "Expression tree is too
+     * large" at 997 distinct words and PostgreSQL "stack depth limit exceeded"
+     * at ~4,063 — and `recall` passes the raw user prompt straight through.
+     */
+    public function test_very_long_query_is_capped_rather_than_throwing(): void
+    {
+        WikiPage::create([
+            'name' => 'concept:zephyr',
+            'type' => 'concept',
+            'title' => 'Zephyr',
+            'content' => 'Zephyr calibration ledger.',
+        ]);
+
+        $service = app(WikiSearchService::class);
+
+        // Straddle both engine limits, and go past the 65,535 parameter ceiling.
+        foreach ([996, 997, 4062, 4063, 30000] as $wordCount) {
+            $filler = [];
+            for ($i = 0; $i < $wordCount; $i++) {
+                $filler[] = 'noisewordnumber'.$i;
+            }
+
+            $this->assertCount(
+                0,
+                $service->search(implode(' ', $filler)),
+                "a {$wordCount}-word query must not reach the engine uncapped"
+            );
+        }
+
+        // The cap keeps the longest (most specific) words, not an arbitrary
+        // prefix, so a distinctive term survives a wall of short filler.
+        $noise = array_map(fn ($i) => 'n'.$i, range(1, 200));
+        $noise[] = 'zephyr';
+
+        $results = $service->search(implode(' ', $noise));
+
+        $this->assertCount(1, $results, 'the long distinctive word must survive the cap');
+        $this->assertSame('concept:zephyr', $results->first()->name);
     }
 
     /**
@@ -230,6 +298,26 @@ class WikiSearchTest extends TestCase
 
         $this->assertCount(0, $service->search("' OR 1=1 --"));
         $this->assertCount(0, $service->search('!&|:*'));
+
+        // The LIKE metacharacters are the ones that actually produce a
+        // tautology, and the payload above contains neither: unescaped,
+        // `LIKE '%%%'` matched EVERY row at score 1.0 and `LIKE '%_%'` matched
+        // every row with at least one character. `!` is the escape character
+        // itself, so it has to survive escaping too.
+        WikiPage::create([
+            'name' => 'concept:margin',
+            'type' => 'concept',
+            'title' => 'Margin',
+            'content' => 'Gross margin held at 50% this quarter.',
+        ]);
+
+        $percent = $service->search('%');
+        $this->assertCount(1, $percent, '`%` must match the literal character, not every row');
+        $this->assertSame('concept:margin', $percent->first()->name);
+
+        $this->assertCount(0, $service->search('_'), '`_` must not match an arbitrary character');
+        $this->assertCount(0, $service->search('%_%'));
+        $this->assertCount(0, $service->search('!'), 'the escape character must escape itself');
         // A real word alongside the payload still matches only what it should.
         // (The word is whitespace-separated: Postgres' tsquery parser strips
         // punctuation from a token, SQLite's LIKE does not — an engine

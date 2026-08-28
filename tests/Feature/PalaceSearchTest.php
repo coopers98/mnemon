@@ -7,7 +7,6 @@ use App\Models\Room;
 use App\Models\Wing;
 use App\Services\PalaceSearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -260,25 +259,83 @@ class PalaceSearchTest extends TestCase
     }
 
     /**
-     * D11 empty case — see WikiSearchTest for the reasoning. A query made only
-     * of stop words yields an empty tsquery per word on PostgreSQL, which
-     * matches nothing; SQLite's LIKE matches the words literally.
+     * D11 round 2 — see WikiSearchTest for the reasoning. A query made only of
+     * stop words has no dictionary form on PostgreSQL, so it falls through to
+     * the substring primitive and the two engines agree.
      */
-    public function test_stop_words_only_query_returns_nothing_on_postgres(): void
+    public function test_stop_words_only_query_matches_literally_on_both_engines(): void
     {
         $this->createDrawer('We do know what this drawer is about.');
 
         $service = app(PalaceSearchService::class);
-        $results = $service->search('what do we', mode: 'fulltext');
 
-        if (DB::connection()->getDriverName() === 'pgsql') {
-            $this->assertTrue(
-                $results->isEmpty(),
-                'a stop-words-only query has no searchable term on PostgreSQL'
-            );
-        } else {
-            $this->assertCount(1, $results, 'SQLite LIKE matches stop words literally');
+        $this->assertCount(
+            1,
+            $service->search('what do we', mode: 'fulltext'),
+            'a stop-words-only query is matched literally, identically on both engines'
+        );
+    }
+
+    /**
+     * D11 round 2: an English stop word is a real search term in a second brain
+     * — a person named Will, an "IT" wing, a project called "Down". On
+     * PostgreSQL each of these reduced to an empty tsquery and matched nothing.
+     */
+    public function test_single_stop_word_term_still_finds_its_drawer(): void
+    {
+        $this->createDrawer('Will Babbage runs the IT wing and owns project Down. No one else does.');
+        $this->createDrawer('Quokka bandwidth ledger.');
+
+        $service = app(PalaceSearchService::class);
+
+        foreach (['will', 'it', 'down', 'no'] as $term) {
+            $results = $service->search($term, mode: 'fulltext');
+
+            $this->assertCount(1, $results, "single stop-word term [{$term}] must still search");
+            $this->assertStringContainsString('Babbage', $results->first()->content);
         }
+    }
+
+    /**
+     * D11 round 2: the word count that reaches the SQL is capped. Uncapped,
+     * SQLite raises "Expression tree is too large" at 997 distinct words and
+     * PostgreSQL "stack depth limit exceeded" at ~4,063 — and `recall` passes
+     * the raw user prompt straight into this path through hybridSearch().
+     */
+    public function test_very_long_query_is_capped_rather_than_throwing(): void
+    {
+        $this->createDrawer('Zephyr calibration ledger.');
+
+        $service = app(PalaceSearchService::class);
+
+        foreach ([996, 997, 4062, 4063, 30000] as $wordCount) {
+            $filler = [];
+            for ($i = 0; $i < $wordCount; $i++) {
+                $filler[] = 'noisewordnumber'.$i;
+            }
+            $query = implode(' ', $filler);
+
+            $this->assertCount(
+                0,
+                $service->search($query, mode: 'fulltext'),
+                "a {$wordCount}-word query must not reach the engine uncapped"
+            );
+            $this->assertCount(
+                0,
+                $service->search($query, mode: 'hybrid'),
+                "a {$wordCount}-word hybrid query must not reach the engine uncapped"
+            );
+        }
+
+        // The cap keeps the longest (most specific) words, not an arbitrary
+        // prefix, so a distinctive term survives a wall of short filler.
+        $noise = array_map(fn ($i) => 'n'.$i, range(1, 200));
+        $noise[] = 'zephyr';
+
+        $results = $service->search(implode(' ', $noise), mode: 'fulltext');
+
+        $this->assertCount(1, $results, 'the long distinctive word must survive the cap');
+        $this->assertStringContainsString('Zephyr', $results->first()->content);
     }
 
     /**
@@ -296,6 +353,21 @@ class PalaceSearchTest extends TestCase
 
         $this->assertCount(0, $service->search("' OR 1=1 --", mode: 'fulltext'));
         $this->assertCount(0, $service->search('!&|:*', mode: 'fulltext'));
+
+        // The LIKE metacharacters are the ones that actually produce a
+        // tautology, and the payload above contains neither: unescaped,
+        // `LIKE '%%%'` matched EVERY row at score 1.0 and `LIKE '%_%'` matched
+        // every row with at least one character. `!` is the escape character
+        // itself, so it has to survive escaping too.
+        $this->createDrawer('Gross margin held at 50% this quarter.');
+
+        $percent = $service->search('%', mode: 'fulltext');
+        $this->assertCount(1, $percent, '`%` must match the literal character, not every row');
+        $this->assertStringContainsString('50%', $percent->first()->content);
+
+        $this->assertCount(0, $service->search('_', mode: 'fulltext'), '`_` must not match an arbitrary character');
+        $this->assertCount(0, $service->search('%_%', mode: 'fulltext'));
+        $this->assertCount(0, $service->search('!', mode: 'fulltext'), 'the escape character must escape itself');
         // A real word alongside the payload still matches only what it should.
         // (The word is whitespace-separated: Postgres' tsquery parser strips
         // punctuation from a token, SQLite's LIKE does not — an engine

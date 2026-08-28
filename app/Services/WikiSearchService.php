@@ -2,14 +2,45 @@
 
 namespace App\Services;
 
+use App\Services\Concerns\TokenizesSearchQueries;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class WikiSearchService
 {
+    use TokenizesSearchQueries;
+
     /**
      * Search wiki pages by content with optional type filtering.
+     *
+     * One implementation for both engines; only the match primitive differs.
+     * Membership is OR across the searchable terms — a page matches if ANY term
+     * matches — and the raw score is the number of distinct terms present, over
+     * the number of searchable terms. PostgreSQL uses
+     * `to_tsvector @@ plainto_tsquery` per term, SQLite uses
+     * `LOWER(content) LIKE '%term%' ESCAPE '!'`. Terms come from the shared
+     * `TokenizesSearchQueries` tokenizer, so the two paths cannot drift, and
+     * every term is a binding.
+     *
+     * The per-term form matters. Applying `plainto_tsquery` to the WHOLE query
+     * ANDs every surviving lexeme ("what do we know about dorothy" becomes
+     * 'know' & 'dorothi'), so a page about Dorothy that never says "know"
+     * matched nothing. The conversational prompts `recall` feeds this service
+     * are exactly that shape, so on the production driver it silently returned
+     * no wiki context (D11). `websearch_to_tsquery` ANDs unquoted words too and
+     * does not help.
+     *
+     * The engines are NOT ordered by capability; they trade in both directions.
+     * PostgreSQL stems, so "engineers" matches "engineer" where LIKE cannot.
+     * SQLite matches substrings, so `auth` matches "authentication", `compiler`
+     * matches "WikiPageCompiler" and `1234` matches "ISSUE-1234" where
+     * PostgreSQL's whole-lexeme `@@` cannot. Neither is a superset of the other.
+     * Closing that gap on PostgreSQL (a trigram index, or matching substrings
+     * alongside lexemes) is a design question of its own and is not done here;
+     * the one case where PostgreSQL would otherwise return nothing at all — a
+     * query of nothing but stop words — is handled by falling through to the
+     * substring primitive (see `searchTerms()`).
      *
      * @param  string  $query  The search query
      * @param  string|null  $type  Optional page type filter (person, project, concept, decision, synthesis)
@@ -24,67 +55,21 @@ class WikiSearchService
             return collect();
         }
 
-        if ($this->isPostgres()) {
-            return $this->postgresSearch($query, $type, $limit);
-        }
+        ['terms' => $terms, 'literal' => $literal] = $this->searchTerms($query);
 
-        return $this->sqliteSearch($query, $type, $limit);
-    }
-
-    /**
-     * PostgreSQL full-text search.
-     *
-     * Deliberately mirrors sqliteSearch(): membership is OR across the query
-     * words — a page matches if ANY word matches — and the raw score is the
-     * number of distinct query words present. Only the match primitive differs:
-     * Postgres uses `to_tsvector @@ plainto_tsquery` per word, SQLite uses
-     * `LOWER(content) LIKE '%word%'`.
-     *
-     * The per-word form matters. Applying plainto_tsquery to the WHOLE query
-     * ANDs every surviving lexeme ("what do we know about dorothy" becomes
-     * 'know' & 'dorothi'), so a page about Dorothy that never says "know"
-     * matched nothing. The conversational prompts `recall` feeds this service
-     * are exactly that shape, so on the production driver it silently returned
-     * no wiki context (D11). websearch_to_tsquery ANDs unquoted words too and
-     * does not help.
-     *
-     * Postgres keeps its advantage here: lexemes are stemmed, so "engineers"
-     * matches "engineer" where SQLite's LIKE would not. That asymmetry makes
-     * Postgres strictly more capable, not differently broken.
-     *
-     * Stop words: plainto_tsquery('english', 'about') is an EMPTY tsquery, and
-     * `@@` against an empty tsquery is false for every row. Stop words therefore
-     * never contribute a hit, and a query made only of stop words matches
-     * nothing and returns an empty collection. That is deliberate — such a query
-     * carries no searchable term. (Postgres logs a NOTICE per empty tsquery;
-     * PDO does not surface it.)
-     */
-    protected function postgresSearch(string $query, ?string $type, int $limit): Collection
-    {
-        $words = $this->queryWords($query);
-
-        if (empty($words)) {
+        if ($terms === []) {
             return collect();
         }
 
-        $base = $this->baseQuery($type);
+        // PostgreSQL matches whole lexemes through the `english` dictionary;
+        // SQLite matches substrings. A literal query (nothing but stop words
+        // and punctuation) has no dictionary form on either engine, so both
+        // fall through to the substring primitive — see searchTerms().
+        $useTsvector = $this->isPostgres() && ! $literal;
 
-        // One bound tsquery per word: OR for membership, summed for the score.
-        $conditions = [];
-        $selectBindings = [];
-        $whereConditions = [];
-        $whereBindings = [];
-        foreach ($words as $word) {
-            $conditions[] = "CASE WHEN to_tsvector('english', wiki_pages.content) @@ plainto_tsquery('english', ?) THEN 1 ELSE 0 END";
-            $selectBindings[] = $word;
-            $whereConditions[] = "to_tsvector('english', wiki_pages.content) @@ plainto_tsquery('english', ?)";
-            $whereBindings[] = $word;
-        }
+        $fragments = $this->matchFragments('wiki_pages.content', $terms, $useTsvector);
 
-        $scoreSql = '('.implode(' + ', $conditions).')';
-        $matchSql = '('.implode(' OR ', $whereConditions).')';
-
-        $rows = $base
+        $rows = $this->baseQuery($type)
             ->selectRaw("
                 wiki_pages.id,
                 wiki_pages.name,
@@ -93,75 +78,14 @@ class WikiSearchService
                 wiki_pages.content,
                 wiki_pages.description,
                 wiki_pages.last_compiled_at,
-                {$scoreSql} AS raw_score
-            ", $selectBindings)
-            ->whereRaw($matchSql, $whereBindings)
-            ->orderByRaw("{$scoreSql} DESC", $selectBindings)
+                {$fragments['score']} AS raw_score
+            ", $fragments['bindings'])
+            ->whereRaw($fragments['match'], $fragments['bindings'])
+            ->orderByRaw("{$fragments['score']} DESC", $fragments['bindings'])
             ->limit($limit)
             ->get();
 
-        return $this->normalizeAndWrap($rows, count($words));
-    }
-
-    /**
-     * SQLite full-text fallback. Counterpart of postgresSearch(): same OR
-     * membership and same word-hit score, with LIKE as the match primitive.
-     */
-    protected function sqliteSearch(string $query, ?string $type, int $limit): Collection
-    {
-        $words = $this->queryWords($query);
-
-        if (empty($words)) {
-            return collect();
-        }
-
-        $base = $this->baseQuery($type);
-
-        $conditions = [];
-        $selectBindings = [];
-        $whereConditions = [];
-        $whereBindings = [];
-        foreach ($words as $word) {
-            $conditions[] = 'CASE WHEN LOWER(wiki_pages.content) LIKE ? THEN 1 ELSE 0 END';
-            $selectBindings[] = '%'.$word.'%';
-            $whereConditions[] = 'LOWER(wiki_pages.content) LIKE ?';
-            $whereBindings[] = '%'.$word.'%';
-        }
-
-        $scoreSql = '('.implode(' + ', $conditions).')';
-        $matchSql = '('.implode(' OR ', $whereConditions).')';
-
-        $rows = $base
-            ->selectRaw("
-                wiki_pages.id,
-                wiki_pages.name,
-                wiki_pages.type,
-                wiki_pages.title,
-                wiki_pages.content,
-                wiki_pages.description,
-                wiki_pages.last_compiled_at,
-                {$scoreSql} AS raw_score
-            ", $selectBindings)
-            ->whereRaw($matchSql, $whereBindings)
-            ->orderByRaw("{$scoreSql} DESC", $selectBindings)
-            ->limit($limit)
-            ->get();
-
-        return $this->normalizeAndWrap($rows, count($words));
-    }
-
-    /**
-     * Split a query into distinct lowercase words. Shared by both engines so the
-     * two search paths tokenize identically.
-     *
-     * @return array<int, string>
-     */
-    protected function queryWords(string $query): array
-    {
-        return array_values(array_filter(
-            array_unique(explode(' ', preg_replace('/\s+/', ' ', strtolower(trim($query))))),
-            fn ($w) => strlen($w) > 0
-        ));
+        return $this->normalizeAndWrap($rows, count($terms));
     }
 
     protected function baseQuery(?string $type): Builder
@@ -175,16 +99,25 @@ class WikiSearchService
         return $query;
     }
 
-    protected function normalizeAndWrap(Collection $rows, ?float $maxPossible = null): Collection
+    /**
+     * Turn the raw word-hit count into a 0-1 score.
+     *
+     * The denominator is the number of *searchable* terms (`searchTerms()`), not
+     * the number of words the user typed. That is what makes the score both
+     * honest and usable: `recall` filters this service's output against
+     * `mnemon.recall.confidence_floor` (0.45 as shipped), and "what do we know
+     * about dorothy" has six words but only two searchable ones, so a page that
+     * says "dorothy" scores 0.5 and clears the floor instead of scoring 0.167
+     * and being discarded. A query where every term hits still scores exactly
+     * 1.0, unchanged. See D11 in the release roadmap.
+     */
+    protected function normalizeAndWrap(Collection $rows, int $termCount): Collection
     {
         if ($rows->isEmpty()) {
             return collect();
         }
 
-        $max = $maxPossible ?? $rows->max('raw_score');
-        if ($max <= 0) {
-            $max = 1.0;
-        }
+        $max = max(1, $termCount);
 
         return $rows->map(function ($row) use ($max) {
             $normalized = min(1.0, (float) $row->raw_score / $max);

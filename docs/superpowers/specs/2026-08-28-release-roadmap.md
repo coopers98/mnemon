@@ -274,6 +274,32 @@ one to 32 ms, because the vector is never recomputed. That is a schema change
 with a table rewrite and roughly a doubling of text storage, so it is **open**
 rather than done here.
 
+### D12 — full-text search is a sequential scan on PostgreSQL
+
+Surfaced while fixing D11 and measured against a live `pgvector/pgvector:pg17`
+container at 50k rows. A functional GIN index on `to_tsvector('english', content)`
+was added, and **the planner correctly declines it** for the unselective queries
+`recall` issues — the scan stays around 4.8 s. A *stored generated* `tsvector`
+column measures roughly **47 ms**, about 100x faster, because the expression is
+materialised rather than recomputed per row.
+
+That is a schema change (a generated column plus an index on it, and a decision
+about whether the same applies to `drawers` and `wiki_pages` alike), so it is
+recorded rather than rushed. Note this is **not** a regression introduced by
+D11 — the pre-D11 query was also a seq scan at a comparable cost. But `recall`
+runs on every user prompt through the Claude Code hooks, so it is the hot path
+in the product.
+
+### D13 — wiki and drawer confidences are not comparable
+
+`RecallService` filters both legs against a single `confidence_floor`, but the
+wiki leg's score is now an **absolute** fraction of searchable terms matched
+while the drawer leg is **min-max normalised** so its top hit is always 1.0. The
+code comments are accurate as of D11's fix, but one bar is being applied to two
+different scales, so the floor is effectively stricter for wiki than for
+drawers. Deciding whether both should be absolute, both relative, or separately
+configured is a product question about what `confidence` is supposed to mean.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

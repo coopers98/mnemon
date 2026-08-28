@@ -268,4 +268,4 @@ php artisan mnemon:apply-retention      # enforce retention policies
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).

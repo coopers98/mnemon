@@ -6,7 +6,7 @@ Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the
 
 ## Stack
 
-- **Framework:** Laravel 13 (PHP 8.3+)
+- **Framework:** Laravel 13 (PHP 8.4+)
 - **Admin UI:** Filament 5
 - **Primary DB:** PostgreSQL with pgvector extension (for semantic embeddings)
 - **Test DB:** SQLite (vector columns skipped in SQLite migrations)

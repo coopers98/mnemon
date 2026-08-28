@@ -29,7 +29,7 @@ The [README](../README.md) is the project overview. This document is the day-to-
 
 ### Prerequisites
 
-- PHP 8.3+
+- PHP 8.4+
 - PostgreSQL 14+ with the `pgvector` extension installed (or SQLite for local-only)
 - Composer
 - Node optional (Filament's vendor JS is published from the package — you don't need to compile assets unless you customize them)

@@ -158,7 +158,7 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 
 ## Stack
 
-- **Framework:** [Laravel 13](https://laravel.com) (PHP 8.3+)
+- **Framework:** [Laravel 13](https://laravel.com) (PHP 8.4+)
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)

@@ -137,8 +137,10 @@ means `artisan tinker`. Printing to stdout is not sufficient: nobody watches
 **`brain_status` always reports `dimensions: null`.** `BrainStatusTool:81` reads
 `config('mnemon.embedding.dimensions')`; the real key is
 `mnemon.embedding.drivers.{driver}.dimensions`. Verified by execution. Fix the
-key and add `embedded_count` / `unembedded_count` alongside it, so embedding
-coverage is visible rather than inferred.
+key and add `embedded_drawers` / `unembedded_drawers` alongside it, so embedding
+coverage is visible rather than inferred. (Amended to match what shipped: the
+draft called these `embedded_count` / `unembedded_count`, but wiki pages carry
+embeddings too and are not counted here, so the names say `drawers`.)
 
 **~~Semantic search under `driver=none` returns a silent empty result set.~~
 Withdrawn on verification.** The review flagged `PalaceSearchService.php:63-68`
@@ -171,12 +173,14 @@ corrects the README rather than shipping a documented option that hard-errors.
 Three jobs.
 
 1. **`tests`** — PHP 8.4 pinned (matching `composer.json`'s `^8.4`), a
-   `pgvector/pgvector` service container, `passport:keys` as a step, the full
-   suite against PostgreSQL, plus a matrix leg on SQLite to keep the fast
+   `pgvector/pgvector` service container, the full suite against PostgreSQL,
+   plus a matrix leg on SQLite to keep the fast
    contributor loop honest. `phpunit.xml:26-27` pins `DB_CONNECTION=sqlite`;
    PHPUnit's `<env>` without `force` does not override an exported variable, so
    the workflow exports `DB_CONNECTION=pgsql`. That mechanism is stated here so
-   the implementer does not have to discover it.
+   the implementer does not have to discover it. (Shipped without a
+   `passport:keys` step: the `TestCase` hook below generates them for CI and
+   contributors alike, so a separate CI step would be dead weight.)
 2. **`lint`** — `pint --test`.
 3. **`compose`** — build the image, `docker compose up -d`, poll `/up`, curl the
    OAuth discovery document **and the authorize page**, assert the admin
@@ -242,12 +246,56 @@ how it points at a running stack).
 
 This spec is broad enough that landing order matters. Three groups, in order:
 
-1. **CI + test keys + the three product bugs.** Independently valuable, lands
-   fastest, and closes the "defects reach main because the suite cannot run
-   PostgreSQL" gap immediately. Nothing here depends on Docker existing.
+1. **CI + test keys + the three product bugs. — SHIPPED.** Independently
+   valuable, lands fastest, and closes the "defects reach main because the
+   suite cannot run PostgreSQL" gap immediately. Nothing here depends on
+   Docker existing. See "What group 1 shipped" below.
 2. **Image and compose.** The bulk of the work: Dockerfile, entrypoint,
    Caddyfile, `.env.docker.example`, the `compose` CI job.
 3. **Documentation.** Written against what shipped, once it has shipped.
 
 Group 1 makes group 2 verifiable rather than hoped-at, which is why it goes
 first even though group 2 is the headline.
+
+## What group 1 shipped
+
+Landed on `piece-2-group-1`. **Group 2 must not re-implement any of this.**
+
+- **`.github/workflows/ci.yml` (new).** Two jobs: `tests` (PHP 8.4, matrix over
+  `sqlite` and `pgsql`, `pgvector/pgvector:pg17` service container) and `lint`
+  (`pint --test`). The workflow exports `DB_CONNECTION`/`DB_DATABASE` to beat
+  `phpunit.xml`'s unforced `<env>`, and also exports:
+  - `CI_REQUIRE_PGSQL` — turns the driver-guarded skips in
+    `tests/Feature/VectorColumnTest.php` into failures on the pgsql leg, so a
+    broken override cannot make that leg silently run SQLite twice and still
+    exit 0.
+  - `MNEMON_EMBEDDING_DRIVER=none` — the observers embed only on PostgreSQL, so
+    the pgsql leg was the first thing in the suite able to reach a provider.
+  It also sets `permissions: contents: read`, `timeout-minutes: 20`, and names
+  the sqlite extensions rather than relying on `setup-php`'s defaults.
+  **The `compose` job is group 2's.**
+- **Test-environment Passport keys.** `tests/TestCase.php` runs `passport:keys`
+  when either key file is missing, latching only after both exist.
+  `Http::preventStrayRequests()` lives there too: no test reaches the network
+  unless it stubs the call itself.
+- **Admin seeder.** `Str::password(24)`, written to the path in
+  `config('mnemon.admin_password_path')` (default
+  `storage_path('admin-password.txt')`, gitignored) created restrictive-first
+  at mode 0600, throwing rather than creating an admin it cannot hand back a
+  password for. Re-seeding leaves an existing admin alone. **Group 2's
+  entrypoint should read `config('mnemon.admin_password_path')` rather than
+  hard-coding the path**, and must seed only when the users table is empty.
+- **`brain_status`.** Reads the per-driver dimensions key, and reports
+  `embedded_drawers` / `unembedded_drawers`, guarded by
+  `Schema::hasColumn('drawers', 'embedding')` because SQLite never gets the
+  column.
+- **Vector coverage.** `tests/Feature/VectorColumnTest.php` round-trips a real
+  1536-d vector through `drawers.embedding` and exercises the `<=>` operator on
+  the pgsql leg, plus a database-free assertion that the shipped default
+  driver's declared width matches the `vector(1536)` column (the D10 static
+  guard).
+
+Still open from this spec and **owned by later groups**: flipping
+`config/mnemon.php`'s default driver to `none`, the README driver table, the
+Dockerfile/entrypoint/Caddyfile/`.env.docker.example`, the `compose` CI job, the
+timezone fix, and the documentation truth-up.

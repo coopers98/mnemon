@@ -110,6 +110,18 @@ def main() -> int:
     empty = sum(1 for r in rows if not r["error"] and not r["retrieved"])
     print(f"[retrieve] wrote {out} ({len(rows)} rows, {errors} errors, {empty} empty)")
 
+    if errors == len(rows) and rows:
+        # A total outage — server down, token invalid, every wing denied — must
+        # not exit 0. The empty-run guard below cannot catch it, because it
+        # counts only rows that searched successfully and found nothing, and an
+        # all-errored run has none of those. Without this an automated pipeline
+        # reads "0 scored, N errors" as a pass.
+        print(
+            f"[retrieve] FAILED: all {errors} searches errored — nothing was "
+            "retrieved at all. Check the server is up and the token is valid.",
+            file=sys.stderr,
+        )
+        return 1
     if errors:
         print(f"[retrieve] WARNING: {errors} searches errored and are excluded from scoring")
     if empty == len(rows) and rows:

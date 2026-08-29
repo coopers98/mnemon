@@ -355,6 +355,29 @@ untested proxy trust has security consequences (header spoofing if the
 trusted range is too broad) that deserve their own change with its own
 tests, not a doc-driven addition in a release branch.
 
+### D17 — a fresh install cannot mint a personal access token
+
+`docker/entrypoint.sh` runs `passport:keys --force` but never creates a
+personal access client. `User::createToken()` requires one, so on a fresh
+Docker install it throws.
+
+That breaks a path we document: `docs/USERGUIDE.md:220` tells the reader to run
+`$user->createToken('My Custom Agent', ['mcp:use'])->accessToken` to build a
+custom agent, and `benchmark/config.py` and `benchmark/mnemon_client.py` give
+the same instruction for minting a benchmark token. All three fail on a stack
+that was just brought up.
+
+MCP clients themselves are unaffected — Claude Code and friends register through
+Dynamic Client Registration, which does not need a personal access client. The
+gap only bites scripts and custom agents, which is exactly why it survived the
+install-story work: nothing in that piece minted a token this way.
+
+Found while building the benchmark harness, by following our own documented
+setup instructions on a clean stack.
+
+Fix: create the personal access client idempotently in the entrypoint's
+bootstrap block, beside `passport:keys`.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

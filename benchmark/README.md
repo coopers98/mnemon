@@ -125,10 +125,15 @@ python3 evaluate.py --tag keyless
 ```
 
 `--tag` is required on `retrieve.py` so the keyless and embedded runs can't
-overwrite each other's raw hits (`results/hits-{tag}.jsonl`). `evaluate.py`
-scores them into `results/metrics-{tag}.json` (recall@1/3/5/10, MRR, a
-per-question-type breakdown) and excludes any errored search from the
-denominator rather than counting it as a miss.
+overwrite each other's raw hits (`results/hits-{tag}.jsonl`). `retrieve.py`
+also records the server's actual embedding configuration (from
+`brain_status()`) alongside the hits, and refuses to search any question
+that isn't fully ingested unless `--allow-incomplete` is passed. `evaluate.py`
+scores the hits into `results/metrics-{tag}.json` — both `hit_rate@{1,3,5,10}`
+(did *any* gold session appear in the top k) and standard `recall@{1,3,5,10}`
+(what fraction of gold sessions were found), MRR, and a per-question-type
+breakdown — and excludes any errored search from the denominator rather than
+counting it as a miss.
 
 **The keyless number is the shipped default.** A fresh Mnemon install ships
 `MNEMON_EMBEDDING_DRIVER=none` — no OpenAI account, no spend, works
@@ -168,10 +173,17 @@ docker compose -p mnemon-bench --env-file .env.bench exec -T app \
   php artisan tinker --execute='echo config("mnemon.embedding.driver");'
 ```
 
-If a later `retrieve.py --tag embedded` produces `recall@10` identical to the
-keyless run to three decimal places, that is a red flag that the re-embed
-did not take effect — check the driver again before reporting the number as
-"embeddings don't help."
+`retrieve.py` also records this for you now: it calls `brain_status()` once
+per run and writes the server's actual embedding configuration to
+`results/meta-{tag}.json`, which `evaluate.py` carries into
+`metrics-{tag}.json` and `report.py` prints as an "embedding driver" row —
+so the report says which configuration each column actually measured,
+independent of whatever you typed for `--tag`. (An earlier version of this
+section warned that identical `recall@10` between the two legs was a red
+flag for a failed re-embed. It isn't: in a real, correct run recall@10 *is*
+identical between legs — see the results below — so that heuristic fires on
+the good case. Use the embedding driver row instead of a coincidence in the
+numbers.)
 
 ## 5. The embedded run
 
@@ -204,34 +216,67 @@ Measured against Mnemon's **palace** layer only — LongMemEval tests recall ove
 
 | Metric | keyless | embedded |
 |---|---|---|
-| recall@1 | 0.840 | 0.960 |
-| recall@3 | 0.960 | 1.000 |
-| recall@5 | 1.000 | 1.000 |
-| recall@10 | 1.000 | 1.000 |
+| hit_rate@1 | 0.840 | 0.960 |
+| hit_rate@3 | 0.960 | 1.000 |
+| hit_rate@5 | 1.000 | 1.000 |
+| hit_rate@10 | 1.000 | 1.000 |
+| recall@1 | 0.620 | 0.720 |
+| recall@3 | 0.900 | 0.960 |
+| recall@5 | 0.920 | 0.960 |
+| recall@10 | 1.000 | 0.980 |
 | MRR | 0.910 | 0.980 |
 | questions scored | 25 | 25 |
 | errors | 0 | 0 |
+| embedding driver | n/a | n/a |
 ```
 
-**What this shows.** Keyless already finds the evidence within the top 5 for
-every one of the 25 questions — recall@5 and recall@10 are saturated at
-1.000 for both configurations, so an embedding cannot find *more* evidence
-here, only rank what's already found. Where it does help is exactly recall@1
-and MRR: the top-ranked result is correct more often with embeddings, and the
-first correct hit sits higher on average. Read this as "you don't need an API
-key to find the right memory; a key makes it surface first more often," not
-as "embeddings don't matter" — n=25 is small, and this says nothing about the
-LLM-judged QA layer LongMemEval's own headline metric uses, which this
-harness deliberately does not implement yet (see below).
+The "embedding driver" row reads `n/a` here because these two runs predate
+I1's `brain_status()` wiring — their `hits-{tag}.jsonl` files have no
+companion `meta-{tag}.json` for `evaluate.py` to carry forward. A run
+produced with the current `retrieve.py` records this automatically (see
+Step 4).
+
+Two metric families are published, and they are not interchangeable.
+`hit_rate@k` is "did *any* gold session appear in the top k"; `recall@k` is
+the standard `|retrieved ∩ gold| / |gold|`. They coincide only when a
+question has exactly one gold session — 13 of these 25 don't. An earlier
+version of this harness computed only hit_rate and published it under the
+name "recall," which is why the numbers above don't match older copies of
+this table.
+
+**What this shows.** Under standard recall, embeddings improved rank-1
+placement on both conventions — hit_rate@1 went from 0.840 to 0.960 (21/25
+to 24/25 questions) and recall@1 from 0.620 to 0.720 — but did **not**
+uniformly improve coverage at higher k: recall@10 is **1.000 keyless vs.
+0.980 embedded**, i.e. the embedded leg found *less* of the gold evidence at
+k=10, not more. Concretely, question `3c1045c8` has two gold sessions
+(`answer_c8cc60d6_1`, `answer_c8cc60d6_2`); keyless's top 10 contains both,
+embedded's top 10 contains only `_2`. (An earlier version of this section
+claimed recall@5/@10 were saturated for both legs and concluded embeddings
+"only re-rank" and cannot find more evidence — that claim is false on this
+harness's own hits files, `3c1045c8` above is the counter-example, and it
+has been retracted.)
+
+Treat the rank-1 gap as suggestive, not conclusive: the Wilson 95%
+confidence interval on keyless hit_rate@1 (21/25) is **[0.65, 0.94]**, a
+width of 0.28 — wide enough that a 3-question swing at n=25 is within noise.
+Prefer "keyless found evidence for 21 of 25 questions at rank 1, embedded
+for 24" over quoting three decimal places as if they were precise. This
+says nothing about the LLM-judged QA layer LongMemEval's own headline
+metric uses, which this harness deliberately does not implement yet (see
+below).
 
 ### Reproducibility
 
 This table comes from a full teardown-and-rebuild run: `docker compose down
 -v`, rebuild, fresh migrations, mint a new token, and every step above from
-nothing. A first full run (recorded separately) measured keyless recall@1
-0.880 / MRR 0.930 against the same 25 questions and seed; this run measured
-0.840 / 0.910. **recall@3, @5, @10 and the embedded column reproduced
-exactly both times; only keyless recall@1 and MRR moved.**
+nothing. A first full run (recorded separately, under this harness's old
+metric name — see above) measured keyless hit_rate@1 0.880 / MRR 0.930
+against the same 25 questions and seed; this run measured 0.840 / 0.910.
+**hit_rate@3, @5, @10 and the embedded column reproduced exactly both
+times; only keyless hit_rate@1 and MRR moved.** (Standard recall was not
+computed for that first run — its raw hits were not kept — so this
+reproducibility comparison is hit_rate-only.)
 
 The cause is a real, verified product characteristic, not a harness bug:
 `PalaceSearchService::fulltextSearch()` (`app/Services/PalaceSearchService.php`)
@@ -243,15 +288,15 @@ a stable order among exactly-tied rows without an explicit tiebreaker, and
 which of the pair sorts first depends on physical row order, which in turn
 depends on insertion order — `ingest.py` writes with 8 concurrent workers, so
 insertion order is not identical between two separate ingestion runs of the
-same content. recall@3+ is unaffected because both tied candidates land in
+same content. hit_rate@3+ is unaffected because both tied candidates land in
 the top 2 regardless of order; only "which one is rank 1" moves. The embedded
 leg is unaffected because cosine similarity scores are effectively continuous
 and do not produce exact ties. Recorded as D19 in the roadmap.
 
-**Practical consequence:** treat keyless recall@1/MRR as accurate to roughly
-±0.04 (one question's worth) run-to-run rather than as an exact figure, and
-don't read small keyless recall@1 deltas across runs as a regression without
-checking for this first.
+**Practical consequence:** treat keyless hit_rate@1/MRR as accurate to
+roughly ±0.04 (one question's worth) run-to-run rather than as an exact
+figure, and don't read small keyless hit_rate@1 deltas across runs as a
+regression without checking for this first.
 
 ### Measured throughput, for the scale decision
 

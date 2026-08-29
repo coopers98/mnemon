@@ -411,9 +411,12 @@ string.
 
 Found while validating the benchmark harness's reproducibility (Task 8): the
 identical 25-question subset (seed 1234) was ingested into two separately
-built stacks and scored with the identical keyless configuration. recall@3,
-recall@5, recall@10, and the embedded leg reproduced exactly; keyless
-recall@1 moved from 0.880 to 0.840 and MRR from 0.930 to 0.910.
+built stacks and scored with the identical keyless configuration. hit_rate@3,
+hit_rate@5, hit_rate@10, and the embedded leg reproduced exactly; keyless
+hit_rate@1 moved from 0.880 to 0.840 and MRR from 0.930 to 0.910. (Named
+`recall@` at the time; the benchmark harness's final-fix pass renamed this
+family `hit_rate@` once it was clear it isn't standard recall — see the
+Piece 3 status update below.)
 
 Root-caused rather than filed as noise: for 3 of the 25 questions, the gold
 session's drawer and one or more distractor drawers in the same wing score
@@ -428,9 +431,9 @@ insertion order. `benchmark/ingest.py` writes with 8 concurrent workers, so
 insertion order — and therefore the tie order — is not identical between two
 separate ingestion runs of the same content, even with the same seed.
 
-recall@3 and above are unaffected because both members of a tied pair land in
+hit_rate@3 and above are unaffected because both members of a tied pair land in
 the top two positions regardless of order; only "which one is rank 1" moves,
-which is exactly why recall@1 and MRR are the metrics that shifted. The
+which is exactly why hit_rate@1 and MRR are the metrics that shifted. The
 embedded leg is unaffected because cosine similarity scores are effectively
 continuous and do not produce exact ties in practice — confirmed: 0/25
 retrieved lists were identical between the keyless and embedded legs in the
@@ -440,7 +443,7 @@ This is a real product characteristic — not specific to the benchmark's data
 — that would affect any two `drawer_add` batches sent concurrently against
 overlapping search terms. Low severity (a rank-1 swap between tied,
 equally-relevant results, not a correctness failure), but worth knowing
-before quoting keyless recall@1 to more precision than the tie noise
+before quoting keyless hit_rate@1 to more precision than the tie noise
 supports.
 
 Fix: add a deterministic secondary `ORDER BY` (e.g. `drawers.id ASC`, which
@@ -494,7 +497,7 @@ ties. And the final PHP-side `sortByDesc('score')` is stable, so it faithfully
 preserves whatever order PostgreSQL happened to return. On a freshly bulk-ingested
 corpus, exact ties are the normal case, not an edge case.
 
-This is why the benchmark's keyless `recall@1` moved 0.880 → 0.840 across a clean
+This is why the benchmark's keyless `hit_rate@1` moved 0.880 → 0.840 across a clean
 rebuild of identical content: 3 of 25 questions had the gold session tied with a
 distractor, and concurrent ingestion wrote the rows in a different physical order
 the second time.
@@ -502,28 +505,52 @@ the second time.
 ### Piece 3 status — subset validation, twice
 
 `benchmark/` (`dataset.py`, `preflight.py`, `ingest.py`, `retrieve.py`,
-`evaluate.py`, `report.py`, `cleanup.py`, `benchmark/README.md`, 59 tests) is
+`evaluate.py`, `report.py`, `cleanup.py`, `benchmark/README.md`, 87 tests) is
 complete. The full pipeline was run end to end from a clean stack — teardown,
 rebuild, fresh migrations, a newly minted token, ingest, keyless retrieval,
 re-embed, embedded retrieval, report, cleanup — twice, on the same seeded
 25-question subset (seed 1234), to check reproducibility rather than just
 smoke-test the happy path.
 
+A final-fix review of this branch found the harness's `recall_at_k` was
+actually hit-rate@k ("did *any* gold session appear in the top k"), not
+standard recall (`|retrieved ∩ gold| / |gold|`) — the two coincide only when
+a question has exactly one gold session, and 13 of these 25 have two.
+`evaluate.py` now computes and publishes both, under the names `hit_rate@k`
+and `recall@k`. The table below carries both; only run 2's raw hits (the
+ones kept in `results/`) could be re-scored for standard recall, so run 1's
+recall column is marked accordingly.
+
 | Metric | keyless (run 1) | keyless (run 2) | embedded (both runs) |
 |---|---|---|---|
-| recall@1 | 0.880 | 0.840 | 0.960 |
-| recall@3 | 0.960 | 0.960 | 1.000 |
-| recall@5 | 1.000 | 1.000 | 1.000 |
-| recall@10 | 1.000 | 1.000 | 1.000 |
+| hit_rate@1 | 0.880 | 0.840 | 0.960 |
+| hit_rate@3 | 0.960 | 0.960 | 1.000 |
+| hit_rate@5 | 1.000 | 1.000 | 1.000 |
+| hit_rate@10 | 1.000 | 1.000 | 1.000 |
+| recall@1 | n/a (hits not kept) | 0.620 | 0.720 |
+| recall@3 | n/a (hits not kept) | 0.900 | 0.960 |
+| recall@5 | n/a (hits not kept) | 0.920 | 0.960 |
+| recall@10 | n/a (hits not kept) | 1.000 | 0.980 |
 | MRR | 0.930 | 0.910 | 0.980 |
 
-recall@3/@5/@10, errors (0 both legs, both runs), and the entire embedded
-column reproduced exactly. Keyless recall@1/MRR did not, and the cause was
-root-caused rather than shrugged off — see D19 below. Reading that holds
-across both runs: keyless already finds the evidence within the top 5 for
-every question; embeddings do not find *more* evidence (recall@5/@10 are
-already saturated), they rank what's already found better. n=25 — this is a
-subset validation, not the published number.
+hit_rate@3/@5/@10, errors (0 both legs, both runs), and the entire embedded
+column reproduced exactly across runs. Keyless hit_rate@1/MRR did not, and
+the cause was root-caused rather than shrugged off — see D19 below.
+
+**Reading that holds, corrected:** under standard recall, embeddings
+improved rank-1 placement on both conventions (hit_rate@1 0.840→0.960,
+recall@1 0.620→0.720 on run 2), but did **not** uniformly improve coverage
+at higher k — recall@10 is 1.000 keyless vs. 0.980 embedded, i.e. the
+embedded leg found *less* of the gold evidence at k=10. Question `3c1045c8`
+(gold `answer_c8cc60d6_1` and `answer_c8cc60d6_2`) is the concrete
+counter-example: keyless's top 10 retrieved both, embedded's retrieved only
+`_2`. (The previous version of this status block claimed recall@5/@10 were
+saturated for both legs and that embeddings therefore cannot find more
+evidence, only re-rank it — that claim is false on this harness's own hits
+files and has been retracted.) Treat the rank-1 gap as suggestive, not
+conclusive: the Wilson 95% CI on keyless hit_rate@1 (21/25) is [0.65, 0.94],
+a width of 0.28 — a 3-question swing at n=25 is within noise. n=25 overall
+— this is a subset validation, not the published number.
 
 **Measured throughput** (run 1): ~48 drawers/question, ~2 drawers/sec, 1,201
 drawers for 25 questions, 10m18s wall-clock, 0 truncated. Extrapolated to all

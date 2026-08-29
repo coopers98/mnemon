@@ -407,6 +407,47 @@ Fix: decode `metadata` in the search service's result mapping so both tools
 return an object. Note the wire contract changes for anyone already parsing the
 string.
 
+### D19 — keyless full-text ranking ties break non-deterministically across ingestion runs
+
+Found while validating the benchmark harness's reproducibility (Task 8): the
+identical 25-question subset (seed 1234) was ingested into two separately
+built stacks and scored with the identical keyless configuration. recall@3,
+recall@5, recall@10, and the embedded leg reproduced exactly; keyless
+recall@1 moved from 0.880 to 0.840 and MRR from 0.930 to 0.910.
+
+Root-caused rather than filed as noise: for 3 of the 25 questions, the gold
+session's drawer and one or more distractor drawers in the same wing score
+**exactly equal** under the keyless ranking (confirmed live against the real
+server — e.g. `0.34` vs `0.34`, and a three-way tie at `0.325`).
+`PalaceSearchService::fulltextSearch()` orders its query with
+`->orderByRaw("{score} DESC", ...)` (`app/Services/PalaceSearchService.php:167`)
+and no secondary sort key. PostgreSQL does not guarantee a stable order among
+exactly-tied rows absent an explicit tiebreaker (e.g. `id ASC`); which of two
+tied rows sorts first depends on physical row order, which depends on
+insertion order. `benchmark/ingest.py` writes with 8 concurrent workers, so
+insertion order — and therefore the tie order — is not identical between two
+separate ingestion runs of the same content, even with the same seed.
+
+recall@3 and above are unaffected because both members of a tied pair land in
+the top two positions regardless of order; only "which one is rank 1" moves,
+which is exactly why recall@1 and MRR are the metrics that shifted. The
+embedded leg is unaffected because cosine similarity scores are effectively
+continuous and do not produce exact ties in practice — confirmed: 0/25
+retrieved lists were identical between the keyless and embedded legs in the
+run that established this baseline.
+
+This is a real product characteristic — not specific to the benchmark's data
+— that would affect any two `drawer_add` batches sent concurrently against
+overlapping search terms. Low severity (a rank-1 swap between tied,
+equally-relevant results, not a correctness failure), but worth knowing
+before quoting keyless recall@1 to more precision than the tie noise
+supports.
+
+Fix: add a deterministic secondary `ORDER BY` (e.g. `drawers.id ASC`, which
+is already selected but unused for ordering) to the full-text ranking query
+in `PalaceSearchService`. Out of scope for the benchmark branch — no PHP
+changed here — recorded for whoever picks it up.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs
@@ -436,13 +477,52 @@ string.
 |---|---|---|---|
 | ~~1~~ | ~~**Authorization & audit correctness**~~ | ~~D7, D8, D4.~~ **Done** — see the status blocks above. | — |
 | ~~2~~ | ~~**Install story**~~ | ~~Docker Compose with pgvector; keyless default embedding driver; `passport:keys` automated; `pdo_pgsql` + a PostgreSQL CI service.~~ **Done** — merged in #14. Adds `Dockerfile`, `compose.yaml`, `docker/entrypoint.sh`, `docker/Caddyfile`, `docker/smoke.sh`, a `compose` CI job that boots the real image, the Docker quickstart, and `CONTRIBUTING.md`. | — |
-| 3 | **Benchmark** | Finish the LongMemEval harness in `benchmark/` and publish a number. Note when publishing that it exercises the palace layer only, not the wiki. | Piece 4 |
+| 3 | **Benchmark** | **In progress.** The LongMemEval-S retrieval harness in `benchmark/` (`dataset.py` through `cleanup.py`, `benchmark/README.md`) is complete and validated end-to-end, twice, from a clean stack on a seeded 25-question subset — see below. The QA layer (LLM-judged answer accuracy, LongMemEval's own headline metric) is deliberately deferred to its own plan; retrieval is the layer that validates the pipeline for zero marginal cost and is a prerequisite for interpreting any QA number. Remaining before this piece is done: run all 500 questions and publish the number, noting it exercises the palace layer only, not the wiki. | Piece 4 |
 | 4 | **Truth-up pass** | README and landing page against the shipped product; `LICENSE` added; docs pruned and restructured; repository made public. | Piece 6 |
 | 5 | **Public demo** | Read-only demo instance. Requires a hardening pass — and no demo token may carry write access while D8 is open. | Piece 6 |
 | 6 | **Launch** | Positioning, surfaces, timing. |
 
 The MCP surface, which the superseded roadmap listed as its first piece, is
 done. Piece 1 is what remains of that work.
+
+### Piece 3 status — subset validation, twice
+
+`benchmark/` (`dataset.py`, `preflight.py`, `ingest.py`, `retrieve.py`,
+`evaluate.py`, `report.py`, `cleanup.py`, `benchmark/README.md`, 59 tests) is
+complete. The full pipeline was run end to end from a clean stack — teardown,
+rebuild, fresh migrations, a newly minted token, ingest, keyless retrieval,
+re-embed, embedded retrieval, report, cleanup — twice, on the same seeded
+25-question subset (seed 1234), to check reproducibility rather than just
+smoke-test the happy path.
+
+| Metric | keyless (run 1) | keyless (run 2) | embedded (both runs) |
+|---|---|---|---|
+| recall@1 | 0.880 | 0.840 | 0.960 |
+| recall@3 | 0.960 | 0.960 | 1.000 |
+| recall@5 | 1.000 | 1.000 | 1.000 |
+| recall@10 | 1.000 | 1.000 | 1.000 |
+| MRR | 0.930 | 0.910 | 0.980 |
+
+recall@3/@5/@10, errors (0 both legs, both runs), and the entire embedded
+column reproduced exactly. Keyless recall@1/MRR did not, and the cause was
+root-caused rather than shrugged off — see D19 below. Reading that holds
+across both runs: keyless already finds the evidence within the top 5 for
+every question; embeddings do not find *more* evidence (recall@5/@10 are
+already saturated), they rank what's already found better. n=25 — this is a
+subset validation, not the published number.
+
+**Measured throughput** (run 1): ~48 drawers/question, ~2 drawers/sec, 1,201
+drawers for 25 questions, 10m18s wall-clock, 0 truncated. Extrapolated to all
+500 LongMemEval-S questions: **~24,000 drawers, ~3.3–3.5 hours of ingest**,
+plus the OpenAI re-embed and a second retrieval pass for roughly **4.5–5
+hours end to end** at an estimated **$1–3** of OpenAI usage. This is the
+number the scale decision — whether to run all 500 — should be made on.
+
+The LLM-judged QA layer (LongMemEval's own headline metric) remains
+deliberately deferred to its own plan, per the original task-8 self-review:
+retrieval validates the whole pipeline at zero marginal cost and is a
+prerequisite for interpreting any QA number, and the scale decision belongs
+before that spend.
 
 ## Gate on making the repository public
 

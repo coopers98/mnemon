@@ -383,7 +383,7 @@ tests, not a doc-driven addition in a release branch.
 | # | Piece | Contents | Gates |
 |---|---|---|---|
 | ~~1~~ | ~~**Authorization & audit correctness**~~ | ~~D7, D8, D4.~~ **Done** — see the status blocks above. | — |
-| 2 | **Install story** | Docker Compose with pgvector; keyless default embedding driver; `passport:keys` documented or automated; **`pdo_pgsql` + a PostgreSQL CI service**. | Pieces 3, 4 |
+| ~~2~~ | ~~**Install story**~~ | ~~Docker Compose with pgvector; keyless default embedding driver; `passport:keys` automated; `pdo_pgsql` + a PostgreSQL CI service.~~ **Done** — merged in #14. Adds `Dockerfile`, `compose.yaml`, `docker/entrypoint.sh`, `docker/Caddyfile`, `docker/smoke.sh`, a `compose` CI job that boots the real image, the Docker quickstart, and `CONTRIBUTING.md`. | — |
 | 3 | **Benchmark** | Finish the LongMemEval harness in `benchmark/` and publish a number. Note when publishing that it exercises the palace layer only, not the wiki. | Piece 4 |
 | 4 | **Truth-up pass** | README and landing page against the shipped product; `LICENSE` added; docs pruned and restructured; repository made public. | Piece 6 |
 | 5 | **Public demo** | Read-only demo instance. Requires a hardening pass — and no demo token may carry write access while D8 is open. | Piece 6 |

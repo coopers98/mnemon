@@ -180,8 +180,8 @@ per run and writes the server's actual embedding configuration to
 so the report says which configuration each column actually measured,
 independent of whatever you typed for `--tag`. (An earlier version of this
 section warned that identical `recall@10` between the two legs was a red
-flag for a failed re-embed. It isn't: in a real, correct run recall@10 *is*
-identical between legs — see the results below — so that heuristic fires on
+flag for a failed re-embed. It isn't: in a real, correct run `hit_rate@10`
+*is* identical between legs — see the results below — so that heuristic fires on
 the good case. Use the embedding driver row instead of a coincidence in the
 numbers.)
 

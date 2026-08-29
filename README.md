@@ -218,7 +218,7 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)
-- **Tests:** PHPUnit 12, Livewire-style Filament page tests (431 passed / 1 skipped on SQLite, 432 passed on PostgreSQL)
+- **Tests:** PHPUnit 12, Livewire-style Filament page tests (430 passed / 1 skipped on SQLite, 431 passed on PostgreSQL)
 
 The MCP server is built on [`laravel/mcp`](https://github.com/laravel/mcp) and [`laravel/passport`](https://laravel.com/docs/passport) — Streamable HTTP + OAuth 2.1 + Dynamic Client Registration + tool/resource/prompt dispatch + audit logging.
 
@@ -240,7 +240,7 @@ The classical **method of loci** is the naming convention. A wing is a section o
 
 ## What's built
 
-All sprints complete. 431 tests passing (1 skipped) on SQLite, 432 passing on PostgreSQL. Deployed at [mnemon.example.com](https://mnemon.example.com).
+All sprints complete. 430 tests passing (1 skipped) on SQLite, 431 passing on PostgreSQL. Deployed at [mnemon.example.com](https://mnemon.example.com).
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
@@ -305,7 +305,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Common commands
 
 ```bash
-php artisan test --compact              # run the test suite (431 passed / 1 skipped on SQLite)
+php artisan test --compact              # run the test suite (430 passed / 1 skipped on SQLite)
 ./vendor/bin/pint                       # format PHP
 php artisan migrate:fresh --seed        # rebuild the DB from scratch
 php artisan mnemon:reembed              # re-embed all drawers + wiki pages with the current driver

@@ -485,6 +485,20 @@ changed here — recorded for whoever picks it up.
 The MCP surface, which the superseded roadmap listed as its first piece, is
 done. Piece 1 is what remains of that work.
 
+**Why ties are inevitable rather than rare** (found during the Task 8 review):
+three things compound. The full-text score is a coarse discrete ratio — matched
+terms over total searchable terms — so distinct drawers land on identical values
+routinely. The temporal boost is `1.0 - floor(daysOld)/boostDays`, which is a
+constant `1.0` for every drawer created in the same short ingest, so it breaks no
+ties. And the final PHP-side `sortByDesc('score')` is stable, so it faithfully
+preserves whatever order PostgreSQL happened to return. On a freshly bulk-ingested
+corpus, exact ties are the normal case, not an edge case.
+
+This is why the benchmark's keyless `recall@1` moved 0.880 → 0.840 across a clean
+rebuild of identical content: 3 of 25 questions had the gold session tied with a
+distractor, and concurrent ingestion wrote the rows in a different physical order
+the second time.
+
 ### Piece 3 status — subset validation, twice
 
 `benchmark/` (`dataset.py`, `preflight.py`, `ingest.py`, `retrieve.py`,

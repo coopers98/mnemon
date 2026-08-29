@@ -34,14 +34,21 @@ below before you point this at anything holding real data.
    MNEMON_ENV_FILE=.env.bench docker compose -p mnemon-bench --env-file .env.bench up -d --build
    ```
 
-   **Inline `MNEMON_ENV_FILE=.env.bench` on every `docker compose` command in
-   this document, every time.** `compose.yaml` reads
+   **Inline `MNEMON_ENV_FILE=.env.bench` on every `docker compose` command
+   that creates or recreates a container** — `up`, `up --build`,
+   `up --force-recreate`, `run`. `compose.yaml` reads
    `env_file: ${MNEMON_ENV_FILE:-.env}` — without the inline variable it
    silently falls back to your default `.env`. Nothing in `docker compose`'s
    own output names the cause: the `app` container just comes up against
    whatever `DB_HOST`/`DB_PORT` your default `.env` has (possibly none) and
    sits unhealthy, or — worse — comes up healthy against the wrong database
-   entirely if your default `.env` also happens to be valid. An `export` in a
+   entirely if your default `.env` also happens to be valid.
+
+   `docker compose exec` does **not** need the prefix: a running container's
+   environment was fixed when it was created, and `exec` never re-resolves
+   `env_file`. That is why the `exec` commands below omit it. The distinction
+   matters — if the rule were "always", you would have no way to tell which
+   omissions are safe. An `export` in a
    previous shell does not help: each Bash invocation here is a fresh shell,
    so the variable never carries over between commands. This is not
    hypothetical — it happened during this harness's own validation.

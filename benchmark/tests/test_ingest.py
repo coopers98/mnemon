@@ -12,10 +12,14 @@ handling, and `ingest_question`'s skip/resume behaviour so that regression
 can't come back quietly.
 """
 
+import io
 import json
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import config
 import ingest
@@ -193,3 +197,54 @@ class IngestQuestionSkipTest(StateDirTestCase):
         self.assertEqual({"drawers": 3, "truncated": 0}, stats)
         self.assertTrue(is_done("bbb"))
         self.assertEqual({"s1", "s2", "s3"}, done_sessions("bbb"))
+
+
+class MainTruncationWarningTest(StateDirTestCase):
+    """ingest.main() must warn on stdout when any drawer was truncated —
+    that is the operator's only signal that evidence may have been cut, per
+    this module's own docstring.
+
+    Calls the real ingest.main() — with sys.argv patched, a fake client, and
+    MAX_DRAWER_CHARS forced tiny — instead of asserting on plan_drawers()'s
+    `truncated` flag directly, so the warning print in main() itself is what
+    gets pinned down. A test that only checked plan_drawers() would keep
+    passing even if main() stopped printing the warning at all.
+    """
+
+    def setUp(self):
+        super().setUp()
+        record = {
+            "question_id": "trunc1",
+            "haystack_session_ids": ["s1"],
+            "haystack_sessions": [[{"role": "assistant", "content": "x" * 100}]],
+            "haystack_dates": ["d1"],
+        }
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump([record], tmp)
+        tmp.close()
+        self.dataset_path = Path(tmp.name)
+        self._orig_dataset = config.DATASET_S
+        self._orig_max_chars = config.MAX_DRAWER_CHARS
+        config.DATASET_S = self.dataset_path
+        config.MAX_DRAWER_CHARS = 10  # forces the one session to truncate
+
+    def tearDown(self):
+        config.DATASET_S = self._orig_dataset
+        config.MAX_DRAWER_CHARS = self._orig_max_chars
+        self.dataset_path.unlink(missing_ok=True)
+        super().tearDown()
+
+    def _run(self):
+        with patch.object(sys, "argv", ["ingest.py"]), \
+             patch("ingest.MnemonClient", lambda *a, **kw: FakeClient()), \
+             patch.object(config, "mnemon_token", return_value="test-token"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = ingest.main()
+        return code, buf.getvalue()
+
+    def test_truncation_warning_is_printed(self):
+        code, output = self._run()
+        self.assertEqual(0, code)
+        self.assertIn("WARNING", output)
+        self.assertIn("truncated", output)

@@ -18,9 +18,23 @@ DEFAULT_PREFIX = "benchmark-q"
 
 
 def build_tinker_expression(prefix: str) -> str:
-    if not prefix or prefix.strip() in ("", "%", "*"):
+    if not prefix or prefix.strip() in ("", "*"):
         raise ValueError(
             f"refusing to delete with prefix {prefix!r} — that would match every wing"
+        )
+    if "%" in prefix or "_" in prefix:
+        # Both are SQL LIKE metacharacters, and this script builds
+        # `LIKE '{prefix}%'` straight from --prefix with no escaping of the
+        # prefix itself (only of \ and ' below, for the tinker string
+        # literal — that does not neutralize LIKE semantics). '_' matches
+        # any single character, so "_" alone becomes `LIKE '_%'`, which
+        # matches every non-empty wing slug — a one-character typo away from
+        # the "delete a real palace" case this guard exists to prevent. '%'
+        # matches any run of characters, so "%q" becomes `LIKE '%q%'`.
+        raise ValueError(
+            f"refusing to delete with prefix {prefix!r} — '%' and '_' are SQL "
+            "LIKE metacharacters and this script does not escape them; a "
+            "prefix containing either could match far more than intended"
         )
     safe = prefix.replace("\\", "\\\\").replace("'", "\\'")
     return (

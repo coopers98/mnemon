@@ -1,6 +1,7 @@
 import unittest
 
-from cleanup import build_tinker_expression
+import config
+from cleanup import build_tinker_expression, clear_state_for_prefix
 
 
 class BuildTinkerExpressionTest(unittest.TestCase):
@@ -21,3 +22,46 @@ class BuildTinkerExpressionTest(unittest.TestCase):
     def test_escapes_quotes_in_the_prefix(self):
         expr = build_tinker_expression("bench'mark")
         self.assertNotIn("'bench'mark", expr)
+
+
+class ClearStateForPrefixTest(unittest.TestCase):
+    """State clearing must follow --prefix.
+
+    Wiping every state file regardless of prefix is a data hazard, not untidiness:
+    ingest.py has no server-side dedup key, so a question whose drawers still
+    exist but whose state was discarded is fully re-sent next run, doubling its
+    haystack. These fail if clear_state_for_prefix stops filtering.
+    """
+
+    def setUp(self):
+        import tempfile, pathlib
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig = config.STATE_DIR
+        config.STATE_DIR = pathlib.Path(self.tmp.name)
+        d = config.STATE_DIR / "ingested"
+        d.mkdir(parents=True)
+        for qid in ("aaa", "bbb"):
+            (d / f"{qid}.json").write_text("{}")
+        (d / "cleanuptestzz.json").write_text("{}")
+
+    def tearDown(self):
+        config.STATE_DIR = self.orig
+        self.tmp.cleanup()
+
+    def _remaining(self):
+        return sorted(p.stem for p in (config.STATE_DIR / "ingested").glob("*.json"))
+
+    def test_a_narrow_prefix_leaves_unrelated_state_alone(self):
+        # wing_slug("cleanuptestzz") -> benchmark-qcleanuptestzz
+        cleared = clear_state_for_prefix("benchmark-qcleanuptest")
+        self.assertEqual(1, cleared)
+        self.assertEqual(["aaa", "bbb"], self._remaining())
+
+    def test_the_default_prefix_clears_everything_it_owns(self):
+        cleared = clear_state_for_prefix("benchmark-q")
+        self.assertEqual(3, cleared)
+        self.assertEqual([], self._remaining())
+
+    def test_a_non_matching_prefix_clears_nothing(self):
+        self.assertEqual(0, clear_state_for_prefix("benchmark-qnope"))
+        self.assertEqual(3, len(self._remaining()))

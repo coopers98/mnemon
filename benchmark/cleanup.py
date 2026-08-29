@@ -30,6 +30,26 @@ def build_tinker_expression(prefix: str) -> str:
     )
 
 
+def clear_state_for_prefix(prefix: str) -> int:
+    """Delete only the ingestion state whose wings this run actually deleted.
+
+    Wiping every state file regardless of --prefix is not a tidiness bug, it is
+    a data hazard: ingest.py has no server-side dedup key, so a question whose
+    drawers still exist but whose state was discarded gets fully re-sent on the
+    next run, silently doubling its haystack. Cleaning up a narrow test prefix
+    must not arm that for the real corpus.
+    """
+    state_dir = config.STATE_DIR / "ingested"
+    if not state_dir.exists():
+        return 0
+    cleared = 0
+    for path in state_dir.glob("*.json"):
+        if config.wing_slug(path.stem).startswith(prefix):
+            path.unlink()
+            cleared += 1
+    return cleared
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Delete benchmark wings.")
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
@@ -69,11 +89,9 @@ def main() -> int:
         print(result.stderr.strip(), file=sys.stderr)
         return result.returncode
 
-    state_dir = config.STATE_DIR / "ingested"
-    if state_dir.exists():
-        for f in state_dir.glob("*.json"):
-            f.unlink()
-        print("[cleanup] cleared ingestion state")
+    cleared = clear_state_for_prefix(args.prefix)
+    if cleared:
+        print(f"[cleanup] cleared ingestion state for {cleared} question(s)")
     return 0
 
 

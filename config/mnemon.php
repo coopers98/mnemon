@@ -8,6 +8,13 @@ return [
     // from clobbering it.
     'admin_password_path' => storage_path('admin-password.txt'),
 
+    // Address the public landing page's contact form notifies, in addition
+    // to always persisting the submission as a ContactSubmission row. Empty
+    // by default: ContactController skips the send entirely rather than
+    // falling back to any hardcoded address — every self-hosted install
+    // must opt in to where its own visitors' messages get mailed.
+    'contact_to' => env('MNEMON_CONTACT_TO'),
+
     'embedding' => [
         'driver' => env('MNEMON_EMBEDDING_DRIVER', 'openai'),
         'drivers' => [

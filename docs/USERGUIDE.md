@@ -27,14 +27,40 @@ The [README](../README.md) is the project overview. This document is the day-to-
 
 ## Getting started
 
-### Prerequisites
+The fastest way to run Mnemon is Docker — see the [Quickstart](../README.md#quickstart) in the README:
+
+```bash
+git clone https://github.com/coopers98/mnemon.git
+cd mnemon
+cp .env.docker.example .env
+docker compose up -d
+```
+
+Then open `http://localhost:8080`. Read the generated admin password with:
+
+```bash
+docker compose exec app cat storage/admin-password.txt
+```
+
+There is no password reset flow — save it somewhere safe. The default binds
+are loopback-only (`127.0.0.1:8080` / `127.0.0.1:8443`), so a local trial is
+not exposed to the network; see the README for serving on a real hostname
+with automatic HTTPS.
+
+The rest of this section covers the **native install** — the alternative to
+Docker. Use it if you're developing on Mnemon itself, or if you'd rather
+manage PHP and Postgres yourself.
+
+### Native install (the alternative to Docker)
+
+#### Prerequisites
 
 - PHP 8.4+
 - PostgreSQL 14+ with the `pgvector` extension installed (or SQLite for local-only)
 - Composer
 - Node optional (Filament's vendor JS is published from the package — you don't need to compile assets unless you customize them)
 
-### Install
+#### Install
 
 ```bash
 git clone https://github.com/coopers98/mnemon.git
@@ -57,13 +83,14 @@ DB_PASSWORD=...
 # Required for the default embedding driver
 OPENAI_API_KEY=sk-...
 
-# Optional — defaults are sensible
-MNEMON_EMBEDDING_DRIVER=openai      # or "ollama" or "none"
+# Optional — defaults are sensible. "ollama" is implemented but currently
+# unusable (see "Re-embedding" below) — use "openai" or "none".
+MNEMON_EMBEDDING_DRIVER=openai      # or "none"
 PASSPORT_PRIVATE_KEY=               # leave blank; passport:install generates files
 PASSPORT_PUBLIC_KEY=
 ```
 
-### Initialize
+#### Initialize
 
 ```bash
 createdb mnemon                       # if Postgres
@@ -77,7 +104,7 @@ The seeder writes the admin credentials to `storage/admin-password.txt` (mode 06
 
 Visit `http://localhost:8000/admin` and log in. You should see the dashboard with empty wing/drawer counts.
 
-### Verify it's running
+#### Verify it's running
 
 ```bash
 # Public discovery endpoint, no auth needed
@@ -126,13 +153,15 @@ Wing access:
 
 All tools use the single `mcp:use` scope — there are no scope checkboxes. The real authorization decision is **which wings** this agent can see.
 
+On a fresh install there are no wings yet — nothing has been written to the palace, so the per-wing checkboxes shown above won't appear at all, only the "All wings" toggle. Your first token is necessarily unrestricted; once you've created wings, later tokens can be scoped to specific ones (see [Multi-device](#multi-device)).
+
 For your first agent, the simplest grant is **"All wings" (the master toggle)** — full access. You can mint additional, more restricted tokens for specific agent installs later (see [Multi-device](#multi-device)).
 
 Click **Authorize**. The browser closes. Claude Code shows `mnemon: connected`.
 
 ### Step 4: Test it
 
-In Claude Code, run `/mcp`. You should see Mnemon listed with 12 tools, 3 resources, 3 prompts. Then ask Claude something that should trigger a tool call:
+In Claude Code, run `/mcp`. You should see Mnemon listed with 14 tools, 3 resources, 3 prompts. Then ask Claude something that should trigger a tool call:
 
 > "Add a drawer to the work wing in a 'notes' room with content 'first ever drawer in mnemon, hello world'"
 
@@ -325,7 +354,7 @@ Claude calls `context_get` (wiki page lookup by name) first; if the wiki has a p
 
 Claude calls `context_list` and filters by `last_compiled_at`. The `FindStaleWikiPagesPrompt` automates this.
 
-You can also let it run automatically — `mnemon:auto-compile-stale` is on a 6-hour schedule (see [Scheduled maintenance](#scheduled-maintenance)).
+You can also let it run automatically — `mnemon:auto-compile-stale` is on a 4-hour schedule (see [Scheduled maintenance](#scheduled-maintenance)).
 
 ### Use the knowledge graph
 
@@ -471,7 +500,7 @@ Mnemon ships three OpenClaw integration commands:
 ```bash
 php artisan mnemon:import-memory      # bulk import OpenClaw memory files
 php artisan mnemon:ingest-sessions    # ingest session transcripts as drawers
-php artisan mnemon:sync-openclaw      # bidirectional sync (also runs daily)
+php artisan mnemon:sync-openclaw      # bidirectional sync (manual only — not scheduled)
 ```
 
 See `docs/OPENCLAW-INTEGRATION.md` for the full setup.
@@ -507,7 +536,7 @@ Same pattern via tinker or a one-off command. The `Drawer` model accepts arbitra
 
 ## Re-embedding
 
-If you change the embedding driver (e.g. switching from OpenAI to Ollama, or upgrading the OpenAI model), existing embeddings are stale — they were computed against the old model and live in vector space the new model doesn't know about.
+If you change the embedding driver (e.g. upgrading the OpenAI model, or switching to/from `none`), existing embeddings are stale — they were computed against the old model and live in vector space the new model doesn't know about.
 
 ```bash
 php artisan mnemon:reembed
@@ -515,7 +544,12 @@ php artisan mnemon:reembed
 
 This re-embeds every drawer and wiki page using the currently configured driver. It's idempotent — running twice gives the same result.
 
-Performance: ~50 drawers/sec against OpenAI's embeddings API; faster against Ollama (local). Budget accordingly. Consider running it overnight if you have thousands of drawers.
+Performance: ~50 drawers/sec against OpenAI's embeddings API. Budget accordingly. Consider running it overnight if you have thousands of drawers.
+
+> **Note on `ollama`:** a third driver, `ollama` (`nomic-embed-text`), is implemented in
+> `config/mnemon.php` but currently can't store anything — the `embedding` column is a
+> fixed `vector(1536)`, and `nomic-embed-text` produces 768-dimension vectors, so a write
+> under this driver fails. Tracked as defect D10, not fixed in this release.
 
 To switch drivers:
 
@@ -540,11 +574,13 @@ The schedule (defined in `routes/console.php` or `app/Console/Kernel.php`) cover
 
 | Schedule | Command | Purpose |
 |---|---|---|
-| Daily | `mnemon:decay-confidence` | Apply time-based confidence decay |
+| Daily, 03:00 | `mnemon:decay-confidence` | Apply time-based confidence decay |
 | Every 6h | `mnemon:auto-lint` | Run wiki_lint with auto-fix; repair stale/orphan/low-confidence pages |
-| Every 6h | `mnemon:auto-compile-stale` | Recompile wiki pages flagged stale |
-| Daily | `mnemon:apply-retention` | Enforce retention policies (archive past half-lives) |
-| Daily | `mnemon:sync-openclaw` | Sync with OpenClaw |
+| Every 4h | `mnemon:auto-compile-stale` | Recompile wiki pages flagged stale |
+| Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforce retention policies (archive past half-lives) |
+
+Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` exists as an
+artisan command but is **not** scheduled — run it manually when you want it.
 
 You can also run any of these manually:
 
@@ -613,13 +649,13 @@ Set the env vars to the contents (one-line, can be plain or base64 — Passport 
 
 OAuth 2.1 requires `https://` for non-localhost redirect URIs. If `APP_URL` is `http://`, the OAuth flow will reject DCR client registrations with `https://` redirects.
 
-Configure your reverse proxy (Forge nginx, Cloudflare, etc.) to:
-
-- Terminate TLS
-- Forward `X-Forwarded-Proto: https` to PHP
-- Trust the proxy in `config/trustedproxy.php` (or `App\Http\Middleware\TrustProxies`)
-
-If consent flows redirect to `http://` URLs by mistake, your trusted-proxies config is wrong.
+**Running behind a TLS-terminating reverse proxy is not yet supported.** There is no
+`TrustProxies` configuration anywhere in this codebase, so Mnemon does not process
+`X-Forwarded-*` headers — a proxy terminating TLS in front of the app would still see
+Mnemon advertise `http://` URLs (OAuth discovery, Vite asset URLs), and a browser blocks
+the resulting mixed content on the consent screen. Until proxy trust is implemented,
+terminate TLS in the same process that serves Mnemon (for example the Docker `DOMAIN`
+path, which handles this via Caddy) rather than behind a separate reverse proxy.
 
 #### Migrations on deploy
 
@@ -643,11 +679,42 @@ Mnemon runs synchronous embedding generation by default. If you have a high writ
 
 ### Docker
 
-A reference Dockerfile isn't shipped, but the standard Laravel docker pattern works. Key bind mounts:
+Docker is the primary, shipped install path — see the [Quickstart](../README.md#quickstart)
+in the README for the fastest way to a running instance. This subsection covers what's
+relevant for running it in production rather than as a local trial.
 
-- `storage/oauth-*.key` (or set as env vars)
-- `storage/app/public` if you have file uploads
-- The Postgres data dir (or use a managed Postgres)
+`compose.yaml` at the repo root defines three services:
+
+- **`app`** — runs the bootstrap (key generation, migrations, Passport key generation,
+  admin seeding) on boot, then serves the app via FrankenPHP/Caddy.
+- **`db`** — PostgreSQL with pgvector, reachable only on the compose network (no published
+  port).
+- **`scheduler`** — runs `php artisan schedule:work`, so there's no crontab to configure
+  separately from the [Forge/Vapor/VPS](#forge--vapor--vps) instructions above. There is
+  no queue worker service — nothing in the app implements `ShouldQueue` today.
+
+Three named volumes persist state across `docker compose down` (but not `down -v`).
+Compose prefixes volume names with the project name, so `docker volume ls` (or
+`docker volume inspect`) shows them as `mnemon_pgdata`, `mnemon_storage`, and
+`mnemon_caddy_data` — use the prefixed names in any `docker volume` command you run:
+
+- **`pgdata`** — the Postgres data directory.
+- **`storage`** — `storage/`, including the generated `APP_KEY` (`storage/app_key`), the
+  Passport OAuth keys, and the admin password file.
+- **`caddy_data`** — Caddy's ACME account and certificates. Losing this on every restart
+  would burn into Let's Encrypt's 5-duplicate-certificates-per-week limit.
+
+`APP_KEY` and the OAuth keys are generated on first boot and persisted in the `storage`
+volume automatically — there's no manual key-export step like the native Forge/Vapor
+deploy above. An operator-supplied `APP_KEY` in the environment always wins and is never
+overwritten.
+
+For a real hostname with automatic HTTPS, see the [Quickstart](../README.md#quickstart)
+in the README — set `DOMAIN`, and set `HTTP_BIND=0.0.0.0:80` / `HTTPS_BIND=0.0.0.0:443`
+so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. Running behind
+a separate TLS-terminating reverse proxy is **not yet supported** — Mnemon does not
+process `X-Forwarded-*` headers, so OAuth discovery and asset URLs would still be
+advertised as `http://` behind one. Use the `DOMAIN` path above instead.
 
 ---
 
@@ -727,9 +794,41 @@ The consent form's CSRF token expired (sessions are short). Restart the OAuth fl
 Symptom: `drawer_add` errors with timeout / 401 / 429.
 
 - OpenAI driver: verify `OPENAI_API_KEY` is set and not rate-limited. Check API quota.
-- Ollama driver: verify `ollama serve` is running and `nomic-embed-text` is pulled.
+- `ollama` driver: this isn't a transient failure to troubleshoot — selecting `ollama`
+  fails on every write today. The `embedding` column is a fixed `vector(1536)`, and
+  `nomic-embed-text` produces 768-dimension vectors. Use `openai` or `none` instead
+  (see [Re-embedding](#re-embedding)).
 
-Workaround during outage: temporarily set `MNEMON_EMBEDDING_DRIVER=none`. New drawers won't get embeddings; semantic search degrades to full-text. Re-enable and `mnemon:reembed` once the driver recovers.
+Workaround during an OpenAI outage: temporarily set `MNEMON_EMBEDDING_DRIVER=none`. New drawers won't get embeddings; semantic search degrades to full-text. Re-enable and `mnemon:reembed` once the driver recovers.
+
+### Changed `DB_PASSWORD` in `.env` and now the app crash-loops (Docker)
+
+```
+FATAL: password authentication failed for user "mnemon"
+```
+
+...while `docker compose ps` still shows `db` as healthy. This happens because
+PostgreSQL only reads `POSTGRES_PASSWORD` (from `DB_PASSWORD` in your env file)
+when **initialising an empty data directory** — on an existing `pgdata` volume
+the role keeps whatever password it was created with, so editing `DB_PASSWORD`
+after first boot silently does nothing for Postgres while the app keeps trying
+the new value. `pg_isready` (what the `db` healthcheck runs) doesn't
+authenticate, so the healthcheck stays green throughout.
+
+Two ways to fix it:
+
+1. **Change the role's actual password to match** — run this once, then keep
+   `DB_PASSWORD` in your env file in sync with whatever you set:
+   ```bash
+   docker compose exec db psql -U mnemon -c "ALTER ROLE mnemon WITH PASSWORD 'the-new-password';"
+   ```
+2. **Start over** — `docker compose down -v` deletes the `pgdata` volume (and
+   `storage`/`caddy_data` too) so the next `up` initialises fresh with whatever
+   `DB_PASSWORD` is currently in your env file. **This destroys all data** —
+   drawers, wiki pages, OAuth clients, everything.
+
+Avoid this entirely by setting `DB_PASSWORD` to its real value **before** the
+first `docker compose up`, not after.
 
 ### `pgvector` not installed
 
@@ -806,7 +905,9 @@ True multi-tenancy (per-user wings, per-user tokens scoped to their own data) is
 
 **Q: Can I run Mnemon entirely offline?**
 
-Yes, with `MNEMON_EMBEDDING_DRIVER=ollama` (local Ollama daemon) or `=none` (full-text-only search). No external API calls. The OAuth flow needs a browser but doesn't require external servers.
+Yes, with `MNEMON_EMBEDDING_DRIVER=none` (full-text + temporal search, no semantic ranking). No external API calls. The OAuth flow needs a browser but doesn't require external servers. This is the Docker Quickstart's default.
+
+A local-Ollama driver is implemented in config but currently can't store embeddings — see the note in [Re-embedding](#re-embedding) — so it isn't a working offline option for semantic search today.
 
 **Q: Can I use Mnemon as a knowledge base for a static site?**
 

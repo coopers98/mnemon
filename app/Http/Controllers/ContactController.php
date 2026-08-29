@@ -20,10 +20,14 @@ class ContactController extends Controller
 
         ContactSubmission::create($validated);
 
-        try {
-            Mail::to('coopersellers@gmail.com')->send(new ContactNotification($validated));
-        } catch (\Throwable $e) {
-            report($e);
+        $contactTo = config('mnemon.contact_to');
+
+        if (filled($contactTo)) {
+            try {
+                Mail::to($contactTo)->send(new ContactNotification($validated));
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return redirect('/')->with('contact_success', 'Thanks for reaching out! We\'ll get back to you soon.');

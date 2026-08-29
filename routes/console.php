@@ -7,16 +7,23 @@ use Illuminate\Support\Facades\Schedule;
 | Mnemon Scheduled Tasks
 |--------------------------------------------------------------------------
 |
-| Queue worker + scheduler must be running on Forge:
-|   - Daemon: php artisan queue:work --sleep=3 --daemon --quiet
-|   - Scheduler: php artisan schedule:run (every minute via Forge cron)
+| These run wherever `php artisan schedule:run` (or `schedule:work`) is
+| invoked every minute. The Docker Compose stack runs this via a dedicated
+| `scheduler` service (`php artisan schedule:work`) — see compose.yaml.
+| Outside Docker, wire `schedule:run` into cron. There is no queue worker:
+| nothing in this application implements ShouldQueue or dispatches a job.
+|
+| Every event below declares config('app.timezone') explicitly (exposed as
+| APP_TIMEZONE) so the hours mean the same local time regardless of what
+| timezone the container/host is running in.
 |
 */
 
 // Recalculate confidence scores based on age and source count
-// Runs daily at 3 AM CT
+// Runs daily at 3 AM local time
 Schedule::command('mnemon:decay-confidence')
-    ->dailyAt('08:00') // UTC = 3 AM CT (CDT)
+    ->dailyAt('03:00')
+    ->timezone(config('app.timezone'))
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/scheduled.log'));
 
@@ -24,6 +31,7 @@ Schedule::command('mnemon:decay-confidence')
 // Runs every 6 hours
 Schedule::command('mnemon:auto-lint')
     ->everySixHours()
+    ->timezone(config('app.timezone'))
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/scheduled.log'));
 
@@ -31,12 +39,14 @@ Schedule::command('mnemon:auto-lint')
 // Runs every 4 hours
 Schedule::command('mnemon:auto-compile-stale')
     ->everyFourHours()
+    ->timezone(config('app.timezone'))
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/scheduled.log'));
 
 // Prune old revisions and low-retention drawers
-// Runs weekly on Sundays at 4 AM CT
+// Runs weekly on Sundays at 4 AM local time
 Schedule::command('mnemon:apply-retention --force')
-    ->weeklyOn(0, '09:00') // UTC = 4 AM CT (CDT)
+    ->weeklyOn(0, '04:00')
+    ->timezone(config('app.timezone'))
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/scheduled.log'));

@@ -1,0 +1,34 @@
+# Do NOT add `auto_https off` here: it is a global switch with no per-site
+# override, so it would also disable HTTPS for the CADDY_SITE_ADDRESS
+# hostname site below, leaving TLS handshakes failing and plaintext getting
+# `400 Client sent an HTTP request to an HTTPS server`. The bare `:80`
+# default site provisions nothing regardless, since it has no hostname.
+{
+	frankenphp
+}
+
+{$CADDY_SITE_ADDRESS::80} {
+	root * /app/public
+	encode zstd gzip
+	php_server
+}
+
+# Internal-only health address, not published in compose's ports:. When
+# CADDY_SITE_ADDRESS is a hostname (DOMAIN set), the site block above serves
+# HTTPS with an automatic HTTP->HTTPS redirect on port 80 for ALL requests
+# regardless of Host header — so `curl http://localhost/up` gets back a 308
+# instead of ever reaching php_server. `curl -f` does not treat a 3xx as a
+# failure, so a healthcheck against port 80 would report "healthy" without
+# ever exercising the app. This dedicated address exists in both modes and
+# always reaches php_server directly.
+:2020 {
+	# bind, not the `127.0.0.1:2020` site-address form: Caddy adapts that form to
+	# a listener on `:2020` (all interfaces) plus a Host matcher, which any
+	# container on the compose network defeats by sending `Host: 127.0.0.1`.
+	# `bind` is what actually restricts the listener to loopback, so :2020 is
+	# reachable only from inside this container — which is where the Docker
+	# healthcheck runs.
+	bind 127.0.0.1
+	root * /app/public
+	php_server
+}

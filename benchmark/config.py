@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-MNEMON_URL = os.environ.get("MNEMON_URL", "https://mnemon.example.com/mcp")
+MNEMON_URL = os.environ.get("MNEMON_URL", "http://localhost:8080/mcp")
 
 # OAuth bearer token: env var wins, then a file (default /tmp/.mnemon-token).
 MNEMON_TOKEN_FILE = os.environ.get("MNEMON_TOKEN_FILE", "/tmp/.mnemon-token")

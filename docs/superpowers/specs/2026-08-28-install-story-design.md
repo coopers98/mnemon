@@ -225,15 +225,33 @@ exercise exists to prevent.
   published. State the `pg17` pin and that a future major bump needs
   `pg_upgrade` rather than silently refusing to start on the old `pgdata`.
 
-## Also fixed here
+## Also fixed here — SHIPPED
 
 **Timezone.** `routes/console.php:19,40` encodes Central Time as hard-coded UTC
 hours with comments — wrong half the year, and wrong for every user who is not
 Cooper. Schedule in server-local time and expose `TZ`/`APP_TIMEZONE`.
 
+Landed on `piece-2-group-2`: every scheduled command now declares
+`->timezone(config('app.timezone'))`, `config/app.php` wires
+`'timezone' => env('APP_TIMEZONE', 'UTC')` (it was hard-coded, so the env var
+was previously decorative), and the two absolute-time commands moved from
+UTC-instant hours to the local hours the comments actually describe (3am /
+4am). `TZ`/`APP_TIMEZONE` are both exposed in `.env.docker.example`.
+
 **`MAIL_MAILER=log`** with a live contact form (`routes/web.php:12`) silently
 writes email to the log. Document it or drop the contact form from the
 open-source build.
+
+Landed on `piece-2-group-2`, corrected in review: submissions were never
+*only* logged — `ContactController::store` already persisted a
+`ContactSubmission` row before attempting any send. The real release blocker
+was worse than "silent logging": the mailer sent every submission to the
+project author's personal Gmail address, hard-coded with no config key
+behind it, in a repo about to go MIT. Fixed by adding `mnemon.contact_to`
+(`MNEMON_CONTACT_TO` env, blank by default) — the controller now sends only
+when it's configured, addressing that value, and skips the send entirely
+otherwise. The submission is always persisted either way. Documented as such
+in `.env.docker.example`.
 
 ## Out of scope
 
@@ -250,12 +268,17 @@ This spec is broad enough that landing order matters. Three groups, in order:
    valuable, lands fastest, and closes the "defects reach main because the
    suite cannot run PostgreSQL" gap immediately. Nothing here depends on
    Docker existing. See "What group 1 shipped" below.
-2. **Image and compose.** The bulk of the work: Dockerfile, entrypoint,
-   Caddyfile, `.env.docker.example`, the `compose` CI job.
-3. **Documentation.** Written against what shipped, once it has shipped.
+2. **Image and compose. — SHIPPED.** The bulk of the work: Dockerfile,
+   entrypoint, Caddyfile, `.env.docker.example`, the `compose` CI job.
+3. **Documentation. — SHIPPED.** Written against what shipped, once it had
+   shipped.
 
 Group 1 makes group 2 verifiable rather than hoped-at, which is why it goes
 first even though group 2 is the headline.
+
+Groups 2 and 3 both landed on the `piece-2-group-2` implementation plan
+(seven tasks — image, entrypoint, compose stack, idempotency proof, CI job,
+docs, and this timezone/mail closeout). See "What group 2 shipped" below.
 
 ## What group 1 shipped
 
@@ -299,3 +322,72 @@ Still open from this spec and **owned by later groups**: flipping
 `config/mnemon.php`'s default driver to `none`, the README driver table, the
 Dockerfile/entrypoint/Caddyfile/`.env.docker.example`, the `compose` CI job, the
 timezone fix, and the documentation truth-up.
+
+## What group 2 shipped
+
+Landed on `piece-2-group-2` (seven tasks). Group 3 (or whatever lands next)
+must not re-implement any of this.
+
+- **Docker image.** Multi-stage `Dockerfile` (assets → vendor → runtime) on
+  FrankenPHP, classic mode. `public/build/manifest.json` and every file it
+  references are asserted to exist inside the built image — the guard against
+  a repeat of the Vite-manifest-throws-on-the-consent-screen class of bug.
+- **Entrypoint and Caddyfile.** `docker/entrypoint.sh` runs the bootstrap
+  (`config:clear`/`view:clear`/`cache:clear`, conditional `key:generate`,
+  `migrate --force`, conditional `passport:keys` + `chmod 600`, admin seed
+  only when the users table is empty) in exactly the `app` container;
+  `scheduler` waits on `app`'s `/up` healthcheck instead of sharing the
+  bootstrap. `docker/Caddyfile` gets automatic HTTPS when `DOMAIN` is set, a
+  bare `:80` otherwise (the `auto_https off` global-switch bug from an
+  earlier draft — total TLS outage on any `DOMAIN` — is gone).
+- **Compose stack.** `compose.yaml`: `app`, `db` (`pgvector/pgvector:pg17`,
+  unpublished port), `scheduler` (`schedule:work`, no queue worker — nothing
+  implements `ShouldQueue`). Interpolated `HTTP_BIND`/`HTTPS_BIND`, a
+  `caddy_data` named volume (certs used to die on every `down`), and
+  `${MNEMON_ENV_FILE:-.env}` so tooling can point compose at a template
+  instead of a real `.env`.
+- **`docker/smoke.sh`.** Boots the stack in its own `mnemon-smoke` Compose
+  project — never the default `mnemon` namespace a self-hoster's own
+  `docker compose up` uses from the same checkout — and runs `down -v`
+  before `up` so every run starts from nothing; leftover state from a prior
+  run would otherwise let the first-boot assertions below pass without the
+  code they exist to test. Asserts `/up` responds, that
+  `public/build/manifest.json` and every asset file it references exist
+  inside the running container, and that exactly one user exists after
+  first boot; then restarts `app` and asserts `APP_KEY` and the admin
+  password are unchanged. It does **not** assert a rendering OAuth consent
+  screen — no such assertion exists — and it does not rotate the admin user
+  as part of its own logic; an earlier review pass gutted
+  `AdminUserSeeder::run()` as a one-off fault injection to confirm the
+  assertions could actually fail, then restored it. That was a review-time
+  check, not something the shipped script does.
+- **`compose` CI job.** Runs `docker/smoke.sh` on every PR. It does not
+  itself "prove" anything beyond running the script and failing the build
+  if it exits non-zero — the claim that it "proves the guard catches the
+  asset-stage failure" described a review-time fault injection (temporarily
+  breaking the asset stage and confirming the script failed), not something
+  the CI job re-demonstrates on each run.
+- **Documentation truth-up.** README Docker quickstart as the primary install
+  path (native install demoted, not deleted), `docs/USERGUIDE.md`,
+  `CONTRIBUTING.md` (PHP 8.4 floor stated explicitly).
+- **Timezone and mail (this task).** Every scheduled command declares
+  `->timezone(config('app.timezone'))`; `config/app.php` wires
+  `'timezone' => env('APP_TIMEZONE', 'UTC')` (previously hard-coded, so the
+  env var was decorative); the two absolute-time commands moved from
+  UTC-instant hours to actual local hours. `routes/console.php`'s header no
+  longer describes a Forge queue-worker daemon nothing in the app uses.
+  Separately — found during this task, not in the original plan — the contact
+  form mailed every submission to the project author's personal Gmail
+  address, hard-coded with no config key behind it, on the eve of an MIT
+  release; fixed via `mnemon.contact_to` / `MNEMON_CONTACT_TO` (blank by
+  default, submission always persisted regardless of whether mail is
+  configured).
+
+**Confirmed still open, deliberately not touched by group 2:**
+`config/mnemon.php`'s default `MNEMON_EMBEDDING_DRIVER` is still `openai`, not
+`none` — the Docker template overrides it to `none` in `.env.docker.example`,
+but the application-level default was explicitly out of scope for this group
+(native installs without a `.env.docker.example` still default to `openai`
+and need `OPENAI_API_KEY`). The `benchmark/` harness still points at a live
+deployed host (`benchmark/config.py`'s `MNEMON_URL` default) rather than the
+compose stack — Piece 3's, per "Out of scope" above.

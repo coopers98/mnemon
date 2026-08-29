@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+vendor
+benchmark/data
+benchmark/results
+benchmark/state
+storage
+bootstrap/cache
+.env
+.env.*
+!.env.docker.example
+.superpowers
+docs
+tests
+*.md

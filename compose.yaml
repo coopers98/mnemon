@@ -1,0 +1,89 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Deliberately no `ports:` — the database is reachable only from the
+    # compose network.
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: ${MNEMON_ENV_FILE:-.env}
+    environment:
+      MNEMON_BOOTSTRAP: "1"
+    # Bound to loopback when DOMAIN is unset. Compose publishes on 0.0.0.0 by
+    # default and punches through ufw on Linux, so an unbound "just trying it"
+    # run on a VPS would serve the knowledge base and login page in plaintext
+    # to the internet.
+    #
+    # Setting DOMAIN requires both HTTP_BIND and HTTPS_BIND to be public
+    # binds: ACME's HTTP-01 challenge needs port 80 reachable from the
+    # internet, and TLS needs 443 published. See .env.docker.example.
+    ports:
+      - "${HTTP_BIND:-127.0.0.1:8080}:80"
+      - "${HTTPS_BIND:-127.0.0.1:8443}:443"
+    volumes:
+      - storage:/app/storage
+      # Caddy's ACME material (account + certificates) lives at /data/caddy
+      # (XDG_DATA_HOME=/data in the base image). The image declares no
+      # volumes, so without this it's part of the container's writable layer
+      # and is destroyed on every `docker compose down` or image upgrade.
+      # Let's Encrypt allows only 5 duplicate certificates per week — losing
+      # this on every recreate can lock a self-hoster out of HTTPS for days.
+      - caddy_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Hits the internal-only :2020 address (see docker/Caddyfile), not the
+      # public site block. When DOMAIN is set, the public site block serves
+      # HTTPS with an automatic HTTP->HTTPS redirect on port 80 that applies
+      # to every Host header, so `curl http://localhost/up` would get back a
+      # 308 without ever reaching php_server — and `curl -f` does not treat a
+      # 3xx as failure, so that healthcheck would report "healthy" without
+      # ever having exercised the app. :2020 always reaches php_server
+      # directly in both modes. It is not published in ports: above — only
+      # reachable inside the container.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:2020/up || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    env_file: ${MNEMON_ENV_FILE:-.env}
+    environment:
+      MNEMON_BOOTSTRAP: "0"
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["php", "artisan", "schedule:work"]
+    # The base frankenphp image bakes in `HEALTHCHECK curl -f
+    # http://localhost:2019/metrics` (Caddy's admin API). This service
+    # overrides the container's command to `schedule:work` instead of
+    # frankenphp/Caddy, so port 2019 is never bound here — left enabled, the
+    # inherited healthcheck fails forever and the container sits permanently
+    # "unhealthy" (confirmed empirically). Nothing depends on scheduler's
+    # health, so disable it rather than report a false unhealthy status.
+    healthcheck:
+      disable: true
+
+volumes:
+  pgdata:
+  storage:
+  caddy_data:

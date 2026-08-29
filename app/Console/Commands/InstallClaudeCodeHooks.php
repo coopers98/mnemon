@@ -33,7 +33,7 @@ class InstallClaudeCodeHooks extends Command
 
         $endpoint = $this->option('endpoint')
             ?: env('MNEMON_URL')
-            ?: $this->ask('Mnemon MCP endpoint URL', 'https://mnemon.example.com/mcp');
+            ?: $this->ask('Mnemon MCP endpoint URL', 'http://localhost:8080/mcp');
 
         $token = $this->option('token')
             ?: $this->resolveTokenFromClaudeJson($home)

@@ -300,6 +300,61 @@ different scales, so the floor is effectively stricter for wiki than for
 drawers. Deciding whether both should be absolute, both relative, or separately
 configured is a product question about what `confidence` is supposed to mean.
 
+### D14 — the contact form emailed a hardcoded personal address — FIXED
+
+`app/Http/Controllers/ContactController.php` hardcoded a `Mail::to(...)` call to
+the project author's personal address, with no config key behind it. The contact
+form ships on the public landing page
+(`resources/views/landing/index.blade.php:591`) in every install, so on an MIT
+self-hosted release every operator's instance would have mailed that address
+with their own visitors' submissions, and the operator would never have learned
+anyone contacted them.
+
+Submissions were never at risk — `ContactController::store` writes a
+`ContactSubmission` row *before* attempting the send and catches failures — so
+this was a misdirection and disclosure problem, not a data-loss one.
+
+Fixed in install-story group 2, Task 7: a `MNEMON_CONTACT_TO` config key
+defaulting to null, sending only when set, with no fallback recipient.
+
+A note on this entry's own history, because the lesson generalises. As first
+written it quoted the offending address literally, while arguing that the
+address must not "sit in a public repository to be scraped" — so the defect
+report reproduced the exact exposure it described, and moved it from code, where
+a grep of `app/` would find it, into documentation, where that grep would not.
+The original claim that the controller held "the only occurrence" was true when
+written and false the moment this entry was committed. Redacted. When recording
+a disclosure defect, describe the value; do not quote it.
+
+### D15 — a malformed `client_id` returns 500 instead of a 4xx
+
+`GET /oauth/authorize?client_id=x` returns a 500. The value is cast to UUID
+against `oauth_clients.id` and PostgreSQL raises on the malformed input before
+any validation runs, so an unauthenticated request can trip a server error.
+Pre-existing and unrelated to the Docker work; found while smoke-testing the
+compose stack. Deliberately out of scope for group 2.
+
+### D16 — no TLS-terminating reverse proxy support
+
+README, `.env.docker.example`, and `docs/USERGUIDE.md` previously told
+operators that leaving `DOMAIN` blank was "the correct configuration" behind
+a TLS-terminating reverse proxy. There is no trusted-proxy configuration
+anywhere in the codebase — `grep -rn 'trustProxies|TrustProxies|forceScheme|X-Forwarded' app/ bootstrap/ config/`
+returns nothing — and live testing confirms `X-Forwarded-Proto: https` is
+ignored: OAuth discovery advertises `http://` endpoints and `@vite` emits
+`http://` asset URLs, which a browser blocks as mixed content on the consent
+screen. Corrected in the final fix round of install-story group 2: the docs
+now say plainly that running behind a reverse proxy is not yet supported and
+point operators at the `DOMAIN` path instead.
+
+Supporting it for real means wiring Laravel's `trustProxies` (or the
+equivalent Symfony `TrustedProxy` configuration) for the proxy's address,
+setting `SESSION_SECURE_COOKIE=true` and a correct `APP_URL`, and testing the
+consent screen and Vite asset URLs behind an actual TLS-terminating proxy —
+untested proxy trust has security consequences (header spoofing if the
+trusted range is too broad) that deserve their own change with its own
+tests, not a doc-driven addition in a release branch.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs
@@ -345,9 +400,18 @@ all three require a valid `mcp:use` token — so this is a lower bar than the
 one the superseded roadmap set, and it is a judgement rather than a hard rule.
 The wiki limitation ships documented rather than fixed.
 
-Two things are hard requirements regardless: a `LICENSE` file must exist
-before the repository is public, and the GitHub OAuth token currently embedded
-in the `origin` remote URL must be rotated.
+Three things were hard requirements regardless. **D14 has landed** — the contact
+recipient is now configurable and unset by default. **The `LICENSE` file has
+also landed** — MIT, `Copyright (c) 2026 Cooper Sellers`, committed in
+`70d24d5`, present throughout this branch. One item remains open, and it is
+outside what an implementation branch can close:
+
+- The GitHub OAuth token embedded in the `origin` remote URL must be rotated.
+
+Before flipping the repository public, grep the full tracked tree — not just
+`app/` — for personal addresses, tokens, and internal hostnames. This document
+itself carried the author's personal email for several commits precisely because
+the earlier check was scoped to application code.
 
 ## Documentation
 

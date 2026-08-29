@@ -6,6 +6,49 @@ Built on Laravel 13, PostgreSQL + pgvector, and Filament v5. Deployed at [mnemon
 
 ---
 
+## Quickstart
+
+```bash
+git clone https://github.com/coopers98/mnemon.git
+cd mnemon
+cp .env.docker.example .env
+docker compose up -d
+```
+
+Then open `http://localhost:8080`. The admin password is generated on first
+boot and written to `storage/admin-password.txt` inside the `app` container:
+
+```bash
+docker compose exec app cat storage/admin-password.txt
+```
+
+There is no password reset flow — save it somewhere safe.
+
+By default the stack binds to loopback only (`127.0.0.1:8080` / `127.0.0.1:8443`),
+so a local trial is never exposed to the network. To serve on a real hostname with
+automatic HTTPS from Let's Encrypt instead:
+
+1. Point a DNS **A/AAAA record for the hostname at this host before you start the
+   stack.** Let's Encrypt validates over HTTP-01, so a name that doesn't resolve
+   yet fails issuance and Caddy serves nothing on that hostname.
+2. Set `DOMAIN` in `.env` to that hostname.
+3. Set `HTTP_BIND=0.0.0.0:80` and `HTTPS_BIND=0.0.0.0:443` in `.env`. These
+   default to loopback so a "just trying it" run doesn't serve your knowledge
+   base to the internet — leaving them at the defaults while `DOMAIN` is set is
+   the single most likely reason certificate issuance fails.
+
+Running behind a TLS-terminating reverse proxy is **not yet supported**: the
+app does not process `X-Forwarded-*` headers, so behind such a proxy OAuth
+discovery and asset URLs would still be advertised as `http://`, and a browser
+blocks the mixed content that results on the consent screen. Use the `DOMAIN`
+path above for HTTPS.
+
+See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#native-install-the-alternative-to-docker) for the native
+(non-Docker) install, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for running the
+test suite.
+
+---
+
 ## What this is
 
 Mnemon has two layers:
@@ -13,7 +56,7 @@ Mnemon has two layers:
 - **The palace** — verbatim, append-only storage organised as **wings → rooms → drawers**. Everything you put in comes back out exactly as it went in. Nothing is summarised at ingest, nothing is lost. Retrieval is hybrid: pgvector cosine distance + Postgres full-text search + a temporal recency boost, weighted and merged.
 - **The wiki** — synthesised, structured pages that distill what's in the palace into knowledge you can read directly. Wiki pages are typed (`person:`, `project:`, `concept:`, `decision:`, `synthesis:`), markdown-rendered, and tracked for staleness. They compound over time.
 
-Agents read and write both layers via 12 MCP tools. Humans manage everything through a Filament admin panel at `/admin`, browse the wiki at `/wiki`, and explore the palace at `/palace`.
+Agents read and write both layers via 14 MCP tools. Humans manage everything through a Filament admin panel at `/admin`, browse the wiki at `/wiki`, and explore the palace at `/palace`.
 
 The name is from [Mnemosyne](https://en.wikipedia.org/wiki/Mnemosyne) — the Greek personification of memory. The wing/room/drawer hierarchy is named after the classical [method of loci](https://en.wikipedia.org/wiki/Method_of_loci) (the original "memory palace").
 
@@ -56,11 +99,15 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 
 **Admin panel** at `/admin` — full CRUD for wings, rooms, drawers, wiki pages, OAuth clients, and access tokens. Dashboard with stats, sparklines, and audit log browser.
 
-**Wiki frontend** at `/wiki` — browsable, rendered wiki pages. No login required for reading.
+**Wiki frontend** at `/wiki` — browsable, rendered wiki pages. Requires login; every `/wiki` and `/palace` route sits behind `auth` middleware today.
 
 **Palace browser** at `/palace` — explore wings, rooms, and drawers visually.
 
 **Landing page** at `/` — overview and entry point.
+
+Use the [Quickstart](#quickstart) above to get a running instance fastest. The
+steps below are the native (non-Docker) install — useful for developing on
+Mnemon itself, or if you'd rather manage PHP and Postgres yourself:
 
 ```bash
 composer install
@@ -82,7 +129,7 @@ Then visit `http://localhost:8000/admin`. The panel ships:
 
 ### As an AI agent (MCP)
 
-Mnemon exposes 12 tools over Streamable HTTP at `POST /mcp` (JSON-RPC 2.0). Authenticate with an OAuth 2.1 bearer token issued via Passport. All tools require the `mcp:use` scope; wing restrictions (selected at the consent screen) provide per-agent isolation.
+Mnemon exposes 14 tools over Streamable HTTP at `POST /mcp` (JSON-RPC 2.0). Authenticate with an OAuth 2.1 bearer token issued via Passport. All tools require the `mcp:use` scope; wing restrictions (selected at the consent screen) provide per-agent isolation.
 
 To connect from Claude Code:
 
@@ -107,6 +154,8 @@ All tools require scope `mcp:use`. Wing restrictions on the token provide per-ag
 | `wiki_compile` | Gather related drawers for wiki page compilation; supports consolidation tiers |
 | `wiki_graph` | Query the knowledge graph — entities, typed relationships, graph traversal |
 | `wiki_history` | Supersession and revision history for wiki pages; track how knowledge evolved |
+| `recall` | Hybrid recall of wiki excerpts and drawer snippets for a prompt, packed into a token budget; powers the Claude Code `mnemon-recall.sh` hook |
+| `session_digest` | Digest a sanitized transcript slice into drawer proposals; persists high-confidence ones, queues new-wing proposals for review; powers the Claude Code `mnemon-capture.sh` hook |
 
 Wing restrictions on a token short-circuit before the tool even runs — a token restricted to `project:atlas` can never see a drawer in `personal`.
 
@@ -144,13 +193,20 @@ OpenClaw's `memory_search` can route queries to Mnemon alongside local files, gi
 
 ### As an embedding backend
 
-Three drivers ship out of the box. Configure via `MNEMON_EMBEDDING_DRIVER`:
+Configure via `MNEMON_EMBEDDING_DRIVER`:
 
 | Driver | Model | Dimensions | Notes |
 |---|---|---|---|
-| `openai` | `text-embedding-3-small` | 1536 | Default. Needs `OPENAI_API_KEY`. |
-| `ollama` | `nomic-embed-text` | 768 | For local-only setups. Needs an Ollama daemon. |
+| `openai` | `text-embedding-3-small` | 1536 | The application default (`config/mnemon.php`). Needs `OPENAI_API_KEY`. The Docker Quickstart overrides this to `none` in `.env.docker.example`, so trying Mnemon needs no account and spends nothing. |
 | `none` | — | — | Disables embeddings; search falls back to full-text + temporal only. |
+
+A third driver, `ollama` (`nomic-embed-text`, 768 dimensions), is implemented
+but currently unusable: the `drawers` and `wiki_pages` tables define
+`embedding` as a fixed `vector(1536)` column, so a 768-dimension vector fails
+to write. Selecting `ollama` will error the first time anything tries to
+store an embedding. This is tracked as defect D10 and is not fixed in this
+release — if you need fully local embeddings, `none` (no semantic ranking,
+full-text + temporal only) is the working option today.
 
 Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings under the new model.
 
@@ -162,7 +218,7 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)
-- **Tests:** PHPUnit 12, Livewire-style Filament page tests (413 passing)
+- **Tests:** PHPUnit 12, Livewire-style Filament page tests (430 passed / 1 skipped on SQLite, 431 passed on PostgreSQL)
 
 The MCP server is built on [`laravel/mcp`](https://github.com/laravel/mcp) and [`laravel/passport`](https://laravel.com/docs/passport) — Streamable HTTP + OAuth 2.1 + Dynamic Client Registration + tool/resource/prompt dispatch + audit logging.
 
@@ -184,18 +240,18 @@ The classical **method of loci** is the naming convention. A wing is a section o
 
 ## What's built
 
-All sprints complete. 413 tests passing. Deployed at [mnemon.example.com](https://mnemon.example.com).
+All sprints complete. 430 tests passing (1 skipped) on SQLite, 431 passing on PostgreSQL. Deployed at [mnemon.example.com](https://mnemon.example.com).
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
 - **Sprint 3 — Hybrid retrieval.** `PalaceSearchService` (semantic / fulltext / hybrid modes with temporal boost), `WikiSearchService`, wing/room scoping.
-- **Sprint 4 — MCP server.** All 12 MCP tools, OAuth 2.1 + Passport with `mcp:use` scope and per-token wing-restriction enforcement, audit logging on every call.
+- **Sprint 4 — MCP server.** All 14 MCP tools, OAuth 2.1 + Passport with `mcp:use` scope and per-token wing-restriction enforcement, audit logging on every call.
 - **Sprint 5 — Filament v5 admin panel.** Six resources, dashboard stats widget, custom palace + wiki Search page.
 - **Sprint 6 — OpenClaw integration.** Session ingest, memory-file imports, bidirectional sync, reference client.
 - **Tier 1 — Karpathy core.** Structured metadata (confidence, sources, related), source citations with drawer previews, cascade awareness (`drawer_add` flags wiki pages), `wiki_lint`, `wiki_compile`.
 - **Tier 2 — Production hardening.** Confidence scoring + decay, supersession / revision history, consolidation tiers (raw → reviewed → consolidated), quality scoring (multi-factor heuristic), self-healing lint (auto-fixer with audit trail), retention management (configurable half-lives), security filtering (ContentSanitizer).
 - **Tier 3 — Scale & Advanced.** Knowledge graph (entities, typed relationships, graph traversal via `wiki_graph`), revision history queries via `wiki_history`.
-- **Wiki Frontend.** Browsable wiki at `/wiki`, palace browser at `/palace`, landing page at `/`. Public read access, login at `/login` for write operations.
+- **Wiki Frontend.** Browsable wiki at `/wiki`, palace browser at `/palace`, landing page at `/`. Every `/wiki` and `/palace` route requires login; only the landing page at `/` is public.
 
 See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the full breakdown of each sprint.
 
@@ -207,11 +263,13 @@ Mnemon runs several automated maintenance tasks to keep the knowledge base healt
 
 | Schedule | Command | What it does |
 |---|---|---|
-| Daily | `mnemon:decay-confidence` | Applies time-based confidence decay to drawers and wiki pages |
+| Daily, 03:00 | `mnemon:decay-confidence` | Applies time-based confidence decay to drawers and wiki pages |
 | Every 6 hours | `mnemon:auto-lint` | Runs wiki_lint with auto-fix enabled; repairs stale, orphan, and low-confidence pages |
-| Every 6 hours | `mnemon:auto-compile-stale` | Gathers drawers and recompiles wiki pages flagged as stale |
-| Daily | `mnemon:apply-retention` | Enforces retention policies; archives or removes content past its configured half-life |
-| Daily | `mnemon:sync-openclaw` | Syncs memory between Mnemon and OpenClaw |
+| Every 4 hours | `mnemon:auto-compile-stale` | Gathers drawers and recompiles wiki pages flagged as stale |
+| Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforces retention policies; archives or removes content past its configured half-life |
+
+Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` is a manual
+convenience wrapper, not a scheduled task — run it yourself when you want it.
 
 ---
 
@@ -222,6 +280,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
+- **The `ollama` embedding driver can't store an embedding.** The `embedding` column is a fixed `vector(1536)`, and `nomic-embed-text` produces 768-dimension vectors — writes fail. Tracked as D10, not fixed in this release. See [As an embedding backend](#as-an-embedding-backend).
 - **Word count is ASCII-only.** `getWordCountAttribute()` uses PHP's `str_word_count`. Multi-byte content under-counts. Documented; will be revisited if it ever matters.
 - **Source filter dropdowns are cached for 60s.** Newly added drawer sources or new MCP tool names take up to a minute to appear in the BrainSession/Drawer filter dropdowns.
 - **`brain_sessions.source` is non-nullable.** The audit log requires every invocation to identify itself with a key name; anonymous calls are rejected upstream by the auth middleware.
@@ -234,6 +293,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Documentation
 
 - [`docs/USERGUIDE.md`](docs/USERGUIDE.md) — **day-to-day playbook**: setup, connecting agents, OAuth, multi-device, troubleshooting, FAQ
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — running the test suite (SQLite and Postgres), formatting, the Docker smoke test
 - [`CLAUDE.md`](CLAUDE.md) — agent / contributor conventions (canonical for AI work)
 - [`AGENTS.md`](AGENTS.md) — pointer for non-Claude agents
 - [`docs/FRD.md`](docs/FRD.md) — functional requirements
@@ -245,7 +305,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Common commands
 
 ```bash
-php artisan test --compact              # run the test suite (413 tests passing)
+php artisan test --compact              # run the test suite (430 passed / 1 skipped on SQLite)
 ./vendor/bin/pint                       # format PHP
 php artisan migrate:fresh --seed        # rebuild the DB from scratch
 php artisan mnemon:reembed              # re-embed all drawers + wiki pages with the current driver

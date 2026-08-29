@@ -378,6 +378,35 @@ setup instructions on a clean stack.
 Fix: create the personal access client idempotently in the entrypoint's
 bootstrap block, beside `passport:keys`.
 
+### D18 — `drawer_search` and `drawer_get` return `metadata` as different types
+
+`Drawer` casts `metadata` to `array` (`app/Models/Drawer.php:34-35`), but
+`PalaceSearchService` builds its results with `DB::table('drawers')`
+(`app/Services/PalaceSearchService.php:280`), which bypasses the model and its
+casts. So the same field comes back as two different types depending on which
+tool the client called:
+
+- `drawer_search` → a JSON-encoded **string**
+- `drawer_get` → a **dict**
+
+Confirmed live against the same drawer: search returned
+`'{"session_id":"2c501e33",...}'` while get returned
+`{'session_id': '2c501e33', ...}`.
+
+Any MCP client that reads `result.metadata.session_id` off a search result
+breaks, and the failure is a type error at the client rather than anything
+visible server-side. Agents are the primary consumer of this API, and an
+inconsistency like this is the kind they cannot reason around — it looks like
+malformed data rather than a contract they should have parsed.
+
+Found while building the benchmark harness: the harness's own unit tests
+modelled `metadata` as a dict and passed, and the code crashed on the first
+real search.
+
+Fix: decode `metadata` in the search service's result mapping so both tools
+return an object. Note the wire contract changes for anyone already parsing the
+string.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

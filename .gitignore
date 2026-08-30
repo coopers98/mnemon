@@ -1,9 +1,11 @@
 *.log
 .DS_Store
-.env
-.env.backup
-.env.production
-.env.smoke
+# Ignore every .env variant by default and allow the committed templates back
+# in explicitly. An enumerated list let .env.bench through while it held a live
+# OpenAI key — a `git add -A` away from publishing it.
+.env*
+!.env.example
+!.env.docker.example
 .phpactor.json
 .phpunit.result.cache
 /.codex

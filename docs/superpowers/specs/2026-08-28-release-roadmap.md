@@ -355,6 +355,102 @@ untested proxy trust has security consequences (header spoofing if the
 trusted range is too broad) that deserve their own change with its own
 tests, not a doc-driven addition in a release branch.
 
+### D17 — a fresh install cannot mint a personal access token
+
+`docker/entrypoint.sh` runs `passport:keys --force` but never creates a
+personal access client. `User::createToken()` requires one, so on a fresh
+Docker install it throws.
+
+That breaks a path we document: `docs/USERGUIDE.md:220` tells the reader to run
+`$user->createToken('My Custom Agent', ['mcp:use'])->accessToken` to build a
+custom agent, and `benchmark/config.py` and `benchmark/mnemon_client.py` give
+the same instruction for minting a benchmark token. All three fail on a stack
+that was just brought up.
+
+MCP clients themselves are unaffected — Claude Code and friends register through
+Dynamic Client Registration, which does not need a personal access client. The
+gap only bites scripts and custom agents, which is exactly why it survived the
+install-story work: nothing in that piece minted a token this way.
+
+Found while building the benchmark harness, by following our own documented
+setup instructions on a clean stack.
+
+Fix: create the personal access client idempotently in the entrypoint's
+bootstrap block, beside `passport:keys`.
+
+### D18 — `drawer_search` and `drawer_get` return `metadata` as different types
+
+`Drawer` casts `metadata` to `array` (`app/Models/Drawer.php:34-35`), but
+`PalaceSearchService` builds its results with `DB::table('drawers')`
+(`app/Services/PalaceSearchService.php:280`), which bypasses the model and its
+casts. So the same field comes back as two different types depending on which
+tool the client called:
+
+- `drawer_search` → a JSON-encoded **string**
+- `drawer_get` → a **dict**
+
+Confirmed live against the same drawer: search returned
+`'{"session_id":"2c501e33",...}'` while get returned
+`{'session_id': '2c501e33', ...}`.
+
+Any MCP client that reads `result.metadata.session_id` off a search result
+breaks, and the failure is a type error at the client rather than anything
+visible server-side. Agents are the primary consumer of this API, and an
+inconsistency like this is the kind they cannot reason around — it looks like
+malformed data rather than a contract they should have parsed.
+
+Found while building the benchmark harness: the harness's own unit tests
+modelled `metadata` as a dict and passed, and the code crashed on the first
+real search.
+
+Fix: decode `metadata` in the search service's result mapping so both tools
+return an object. Note the wire contract changes for anyone already parsing the
+string.
+
+### D19 — keyless full-text ranking ties break non-deterministically across ingestion runs
+
+Found while validating the benchmark harness's reproducibility (Task 8): the
+identical 25-question subset (seed 1234) was ingested into two separately
+built stacks and scored with the identical keyless configuration. hit_rate@3,
+hit_rate@5, hit_rate@10, and the embedded leg reproduced exactly; keyless
+hit_rate@1 moved from 0.880 to 0.840 and MRR from 0.930 to 0.910. (Named
+`recall@` at the time; the benchmark harness's final-fix pass renamed this
+family `hit_rate@` once it was clear it isn't standard recall — see the
+Piece 3 status update below.)
+
+Root-caused rather than filed as noise: for 3 of the 25 questions, the gold
+session's drawer and one or more distractor drawers in the same wing score
+**exactly equal** under the keyless ranking (confirmed live against the real
+server — e.g. `0.34` vs `0.34`, and a three-way tie at `0.325`).
+`PalaceSearchService::fulltextSearch()` orders its query with
+`->orderByRaw("{score} DESC", ...)` (`app/Services/PalaceSearchService.php:167`)
+and no secondary sort key. PostgreSQL does not guarantee a stable order among
+exactly-tied rows absent an explicit tiebreaker (e.g. `id ASC`); which of two
+tied rows sorts first depends on physical row order, which depends on
+insertion order. `benchmark/ingest.py` writes with 8 concurrent workers, so
+insertion order — and therefore the tie order — is not identical between two
+separate ingestion runs of the same content, even with the same seed.
+
+hit_rate@3 and above are unaffected because both members of a tied pair land in
+the top two positions regardless of order; only "which one is rank 1" moves,
+which is exactly why hit_rate@1 and MRR are the metrics that shifted. The
+embedded leg is unaffected because cosine similarity scores are effectively
+continuous and do not produce exact ties in practice — confirmed: 0/25
+retrieved lists were identical between the keyless and embedded legs in the
+run that established this baseline.
+
+This is a real product characteristic — not specific to the benchmark's data
+— that would affect any two `drawer_add` batches sent concurrently against
+overlapping search terms. Low severity (a rank-1 swap between tied,
+equally-relevant results, not a correctness failure), but worth knowing
+before quoting keyless hit_rate@1 to more precision than the tie noise
+supports.
+
+Fix: add a deterministic secondary `ORDER BY` (e.g. `drawers.id ASC`, which
+is already selected but unused for ordering) to the full-text ranking query
+in `PalaceSearchService`. Out of scope for the benchmark branch — no PHP
+changed here — recorded for whoever picks it up.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs
@@ -383,14 +479,91 @@ tests, not a doc-driven addition in a release branch.
 | # | Piece | Contents | Gates |
 |---|---|---|---|
 | ~~1~~ | ~~**Authorization & audit correctness**~~ | ~~D7, D8, D4.~~ **Done** — see the status blocks above. | — |
-| 2 | **Install story** | Docker Compose with pgvector; keyless default embedding driver; `passport:keys` documented or automated; **`pdo_pgsql` + a PostgreSQL CI service**. | Pieces 3, 4 |
-| 3 | **Benchmark** | Finish the LongMemEval harness in `benchmark/` and publish a number. Note when publishing that it exercises the palace layer only, not the wiki. | Piece 4 |
+| ~~2~~ | ~~**Install story**~~ | ~~Docker Compose with pgvector; keyless default embedding driver; `passport:keys` automated; `pdo_pgsql` + a PostgreSQL CI service.~~ **Done** — merged in #14. Adds `Dockerfile`, `compose.yaml`, `docker/entrypoint.sh`, `docker/Caddyfile`, `docker/smoke.sh`, a `compose` CI job that boots the real image, the Docker quickstart, and `CONTRIBUTING.md`. | — |
+| 3 | **Benchmark** | **In progress.** The LongMemEval-S retrieval harness in `benchmark/` (`dataset.py` through `cleanup.py`, `benchmark/README.md`) is complete and validated end-to-end, twice, from a clean stack on a seeded 25-question subset — see below. The QA layer (LLM-judged answer accuracy, LongMemEval's own headline metric) is deliberately deferred to its own plan; retrieval is the layer that validates the pipeline for zero marginal cost and is a prerequisite for interpreting any QA number. Remaining before this piece is done: run all 500 questions and publish the number, noting it exercises the palace layer only, not the wiki. | Piece 4 |
 | 4 | **Truth-up pass** | README and landing page against the shipped product; `LICENSE` added; docs pruned and restructured; repository made public. | Piece 6 |
 | 5 | **Public demo** | Read-only demo instance. Requires a hardening pass — and no demo token may carry write access while D8 is open. | Piece 6 |
 | 6 | **Launch** | Positioning, surfaces, timing. |
 
 The MCP surface, which the superseded roadmap listed as its first piece, is
 done. Piece 1 is what remains of that work.
+
+**Why ties are inevitable rather than rare** (found during the Task 8 review):
+three things compound. The full-text score is a coarse discrete ratio — matched
+terms over total searchable terms — so distinct drawers land on identical values
+routinely. The temporal boost is `1.0 - floor(daysOld)/boostDays`, which is a
+constant `1.0` for every drawer created in the same short ingest, so it breaks no
+ties. And the final PHP-side `sortByDesc('score')` is stable, so it faithfully
+preserves whatever order PostgreSQL happened to return. On a freshly bulk-ingested
+corpus, exact ties are the normal case, not an edge case.
+
+This is why the benchmark's keyless `hit_rate@1` moved 0.880 → 0.840 across a clean
+rebuild of identical content: 3 of 25 questions had the gold session tied with a
+distractor, and concurrent ingestion wrote the rows in a different physical order
+the second time.
+
+### Piece 3 status — subset validation, twice
+
+`benchmark/` (`dataset.py`, `preflight.py`, `ingest.py`, `retrieve.py`,
+`evaluate.py`, `report.py`, `cleanup.py`, `benchmark/README.md`, 87 tests) is
+complete. The full pipeline was run end to end from a clean stack — teardown,
+rebuild, fresh migrations, a newly minted token, ingest, keyless retrieval,
+re-embed, embedded retrieval, report, cleanup — twice, on the same seeded
+25-question subset (seed 1234), to check reproducibility rather than just
+smoke-test the happy path.
+
+A final-fix review of this branch found the harness's `recall_at_k` was
+actually hit-rate@k ("did *any* gold session appear in the top k"), not
+standard recall (`|retrieved ∩ gold| / |gold|`) — the two coincide only when
+a question has exactly one gold session, and 13 of these 25 have two.
+`evaluate.py` now computes and publishes both, under the names `hit_rate@k`
+and `recall@k`. The table below carries both; only run 2's raw hits (the
+ones kept in `results/`) could be re-scored for standard recall, so run 1's
+recall column is marked accordingly.
+
+| Metric | keyless (run 1) | keyless (run 2) | embedded (both runs) |
+|---|---|---|---|
+| hit_rate@1 | 0.880 | 0.840 | 0.960 |
+| hit_rate@3 | 0.960 | 0.960 | 1.000 |
+| hit_rate@5 | 1.000 | 1.000 | 1.000 |
+| hit_rate@10 | 1.000 | 1.000 | 1.000 |
+| recall@1 | n/a (hits not kept) | 0.620 | 0.720 |
+| recall@3 | n/a (hits not kept) | 0.900 | 0.960 |
+| recall@5 | n/a (hits not kept) | 0.920 | 0.960 |
+| recall@10 | n/a (hits not kept) | 1.000 | 0.980 |
+| MRR | 0.930 | 0.910 | 0.980 |
+
+hit_rate@3/@5/@10, errors (0 both legs, both runs), and the entire embedded
+column reproduced exactly across runs. Keyless hit_rate@1/MRR did not, and
+the cause was root-caused rather than shrugged off — see D19 below.
+
+**Reading that holds, corrected:** under standard recall, embeddings
+improved rank-1 placement on both conventions (hit_rate@1 0.840→0.960,
+recall@1 0.620→0.720 on run 2), but did **not** uniformly improve coverage
+at higher k — recall@10 is 1.000 keyless vs. 0.980 embedded, i.e. the
+embedded leg found *less* of the gold evidence at k=10. Question `3c1045c8`
+(gold `answer_c8cc60d6_1` and `answer_c8cc60d6_2`) is the concrete
+counter-example: keyless's top 10 retrieved both, embedded's retrieved only
+`_2`. (The previous version of this status block claimed recall@5/@10 were
+saturated for both legs and that embeddings therefore cannot find more
+evidence, only re-rank it — that claim is false on this harness's own hits
+files and has been retracted.) Treat the rank-1 gap as suggestive, not
+conclusive: the Wilson 95% CI on keyless hit_rate@1 (21/25) is [0.65, 0.94],
+a width of 0.28 — a 3-question swing at n=25 is within noise. n=25 overall
+— this is a subset validation, not the published number.
+
+**Measured throughput** (run 1): ~48 drawers/question, ~2 drawers/sec, 1,201
+drawers for 25 questions, 10m18s wall-clock, 0 truncated. Extrapolated to all
+500 LongMemEval-S questions: **~24,000 drawers, ~3.3–3.5 hours of ingest**,
+plus the OpenAI re-embed and a second retrieval pass for roughly **4.5–5
+hours end to end** at an estimated **$1–3** of OpenAI usage. This is the
+number the scale decision — whether to run all 500 — should be made on.
+
+The LLM-judged QA layer (LongMemEval's own headline metric) remains
+deliberately deferred to its own plan, per the original task-8 self-review:
+retrieval validates the whole pipeline at zero marginal cost and is a
+prerequisite for interpreting any QA number, and the scale decision belongs
+before that spend.
 
 ## Gate on making the repository public
 

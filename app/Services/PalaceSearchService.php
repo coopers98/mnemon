@@ -96,6 +96,9 @@ class PalaceSearchService
                 (1 - (drawers.embedding <=> ?::vector)) AS raw_score
             ', [$vectorLiteral])
             ->orderByRaw('drawers.embedding <=> ?::vector', [$vectorLiteral])
+            // Cosine distances tie far less often than term counts, but the same
+            // reasoning applies — see D19 in the fulltext branch below.
+            ->orderBy('drawers.id')
             ->limit($limit)
             ->get();
 
@@ -165,6 +168,12 @@ class PalaceSearchService
             ", $fragments['bindings'])
             ->whereRaw($fragments['match'], $fragments['bindings'])
             ->orderByRaw("{$fragments['score']} DESC", $fragments['bindings'])
+            // D19: the score is a coarse count of matched terms, so ties are the
+            // normal case. Without a secondary key PostgreSQL may return tied
+            // rows in any order — its sort is not stable — so the same query can
+            // put a different drawer first and a LIMIT can take a different
+            // subset of equally-scored rows.
+            ->orderBy('drawers.id')
             ->limit($limit)
             ->get();
 
@@ -227,7 +236,7 @@ class PalaceSearchService
                     'room' => $base->room,
                     'room_slug' => $base->room_slug,
                     'source' => $base->source,
-                    'metadata' => $base->metadata,
+                    'metadata' => $this->decodeMetadata($base->metadata),
                     'tier' => $base->tier ?? 'raw',
                     'retention_score' => $retention,
                     'created_at' => $base->created_at,
@@ -257,7 +266,7 @@ class PalaceSearchService
                     'room' => $row->room,
                     'room_slug' => $row->room_slug,
                     'source' => $row->source,
-                    'metadata' => $row->metadata,
+                    'metadata' => $this->decodeMetadata($row->metadata),
                     'tier' => $row->tier ?? 'raw',
                     'retention_score' => $retention,
                     'created_at' => $row->created_at,
@@ -307,6 +316,27 @@ class PalaceSearchService
      * null (semantic search) the scores are normalized against the best row
      * instead, since cosine similarity has no natural maximum.
      */
+    /**
+     * D18 — these results come from `DB::table()`, which bypasses the `Drawer`
+     * model and its `array` cast, so `metadata` arrives as the raw JSON column.
+     * `drawer_get` goes through the model and returns an object; without this,
+     * the same field has two types depending on which tool the client called.
+     */
+    protected function decodeMetadata(mixed $metadata): ?array
+    {
+        if ($metadata === null || $metadata === '') {
+            return null;
+        }
+
+        if (is_array($metadata)) {
+            return $metadata;
+        }
+
+        $decoded = json_decode((string) $metadata, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
     protected function normalizeAndWrap(Collection $rows, string $scoreKey, ?float $maxPossible = null): Collection
     {
         if ($rows->isEmpty()) {
@@ -329,7 +359,7 @@ class PalaceSearchService
                 'room' => $row->room,
                 'room_slug' => $row->room_slug,
                 'source' => $row->source,
-                'metadata' => $row->metadata,
+                'metadata' => $this->decodeMetadata($row->metadata),
                 'tier' => $row->tier ?? 'raw',
                 'retention_score' => isset($row->retention_score) ? (float) $row->retention_score : 1.0,
                 'created_at' => $row->created_at,

@@ -451,6 +451,29 @@ is already selected but unused for ordering) to the full-text ranking query
 in `PalaceSearchService`. Out of scope for the benchmark branch — no PHP
 changed here — recorded for whoever picks it up.
 
+### D20 — a blank `APP_KEY=` in the env template shadows the generated key
+
+`.env.docker.example` shipped `APP_KEY=` blank, and Compose passes that into the
+container as a variable that is **set to the empty string**. Laravel's Dotenv is
+immutable — it will not override an already-set variable — so the key the
+entrypoint generates and persists could never be picked up by anything that did
+not inherit PID 1's exported environment.
+
+`docker compose exec` is exactly that: an exec'd process inherits the
+environment the container was *created* with, not PID 1's runtime one. So the
+workflow `docs/USERGUIDE.md` documents — minting a token with
+`php artisan tinker` — failed with "No application encryption key has been
+specified" on every fresh install, while the application itself ran fine.
+
+Confirmed by unsetting the variable inside the container, after which the same
+command read the key from `.env` and succeeded.
+
+Fixed alongside D17: the template now ships the line commented out rather than
+blank, so the variable is absent unless an operator sets it deliberately, and
+the entrypoint writes the resolved key into the container's own `.env` so
+exec'd commands can read it. Operator-supplied keys still take precedence —
+verified.
+
 ## Findings from the 2026-08-28 session, already fixed
 
 - **PHP floor was wrong.** `composer.json` declared `^8.3` and all three docs

@@ -28,6 +28,23 @@ elif [ -f storage/app_key ]; then
     export APP_KEY="$(cat storage/app_key)"
 fi
 
+# D20 — exporting the key reaches PID 1 and its children, but NOT
+# `docker compose exec`: an exec'd process inherits the environment the
+# container was created with, which never had APP_KEY. That breaks the workflow
+# docs/USERGUIDE.md documents — minting a token with `artisan tinker` — with a
+# bare "No application encryption key has been specified".
+# Writing it into the container's own .env (ephemeral, rebuilt from the
+# persisted key on every boot) is what makes exec'd artisan commands work.
+if [ -n "${APP_KEY}" ]; then
+    touch .env
+    chmod 600 .env
+    if grep -q '^APP_KEY=' .env 2>/dev/null; then
+        sed -i "s|^APP_KEY=.*|APP_KEY=${APP_KEY}|" .env
+    else
+        printf 'APP_KEY=%s\n' "${APP_KEY}" >> .env
+    fi
+fi
+
 # APP_URL is resolved from DOMAIN here too, above the gate, for the same
 # reason: any container may need to generate a correct URL, not just the
 # one serving Caddy. CADDY_SITE_ADDRESS is Caddy-specific and stays below,
@@ -126,6 +143,16 @@ if [ ! -f storage/oauth-private.key ] || [ ! -f storage/oauth-public.key ]; then
     echo "[mnemon] generating Passport keys"
     php artisan passport:keys --force
     chmod 600 storage/oauth-private.key
+fi
+
+# D17 — User::createToken() needs a personal access client, and nothing else
+# creates one. MCP clients register through Dynamic Client Registration and are
+# unaffected, which is why this stayed hidden: the documented way to mint a
+# token for a script or a custom agent (docs/USERGUIDE.md) failed on every
+# fresh install. Guarded on the grant type so a restart does not mint duplicates.
+if [ "$(php artisan tinker --execute='echo Laravel\Passport\Client::all()->filter(fn ($c) => $c->hasGrantType("personal_access"))->count();' 2>/dev/null | tail -1)" = "0" ]; then
+    echo "[mnemon] creating the personal access client"
+    php artisan passport:client --personal --no-interaction --name="Mnemon Personal Access"
 fi
 
 # Seed only when there is no user at all. The entrypoint runs on every boot;

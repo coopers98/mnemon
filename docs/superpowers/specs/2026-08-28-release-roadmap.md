@@ -355,7 +355,12 @@ untested proxy trust has security consequences (header spoofing if the
 trusted range is too broad) that deserve their own change with its own
 tests, not a doc-driven addition in a release branch.
 
-### D17 — a fresh install cannot mint a personal access token
+### D17 — a fresh install cannot mint a personal access token — FIXED
+
+**Status: fixed** in `13b2ec2`. The entrypoint now creates a personal access
+client idempotently, guarded on the grant type. Verified on a genuinely first
+boot: the documented `createToken()` call mints a 1039-character token with no
+workaround, and a restart does not mint a duplicate.
 
 `docker/entrypoint.sh` runs `passport:keys --force` but never creates a
 personal access client. `User::createToken()` requires one, so on a fresh
@@ -378,7 +383,11 @@ setup instructions on a clean stack.
 Fix: create the personal access client idempotently in the entrypoint's
 bootstrap block, beside `passport:keys`.
 
-### D18 — `drawer_search` and `drawer_get` return `metadata` as different types
+### D18 — `drawer_search` and `drawer_get` return `metadata` as different types — FIXED
+
+**Status: fixed** in `13b2ec2`. The search service decodes the raw column, so
+both tools return an object. Note this changed the wire contract for anyone who
+was parsing the string.
 
 `Drawer` casts `metadata` to `array` (`app/Models/Drawer.php:34-35`), but
 `PalaceSearchService` builds its results with `DB::table('drawers')`
@@ -407,7 +416,12 @@ Fix: decode `metadata` in the search service's result mapping so both tools
 return an object. Note the wire contract changes for anyone already parsing the
 string.
 
-### D19 — keyless full-text ranking ties break non-deterministically across ingestion runs
+### D19 — keyless full-text ranking ties break non-deterministically across ingestion runs — FIXED
+
+**Status: fixed** in `13b2ec2`, verified `7bb678d`. Both the full-text and
+semantic paths now carry a deterministic `drawers.id` tie-break. Two independent
+ingests of identical content returned identical top-10 rankings for all 25
+benchmark questions, where previously keyless hit_rate@1 moved 0.880 to 0.840.
 
 Found while validating the benchmark harness's reproducibility (Task 8): the
 identical 25-question subset (seed 1234) was ingested into two separately
@@ -451,7 +465,12 @@ is already selected but unused for ordering) to the full-text ranking query
 in `PalaceSearchService`. Out of scope for the benchmark branch — no PHP
 changed here — recorded for whoever picks it up.
 
-### D20 — a blank `APP_KEY=` in the env template shadows the generated key
+### D20 — a blank `APP_KEY=` in the env template shadows the generated key — FIXED
+
+**Status: fixed** in `13b2ec2`. The template ships the line commented out, and
+the entrypoint writes the resolved key into the container's own `.env` after
+generation — the first-boot case, which an earlier attempt missed by writing
+only where a persisted key already existed.
 
 `.env.docker.example` shipped `APP_KEY=` blank, and Compose passes that into the
 container as a variable that is **set to the empty string**. Laravel's Dotenv is

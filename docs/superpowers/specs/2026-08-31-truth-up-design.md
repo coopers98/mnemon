@@ -1,133 +1,259 @@
 # Truth-up pass — design
 
-**Status:** approved 2026-08-31, not yet implemented.
+**Status:** revised 2026-08-31 after an adversarial review found the first
+version audited one page and generalised. Not yet implemented.
 **Roadmap piece:** 4. Gates piece 6 (launch) and the repository going public.
 
 ## Goal
 
-Make every public claim in this repository true, and reduce the public surface
-to documents worth a stranger's time. This is the last piece before the
-repository becomes visible, so it is the last chance to catch a claim that a
-reader can disprove by reading the source.
+Make every public claim in this repository true, decide what the repository
+publishes about its author's infrastructure, and reduce the public surface to
+documents worth a stranger's time. This is the last gate before the repository
+is visible.
 
-## Why this piece is not cosmetic
+## What the audit found
 
-An audit of the landing page — the most public artifact in the project —
-found seven claims the code does not support:
+The first pass checked the landing page's spec-sheet cells and found seven
+false claims. An adversarial review confirmed all seven and then found that
+grep-driven checking had located every claim containing a searchable keyword
+and missed every claim that did not. The real list is much longer, and three
+findings outrank everything in the original scope.
+
+### The seven confirmed false claims
 
 | Claim | Reality |
 |---|---|
-| "BM25 over tsvector" | No BM25 anywhere. The score is `SUM(CASE WHEN to_tsvector(content) @@ plainto_tsquery(term) THEN 1 ELSE 0 END)` — a count of matched terms, with no term frequency and no inverse document frequency |
-| "Reciprocal-rank fusion by default" | A weighted linear blend: semantic 0.6, fulltext 0.3, temporal 0.1, in `config/mnemon.php` |
-| "BM25 · cosine · re-rank · attribution" | No re-ranker exists — and the same page separately claims "No black-box re-rankers" |
-| "Tunable per-room" | The weights are global; nothing is per-room |
-| "Outbound calls require an allow-list and live on the audit log" | No allow-list exists, and no embedding driver ever writes a `BrainSession` — outbound calls are not audited |
-| "anything that returns a vector. Swap them; we re-index in the background" | D10: the Ollama driver cannot store an embedding at all. Re-indexing is a manual `mnemon:reembed` |
-| "A dozen tools out of the box" | 14 |
+| "BM25 over tsvector" | A count of distinct matched terms. No term frequency, no IDF |
+| "Reciprocal-rank fusion by default" | Weighted linear blend, 0.6/0.3/0.1, `config/mnemon.php:34-38` |
+| "BM25 · cosine · re-rank" | No re-ranker; the same page also boasts "No black-box re-rankers" |
+| "Tunable per-room" | Rooms are a scoping filter; weights are global |
+| "Outbound calls require an allow-list and live on the audit log" | No allow-list; `OpenAiDriver` writes `Log::error`, never a `BrainSession` |
+| "Swap them; we re-index in the background" | `vector(1536)` is hard-coded in both migrations (D10); `mnemon:reembed` is a manual foreground command |
+| "A dozen tools" | 14 |
 
-Verified by grep: `bm25`, `reciprocal`, `rrf`, `allowlist`, `allow-list`,
-`rerank` and `re-rank` occur **zero** times across `app/` and `config/`.
+`bm25`, `reciprocal`, `rrf`, `rerank`, `allowlist` occur **zero** times across
+`app/` and `config/`.
 
-The BM25 claim has also propagated into `README.md:231`, `docs/discovery.md:21`
-and `docs/GAP-ANALYSIS.md:18` — the last of which marks it "✅ Complete".
+### Three findings that outrank the original scope
 
-These are not stale version numbers. "BM25" and "reciprocal-rank fusion" are
-specific, checkable technical claims that read as differentiators, and the
-project's own pitch is "boring, knowable infrastructure — audit it on a Sunday
-afternoon." A reader who accepts that invitation finds a term-match count and a
-weighted sum. Overclaiming is worst precisely where the product invites
-inspection.
+**A false security guarantee.** `docs/USERGUIDE.md:380` states a token "cannot
+read or write any other wing, **regardless of which tool is called**".
+`USERGUIDE.md:429` attaches a threat model: "lose the work laptop, the attacker
+can't access `personal` content even if they extract the token". `README.md:87`
+says "a project-specific agent sees only its own wing".
 
-The honest version is a stronger pitch anyway: PostgreSQL full-text joined to
-pgvector cosine, with weights a reader can find in one config file, and no
-black box anywhere. That is a real position. It is simply not the one currently
-being made.
+All three are false. `wiki_pages` has no wing column, and `ContextGetTool` and
+`ContextListTool` contain zero `requireWingAccess` calls — so a restricted
+token can read any wiki page, including syntheses compiled from wings it was
+never granted. The roadmap already knows this and already decided it "must be
+stated plainly in the README rather than implied away"; the README's
+Limitations section does not mention it and the USERGUIDE asserts the opposite.
 
-## Scope
+This is the worst class of claim in the repository. A wrong algorithm name
+costs credibility; a wrong isolation guarantee costs someone their data. It is
+also the claim the first version of this spec would not have caught, because
+its cross-check looked at numbered defects and this is filed as a "known
+limitation".
 
-**In:**
+**A production server's IP ships at HEAD.** `docs/FRD.md:6`,
+`docs/IMPLEMENTATION-PLAN.md:11` and `:411` all carry
+`198.51.100.10 (Forge, shared)`. The first version of this spec slated
+IMPLEMENTATION-PLAN for removal but left FRD "to implementer judgement" —
+leaving a shared server's IP behind a judgement call made in flight.
 
-1. Correct every false claim on the landing page, keeping its voice and structure.
-2. Correct the same claims wherever they appear in `README.md` and `docs/`.
-3. Restructure the documentation tree for a public reader.
-4. A claim-verification pass over the surviving public docs.
+**Git history publishes infrastructure and identity, and no document owns the
+decision.** Verified: the old deployment hostname appears in 14 commits, the
+SSH target `forge@198.51.100.10` in 2, the author's personal email in 4. HEAD
+is clean of all three — earlier passes fixed the tracked tree — but making the
+repository public publishes the history with it, and `git log -p` is one
+command. The roadmap's gate covers rotating the origin-remote token and
+grepping the *tracked tree*; neither reaches this.
 
-**Out:** the LLM-judged QA benchmark layer (its own plan, deferred), the five
-open defects D10/D12/D13/D15/D16 (documented, not fixed here), and the act of
-flipping the repository to public, which is the user's and is separately gated
-on rotating the GitHub token in the `origin` remote.
+The first version of this spec argued that deleting historical documents was
+safe because "git history preserves them". That argument cuts both ways and it
+was only noticed pointing one direction.
+
+## Why this matters more than tidying
+
+The project's pitch is "boring, knowable infrastructure — audit it on a Sunday
+afternoon." Overclaiming is least survivable exactly where you invite
+inspection. A reader who takes that invitation and finds a fictional API
+example, a fictional transport, and a security promise contradicted by the
+schema does not conclude that one section is stale. They conclude the
+documentation is decorative.
 
 ## Decisions
 
-**Landing page: correct the claims, keep the voice.** The treatise styling is
-distinctive and stays. Only the false technical assertions change. Where a
-claim was aspirational — a per-room tunable, an egress allow-list — it is
-removed rather than softened into something unfalsifiable; "we may add X" on a
-landing page is worth less than not mentioning X.
+**Landing page: correct the claims, keep the voice.** The treatise styling
+stays. Aspirational claims are removed rather than softened into something
+unfalsifiable — "we may add an allow-list" is worth less than not mentioning
+one.
 
-**Process docs: keep the specs, drop the plans.** `docs/superpowers/specs/*`
-explain why the system is shaped as it is and move to `docs/design/`. The
-implementation plans are step-by-step task lists with embedded code and
-in-flight corrections; they are noise to a stranger and are preserved in git
-history regardless.
+**Positioning: replace deleted adjectives with measured numbers.** The
+corrected spec sheet is genuinely more modest — term-count full-text, one
+working embedding provider, no per-room tuning, no allow-list. Claiming the
+honest version is "stronger" as a matter of course would be a rationalisation.
+What makes it stronger in fact is that piece 3 was sequenced first precisely to
+produce something real to say: a reproducible LongMemEval retrieval table
+(keyless hit_rate@1 0.840, embedded 0.960, identical across two independent
+ingests). Measured numbers where the adjectives were is a better trade than
+either the adjectives or silence.
 
-**Historical documents are removed, not archived.** `IMPLEMENTATION-PLAN.md`,
-`WIKI-FRONTEND-PLAN.md`, `GAP-ANALYSIS.md`, and `discovery.md` are dated April
-2026, describe intentions rather than the system, and contain claims now known
-false. Archiving them under a "historical" heading still ships documents
-asserting Mnemon uses BM25; a reader who finds them has no way to know which
-parts still hold. Git history preserves them for anyone who wants the
-archaeology.
+**Process docs: keep the specs, drop the plans** — with one exception. The
+design specs move to `docs/design/`. The implementation plans are removed,
+**except `2026-08-31-benchmark-qa-layer.md`**, which is not a historical
+artifact but the design for deferred work the roadmap actively points at.
+Dropping it would orphan those references.
 
-`FRD.md` is judged individually during implementation: if its requirements
-still describe the shipped system it is updated and kept, and if it has drifted
-it goes the same way as the others. That judgement needs the document in front
-of the implementer, so it is not pre-decided here.
+**Historical documents are removed, not archived**, and that now includes
+`FRD.md`. Leaving it to in-flight judgement was a dodge with a concrete cost:
+it is the document carrying the server IP. Its content is half-updated — the
+OAuth section is current while it still claims 12 tools, `mcp:serve` as the
+primary interface, and Composer-package distribution — and mixed freshness is
+worse than uniform staleness, because a reader cannot tell which half to trust.
+`IMPLEMENTATION-PLAN.md`, `WIKI-FRONTEND-PLAN.md`, `GAP-ANALYSIS.md` and
+`discovery.md` go with it.
 
-## The claim-verification pass
+This reverses the roadmap, which called `discovery.md` "worth keeping and
+promoting — its competitive landscape is the positioning argument". The
+reversal is deliberate: the README's "Why it exists" section absorbed that
+content. The roadmap is updated in the same commit so the two do not disagree
+in public.
 
-This is the deliverable that distinguishes the piece from a tidy-up, and it is
-the part most likely to be skipped under time pressure.
+**`OPENCLAW-INTEGRATION.md` and `design_system.md` are decided here, not
+deferred.** `OPENCLAW-INTEGRATION.md` documents a live integration path and is
+linked from the USERGUIDE: it stays, and is claim-checked like any other public
+doc. `design_system.md` describes the landing page's visual language, is
+referenced by no public document, and is design rationale: it moves to
+`docs/design/`.
 
-Every factual claim in the surviving public documents gets checked against the
-code, and the check is recorded. A claim is any statement a reader could
-disprove: a count, a version, a command, an algorithm name, a capability, a
-guarantee. For each one the implementer records the claim, the file and line,
-the evidence, and the verdict.
+**The git-history decision belongs to the user and is a hard gate.** Three
+options, with the trade-off stated rather than a recommendation smuggled in as
+a default:
 
-Rules that follow from what this audit already found:
+1. *Accept the exposure.* The hostname and email are the author's own and
+   arguably already public. The SSH target names a shared Forge box by IP.
+2. *Rewrite history* with `git-filter-repo` before flipping public. Every SHA
+   changes, which is cheap now and expensive after anyone clones or forks.
+3. *Squash to a fresh root commit.* Cleanest surface, discards the development
+   record entirely — including the defect ledger that is arguably the most
+   interesting thing about the project.
 
-- **Algorithm names are claims.** "BM25", "reciprocal-rank fusion", "re-rank"
-  are checkable and were all false. Any named technique must appear in the
-  code or come out of the document.
-- **Absolute words are claims.** "never", "every", "all", "no telemetry",
-  "requires an allow-list" — each needs either evidence or removal.
-- **Counts are claims.** Tool counts, test counts, and defect counts drift
-  every time the code changes; each gets re-derived rather than copied.
-- **A capability claimed for a driver must work on that driver.** The Ollama
-  case is the standing example: it is offered as swappable and cannot store an
-  embedding.
+No implementation work in this piece touches history. The decision is recorded
+here so that flipping public without making it is a visible omission rather
+than an oversight.
 
-## Verification
+## The correction list
 
-The pass is only worth something if it can fail. For each corrected claim the
-implementer records the command or file that establishes the truth, so the
-audit can be re-run later rather than re-argued.
+Beyond the seven, the following were found and must be fixed. This list is the
+floor, not the ceiling — the verification pass may find more.
 
-Two checks specifically:
+**Landing page** (`resources/views/landing/index.blade.php`): the "stdio + sse"
+transport (it is Streamable HTTP at `POST /mcp`, and `README.md:289` says so);
+the tool names `seal`, `compile`, `walk`, `cite` (only `recall` exists); the
+entire Fig. 4 sample exchange (`POST /mcp/wiki.search` is not an endpoint, and
+the response shape and `"sealed": true` field exist nowhere); "Laravel · native
+package" and "Composer-installable package" (`composer.json` is
+`laravel/laravel`, `type: project` — an application); every queue, jobs and
+broadcasting claim (`routes/console.php` states in its own comment that nothing
+implements `ShouldQueue`); "The wiki rebuilds itself each night"; "Issue an API
+key in the admin" (that stack was deleted); "Embeddings are computed lazily"
+(`DrawerObserver` embeds eagerly and synchronously); "byte-perfect" and "sealed
+by content hash" (`ContentSanitizer` deliberately rewrites content before
+storage, and no hash column exists); "Zero egress by default" (`.env.example`
+ships `MNEMON_EMBEDDING_DRIVER=openai`, so the *native* install sends every
+drawer to OpenAI at write time — only the Docker path defaults to `none`);
+"Three commands" (the native install needs six).
 
-- Grep the whole tracked tree for the terms this audit found false, and confirm
-  each surviving occurrence is either accurate or explicitly describing another
-  project. `README.md:231` describes MemPalace's approach and then says
-  Mnemon rewrites it — the fix must not simply delete the word, because the
-  attribution to prior work is worth keeping and is accurate about *them*.
-- Confirm no document asserts a capability that the roadmap simultaneously
-  records as an open defect. That contradiction is what makes a docs tree
-  untrustworthy as a whole rather than wrong in one place.
+**README.md**: the self-healing maintenance story — `AutoCompileStaleCommand`
+only prints candidate names and `AutoLintCommand` only outputs findings, so
+"the system takes care of itself" is fiction; knowledge-graph entities
+"extracted from drawers and wiki pages" (`extractEntity()` takes only a
+`WikiPage`); "Deployed at mnemon.example.com" asserted twice — a placeholder
+presented as a live deployment, residue of the de-personalisation pass; the
+CRUD/revoke contradiction between `:100` and `:126`; the test counts, which
+have drifted again.
+
+**docs/USERGUIDE.md**: the same self-healing claims; the wing-isolation
+guarantees above; "switch the embedding driver to async via the queue" offered
+as configuration and contradicted sixteen lines later; the legacy
+`/api/mcp/tools` probe against a deleted route; "~50 drawers/sec" reembed
+throughput (the command embeds one record per round trip; the benchmark
+measured ~2/sec); "the drop_api_keys migration in this rework" — internal
+process language in a public document.
+
+**benchmark/README.md**: the D17 workaround instruction, still telling readers
+to run `passport:client --personal` "until it's fixed". D17 was fixed in
+`13b2ec2`.
+
+**Cross-cutting**: the Postgres floor disagrees three ways (landing says ≥15,
+USERGUIDE says 14+, compose ships pg17); the `v0.4 · primer` edition tag has no
+versioning scheme behind it; "© Mnemon HQ" names an organisation that does not
+exist.
+
+## The verification pass
+
+Every factual claim in the surviving public documents is checked against the
+code and the check is recorded. A claim is any statement a reader could
+disprove.
+
+The record lives at `docs/design/claim-audit.md` and **is committed**, which
+makes it itself a public document subject to the same rules — every row must
+carry evidence a reader can re-run.
+
+Rules, extended after the first pass's failure mode:
+
+- **Algorithm and protocol names are claims.** "BM25", "reciprocal-rank
+  fusion", "stdio + sse". All were false. Any named technique or transport must
+  appear in the code or leave the document.
+- **Named endpoints, tools, and fields are claims.** The fictional
+  `wiki.search` endpoint and the `seal`/`compile`/`walk`/`cite` tools were
+  missed by keyword search because nothing flagged them as checkable. Every
+  named identifier gets looked up.
+- **Every code sample and command must execute against the shipped tree.** Not
+  be plausible — execute.
+- **Security and isolation promises are checked against the known-limitations
+  list, not only against numbered defects.** The wiki wing gap is the standing
+  example of what that distinction hides.
+- **Absolute words are claims.** "never", "every", "no telemetry", "zero
+  egress", "byte-perfect". Each needs evidence or removal.
+- **Counts are claims**, re-derived rather than copied.
+- **A capability claimed for a driver must work on that driver.** Ollama is the
+  standing example.
+- **Claims about fixed defects are as stale as claims about absent features.**
+  The benchmark README's D17 workaround is the standing example of that
+  inverse.
+- **Links are claims.** Dead links are the most trivially checkable falsehood a
+  repository can ship.
+- **Claims about other projects need a citation or must be cut.** The Mem0 and
+  MemPalace figures and the Karpathy references are unverifiable from this
+  repository.
+
+## Link integrity
+
+The restructure moves and deletes documents that are linked from at least:
+the landing page footer's FRD link, `AGENTS.md` (three links), `README.md`,
+`docs/USERGUIDE.md` (including into `docs/superpowers/specs/`, which becomes
+`docs/design/`), and `CLAUDE.md`. Every internal link in the surviving tree is
+resolved after the move, and the check is part of the pass rather than a
+follow-up.
+
+## Hard requirements before the repository goes public
+
+1. `198.51.100.10` appears nowhere in the tracked tree.
+2. The wiki wing-isolation limitation is stated plainly in `README.md`, and the
+   three false guarantees are corrected.
+3. Every internal link resolves.
+4. The claim audit is complete and committed.
+5. The GitHub OAuth token in the `origin` remote is rotated (carried from the
+   roadmap; the user's).
+6. The git-history decision is made and recorded (the user's).
 
 ## What "done" looks like
 
 A public reader can read the landing page, `README.md`, `docs/USERGUIDE.md`,
-`CONTRIBUTING.md` and `benchmark/README.md`, check any claim in them against
-the source, and find it holds. The remaining tree is design rationale under
-`docs/design/`, and nothing else.
+`CONTRIBUTING.md`, `benchmark/README.md` and `docs/OPENCLAW-INTEGRATION.md`,
+check any claim against the source, and find it holds. Every internal link
+resolves. `docs/design/` holds the design rationale and the claim audit. The
+repository states its real limitations, including the one about wiki isolation
+that it currently denies.

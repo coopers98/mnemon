@@ -45,7 +45,11 @@ says "a project-specific agent sees only its own wing".
 All three are false. `wiki_pages` has no wing column, and `ContextGetTool` and
 `ContextListTool` contain zero `requireWingAccess` calls — so a restricted
 token can read any wiki page, including syntheses compiled from wings it was
-never granted. The roadmap already knows this and already decided it "must be
+never granted. The exposed channels are `context_get`, `context_list`,
+`palace_wake_up`, `brain_status`, **and `recall`** — the last matters most and
+is missing from the roadmap's own enumeration: `RecallService` searches the
+wiki with no wing patterns and returns full page content, and it is the
+automatic per-prompt path, so the leak happens without an agent asking for it. The roadmap already knows this and already decided it "must be
 stated plainly in the README rather than implied away"; the README's
 Limitations section does not mention it and the USERGUIDE asserts the opposite.
 
@@ -56,15 +60,16 @@ its cross-check looked at numbered defects and this is filed as a "known
 limitation".
 
 **A production server's IP ships at HEAD.** `docs/FRD.md:6`,
-`docs/IMPLEMENTATION-PLAN.md:11` and `:411` all carry
-`198.51.100.10 (Forge, shared)`. The first version of this spec slated
+`docs/IMPLEMENTATION-PLAN.md:11` and `:411` each carry the IPv4 address of a
+shared Forge server, labelled as such. It is deliberately not quoted here: this
+document is itself tracked and moves to `docs/design/` as a public file, and
+the repository's own D14 lesson is that a disclosure defect must be described,
+not reproduced. The first version of this spec slated
 IMPLEMENTATION-PLAN for removal but left FRD "to implementer judgement" —
 leaving a shared server's IP behind a judgement call made in flight.
 
 **Git history publishes infrastructure and identity, and no document owns the
-decision.** Verified: the old deployment hostname appears in 14 commits, the
-SSH target `forge@198.51.100.10` in 2, the author's personal email in 4. HEAD
-is clean of all three — earlier passes fixed the tracked tree — but making the
+decision.** HEAD is clean — earlier passes fixed the tracked tree — but making the
 repository public publishes the history with it, and `git log -p` is one
 command. The roadmap's gate covers rotating the origin-remote token and
 grepping the *tracked tree*; neither reaches this.
@@ -94,10 +99,20 @@ corrected spec sheet is genuinely more modest — term-count full-text, one
 working embedding provider, no per-room tuning, no allow-list. Claiming the
 honest version is "stronger" as a matter of course would be a rationalisation.
 What makes it stronger in fact is that piece 3 was sequenced first precisely to
-produce something real to say: a reproducible LongMemEval retrieval table
-(keyless hit_rate@1 0.840, embedded 0.960, identical across two independent
-ingests). Measured numbers where the adjectives were is a better trade than
-either the adjectives or silence.
+produce something real to say: a reproducible LongMemEval retrieval table.
+Measured numbers where the adjectives were is a better trade than either the
+adjectives or silence.
+
+**Which number ships, and how it is framed, is pinned here rather than left to
+the implementer.** The 500-question run is in progress. If it has completed when
+the landing page is edited, its figures ship. If it has not, the 25-question
+subset figures ship — and either way the number carries its sample size and,
+for the subset, the interval. The benchmark README's own instruction governs:
+prefer "found evidence for 21 of 25 questions at rank 1" over three decimal
+places, because the Wilson 95% interval on that figure is [0.65, 0.94]. A bare
+"0.840 vs 0.960" headline at n=25 would be a fresh overclaim of exactly the
+kind this pass exists to eliminate, and publishing one while deleting "BM25"
+would be indefensible.
 
 **Process docs: keep the specs, drop the plans** — with one exception. The
 design specs move to `docs/design/`. The implementation plans are removed,
@@ -123,25 +138,77 @@ in public.
 **`OPENCLAW-INTEGRATION.md` and `design_system.md` are decided here, not
 deferred.** `OPENCLAW-INTEGRATION.md` documents a live integration path and is
 linked from the USERGUIDE: it stays, and is claim-checked like any other public
-doc. `design_system.md` describes the landing page's visual language, is
-referenced by no public document, and is design rationale: it moves to
-`docs/design/`.
+doc. `design_system.md` describes the landing page's visual language and is design
+rationale: it moves to `docs/design/`. Note the first revision of this spec
+claimed it was "referenced by no public document" — that was false, and caught
+by review: `public/design_system.html` links it three times. Those links are
+part of the link-integrity work, and that file is itself slated for removal
+below.
 
-**The git-history decision belongs to the user and is a hard gate.** Three
-options, with the trade-off stated rather than a recommendation smuggled in as
-a default:
+**The git-history decision belongs to the user and is a hard gate.** The first
+version of this spec briefed it on diff-content counts alone, which understated
+it badly. Measured at HEAD:
 
-1. *Accept the exposure.* The hostname and email are the author's own and
-   arguably already public. The SSH target names a shared Forge box by IP.
-2. *Rewrite history* with `git-filter-repo` before flipping public. Every SHA
-   changes, which is cheap now and expensive after anyone clones or forks.
-3. *Squash to a fresh root commit.* Cleanest surface, discards the development
-   record entirely — including the defect ledger that is arguably the most
-   interesting thing about the project.
+- **Commit metadata, which no diff grep reaches.** 193 commits are authored by
+  the author's personal email; 9 by `clawdbot@openclaw.ai`; and 23 authored /
+  24 committed by `root@` the **current production VPS's fully-qualified
+  hostname** — confirmed by `hostname -f` on this machine. Publishing history
+  publishes that FQDN in metadata.
+- **Diff content.** 16 commits touch the old deployment hostname, 3 the
+  `forge@<ip>` SSH target, 5 the personal email — including the redaction
+  commits themselves, whose removal diffs contain the strings.
+
+Three options, with the trade-off stated rather than a recommendation smuggled
+in as a default:
+
+1. *Accept the exposure.* The email and old hostname are the author's own and
+   arguably already public. The production VPS hostname in metadata is the part
+   least likely to have been considered.
+2. *Rewrite history* with `git-filter-repo`, including a **mailmap pass** for
+   the metadata identities — a content-only filter leaves all three untouched.
+3. *Squash to a fresh root commit.* Discards the development record, including
+   the defect ledger that is arguably the most interesting thing here.
+
+**Options 2 and 3 do not achieve their stated outcome on this repository.**
+It has merged pull requests (#10, #14, #15) and the remote currently exposes 15
+`refs/pull/*` refs. GitHub keeps those alive independently of branch history,
+so a local rewrite force-pushed to the existing remote leaves every old commit
+fetchable through the pull-request refs and the API. Achieving a genuinely
+clean public surface requires **publishing to a fresh repository**, or asking
+GitHub support to purge the refs. Anyone choosing option 2 or 3 without that
+step gets the cost and not the benefit.
 
 No implementation work in this piece touches history. The decision is recorded
 here so that flipping public without making it is a visible omission rather
 than an oversight.
+
+## The public web root
+
+`public/` holds four tracked HTML files — `sample_landing.html`,
+`sample_palace.html`, `sample_wiki.html`, `design_system.html` — served
+verbatim by the web server on every install. `sample_landing.html` is a frozen
+copy of the landing page carrying the same falsehoods being corrected in the
+Blade template: BM25, reciprocal-rank fusion, stdio transport, the allow-list
+and telemetry claims, "Mnemon HQ".
+
+Correcting `resources/views/landing/index.blade.php` while shipping an
+uncorrected duplicate one URL away would defeat the entire pass. **These four
+files are deleted.** They are design mock-ups that predate the real
+implementation; nothing links to them from the application, and the live pages
+supersede them.
+
+**Every public page phones Google while the page declares it does not.**
+`public/styles/mnemon.css:6` opens with an `@import` of
+`fonts.googleapis.com`, and `resources/views/layouts/mnemon.blade.php:10` loads
+that stylesheet on the landing, wiki and palace pages. The landing page's own
+spec sheet says "Zero egress", and its footer says "No telemetry, no analytics,
+no phone-home" — while rendering those words requires the visitor's browser to
+call Google on every view.
+
+This is the single easiest falsehood for the Sunday-afternoon auditor the page
+invites to find, needing only DevTools. Either self-host the three families, or
+drop the claim. Self-hosting is preferred: the claim is worth more than the
+convenience, and it is the only option that makes the sentence true.
 
 ## The correction list
 
@@ -186,6 +253,30 @@ process language in a public document.
 to run `passport:client --personal` "until it's fixed". D17 was fixed in
 `13b2ec2`.
 
+**More on README.md**: `:287` claims "the MCP layer is read+append only —
+agents can't delete or modify existing drawers, by design". `ContextSetTool`
+runs `Drawer::whereIn('id', $sources)->update(['tier' => 'consolidated'])` — an
+MCP tool modifying existing drawers, and changing what tier-filtered searches
+return.
+
+**The contact section** promises "We read every note" and "Replies arrive from
+a real person, not a queue". On a default install `MNEMON_CONTACT_TO` is empty
+(the D14 fix) and there is **no Filament resource for `contact_submissions`** —
+so a visitor's note lands in a table no UI displays and is mailed to nobody.
+Either add the admin surface or say what actually happens. Separately, the
+section ships the upstream author's GitHub identity and a "we" voice onto every
+self-hoster's own landing page; it should address the operator's readers, not
+this project's.
+
+**`docs/USERGUIDE.md:591`** documents `php artisan mnemon:auto-lint --dry-run`.
+`AutoLintCommand`'s signature has no such option and artisan throws.
+
+**`composer.json`** still identifies the project as `"name": "laravel/laravel"`
+with the description "The skeleton application for the Laravel framework." The
+spec cites this file as evidence *against* the landing page's package claims;
+its own metadata is a claim too, and a first public release whose manifest says
+it is someone else's skeleton is a claim problem.
+
 **Cross-cutting**: the Postgres floor disagrees three ways (landing says ≥15,
 USERGUIDE says 14+, compose ships pg17); the `v0.4 · primer` edition tag has no
 versioning scheme behind it; "© Mnemon HQ" names an organisation that does not
@@ -199,7 +290,20 @@ disprove.
 
 The record lives at `docs/design/claim-audit.md` and **is committed**, which
 makes it itself a public document subject to the same rules — every row must
-carry evidence a reader can re-run.
+carry evidence a reader can re-run, and it must not quote a value it is telling
+the project to remove.
+
+**The universe of documents under audit is enumerated, because the first pass's
+failure was scope rather than method.** It is: the landing page Blade template
+and every Blade view it includes; `README.md`; `docs/USERGUIDE.md`;
+`CONTRIBUTING.md`; `benchmark/README.md`; `docs/OPENCLAW-INTEGRATION.md`;
+`AGENTS.md`; `CLAUDE.md`; everything remaining under `public/` after the
+deletions above; `composer.json` and `package.json` metadata; and the
+user-visible strings in the Filament admin panel, artisan command
+descriptions, and route names. The specs moved to `docs/design/` are dated
+design rationale and are **out** of the audit — but each gains a header stating
+the date it describes and that it is not maintained as current documentation,
+so a reader cannot mistake one for a description of today's system.
 
 Rules, extended after the first pass's failure mode:
 
@@ -240,9 +344,12 @@ follow-up.
 
 ## Hard requirements before the repository goes public
 
-1. `198.51.100.10` appears nowhere in the tracked tree.
-2. The wiki wing-isolation limitation is stated plainly in `README.md`, and the
-   three false guarantees are corrected.
+1. The shared-server IPv4 address currently in `docs/FRD.md` and
+   `docs/IMPLEMENTATION-PLAN.md` appears nowhere in the tracked tree —
+   including in this spec and in the claim audit.
+2. The wiki wing-isolation limitation is stated plainly in `README.md`, naming
+   every exposed channel including the automatic `recall` path, and the three
+   false guarantees are corrected.
 3. Every internal link resolves.
 4. The claim audit is complete and committed.
 5. The GitHub OAuth token in the `origin` remote is rotated (carried from the

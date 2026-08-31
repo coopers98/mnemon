@@ -67,7 +67,7 @@ class WikiSearchService
         // fall through to the substring primitive — see searchTerms().
         $useTsvector = $this->isPostgres() && ! $literal;
 
-        $fragments = $this->matchFragments('wiki_pages.content', $terms, $useTsvector);
+        $fragments = $this->matchFragments('wiki_pages.content', $terms, $useTsvector, 'wiki_pages.content_tsv');
 
         $rows = $this->baseQuery($type)
             ->selectRaw("

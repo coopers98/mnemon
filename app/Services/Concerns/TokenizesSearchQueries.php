@@ -193,14 +193,25 @@ trait TokenizesSearchQueries
      * @param  array<int, string>  $terms
      * @return array{score: string, match: string, bindings: array<int, string>}
      */
-    protected function matchFragments(string $column, array $terms, bool $useTsvector): array
+    /**
+     * @param  string|null  $tsvColumn  Stored tsvector column to match against.
+     *                                  Passing null falls back to computing
+     *                                  to_tsvector() inline, which is the D12
+     *                                  defect: on a 24k-drawer corpus that
+     *                                  re-tokenised every candidate row once
+     *                                  per term and took 31s, exceeding PHP's
+     *                                  execution limit. Callers on PostgreSQL
+     *                                  should always pass the stored column.
+     */
+    protected function matchFragments(string $column, array $terms, bool $useTsvector, ?string $tsvColumn = null): array
     {
         $conditions = [];
         $bindings = [];
 
         foreach ($terms as $term) {
             if ($useTsvector) {
-                $conditions[] = "to_tsvector('english', {$column}) @@ plainto_tsquery('english', ?)";
+                $matchExpr = $tsvColumn ?? "to_tsvector('english', {$column})";
+                $conditions[] = "{$matchExpr} @@ plainto_tsquery('english', ?)";
                 $bindings[] = $term;
             } else {
                 $conditions[] = "LOWER({$column}) LIKE ? ESCAPE '".self::LIKE_ESCAPE."'";

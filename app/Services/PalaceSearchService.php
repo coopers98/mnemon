@@ -149,6 +149,7 @@ class PalaceSearchService
             'drawers.content',
             $terms,
             $this->isPostgres() && ! $literal,
+            'drawers.content_tsv',
         );
 
         $rows = $this->baseQuery($wing, $room, $tier)

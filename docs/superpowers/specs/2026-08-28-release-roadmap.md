@@ -274,21 +274,37 @@ one to 32 ms, because the vector is never recomputed. That is a schema change
 with a table rewrite and roughly a doubling of text storage, so it is **open**
 rather than done here.
 
-### D12 — full-text search is a sequential scan on PostgreSQL
+### D12 — full-text scoring re-tokenised every candidate row — FIXED
 
-Surfaced while fixing D11 and measured against a live `pgvector/pgvector:pg17`
-container at 50k rows. A functional GIN index on `to_tsvector('english', content)`
-was added, and **the planner correctly declines it** for the unselective queries
-`recall` issues — the scan stays around 4.8 s. A *stored generated* `tsvector`
-column measures roughly **47 ms**, about 100x faster, because the expression is
-materialised rather than recomputed per row.
+**Status: fixed** on 2026-08-31. **The original diagnosis in this entry was
+wrong, and wrong in a way that would have cost the next person their time:** it
+said full-text search was a sequential scan on PostgreSQL. It was not. The GIN
+expression index was being used and was fast — on a 23,855-drawer corpus the
+two bitmap index scans cost about 4ms together and produced 1,405 candidate
+rows in 102ms.
 
-That is a schema change (a generated column plus an index on it, and a decision
-about whether the same applies to `drawers` and `wiki_pages` alike), so it is
-recorded rather than rushed. Note this is **not** a regression introduced by
-D11 — the pre-D11 query was also a seq scan at a comparable cost. But `recall`
-runs on every user prompt through the Claude Code hooks, so it is the hot path
-in the product.
+The cost was in the `ORDER BY`. Scoring recomputed
+`to_tsvector('english', content)` once per query term for every candidate, on
+documents up to 30,000 characters. Isolated by running the identical `WHERE`
+ordered by `id` instead of by score: **31,541ms with the scoring, 2,936ms
+without it.**
+
+This was not a future scaling concern. PHP's execution limit is 30 seconds, so
+every search against a corpus that size **failed outright** with
+`Maximum execution time of 30 seconds exceeded`. It was found by the benchmark
+harness — the first thing to put a production-sized corpus through the system.
+
+Fixed by adding a `content_tsv` column to `drawers` and `wiki_pages`, generated
+always as `to_tsvector('english', coalesce(content, ''))` and stored, with the
+GIN index moved onto it and the expression index dropped. Both the match and
+the score now read a value computed once at write time.
+
+Measured on the same corpus after the change: **50ms**, against 31,541ms
+before — a 627x improvement, with the same rows returned.
+
+Note for operators: adding a stored generated column rewrites the table, so on
+a large existing corpus this migration takes time and needs room for a second
+copy.
 
 ### D13 — wiki and drawer confidences are not comparable
 

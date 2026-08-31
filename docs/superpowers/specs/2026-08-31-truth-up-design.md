@@ -294,8 +294,17 @@ carry evidence a reader can re-run, and it must not quote a value it is telling
 the project to remove.
 
 **The universe of documents under audit is enumerated, because the first pass's
-failure was scope rather than method.** It is: the landing page Blade template
-and every Blade view it includes; `README.md`; `docs/USERGUIDE.md`;
+failure was scope rather than method.** It is: **every Blade view carrying user-visible prose** — not only the landing
+page but the authenticated application, which repeats the same two claim
+classes. `resources/views/palace/drawer.blade.php:63-64` says "The contents
+below are byte-perfect; nothing has been rewritten", the same sentence being
+deleted from the landing page and false for the same reason.
+`resources/views/mcp/authorize.blade.php:65` says "Choose which wings this
+agent can see" — the soft form of the isolation overpromise, shown at the exact
+moment the user grants the token, which is the worst possible placement for it.
+`resources/views/wiki/history.blade.php:31` describes "a sealed snapshot — a
+content hash that can be replayed against its source drawers". Then:
+`README.md`; `docs/USERGUIDE.md`;
 `CONTRIBUTING.md`; `benchmark/README.md`; `docs/OPENCLAW-INTEGRATION.md`;
 `AGENTS.md`; `CLAUDE.md`; everything remaining under `public/` after the
 deletions above; `composer.json` and `package.json` metadata; and the

@@ -32,6 +32,7 @@ Thumbs.db
 # Benchmark data and output — setup.sh re-downloads the dataset on demand
 /benchmark/data/
 /benchmark/results/
+/benchmark/results-*/
 /benchmark/state/
 __pycache__/
 *.pyc

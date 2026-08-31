@@ -35,7 +35,12 @@ fi
 # bare "No application encryption key has been specified".
 # Writing it into the container's own .env (ephemeral, rebuilt from the
 # persisted key on every boot) is what makes exec'd artisan commands work.
-if [ -n "${APP_KEY}" ]; then
+#
+# Called AFTER the key is known. On a first boot there is no persisted key yet
+# — it is generated further down — so calling this only here would write
+# nothing on precisely the boot that matters.
+persist_env_key() {
+    [ -n "${APP_KEY:-}" ] || return 0
     touch .env
     chmod 600 .env
     if grep -q '^APP_KEY=' .env 2>/dev/null; then
@@ -43,7 +48,10 @@ if [ -n "${APP_KEY}" ]; then
     else
         printf 'APP_KEY=%s\n' "${APP_KEY}" >> .env
     fi
-fi
+}
+
+# Covers every later boot, and the scheduler, where the key is already persisted.
+persist_env_key
 
 # APP_URL is resolved from DOMAIN here too, above the gate, for the same
 # reason: any container may need to generate a correct URL, not just the
@@ -134,6 +142,9 @@ if [ -z "${APP_KEY:-}" ]; then
     printf '%s\n' "${APP_KEY}" > storage/app_key
     export APP_KEY
 fi
+
+# A first boot reaches the key only here, after generation.
+persist_env_key
 
 php artisan migrate --force
 

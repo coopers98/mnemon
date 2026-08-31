@@ -560,17 +560,26 @@ hit_rate@3/@5/@10, errors (0 both legs, both runs), and the entire embedded
 column reproduced exactly across runs. Keyless hit_rate@1/MRR did not, and
 the cause was root-caused rather than shrugged off — see D19 below.
 
-**Reading that holds, corrected:** under standard recall, embeddings
-improved rank-1 placement on both conventions (hit_rate@1 0.840→0.960,
-recall@1 0.620→0.720 on run 2), but did **not** uniformly improve coverage
-at higher k — recall@10 is 1.000 keyless vs. 0.980 embedded, i.e. the
-embedded leg found *less* of the gold evidence at k=10. Question `3c1045c8`
-(gold `answer_c8cc60d6_1` and `answer_c8cc60d6_2`) is the concrete
-counter-example: keyless's top 10 retrieved both, embedded's retrieved only
-`_2`. (The previous version of this status block claimed recall@5/@10 were
-saturated for both legs and that embeddings therefore cannot find more
-evidence, only re-rank it — that claim is false on this harness's own hits
-files and has been retracted.) Treat the rank-1 gap as suggestive, not
+**Reading that holds, re-measured after D19 was fixed (2026-08-31):**
+embeddings improve where evidence *ranks*, not how much of it is found —
+hit_rate@1 0.840→0.960 (21 of 25 questions to 24), recall@1 0.620→0.720,
+MRR 0.907→0.980. From k=3 onward the legs are identical on every metric and
+no question differs between them at recall@10.
+
+The current figures are reproducible: two independent ingests of identical
+content, into separate databases with fresh volumes and 8-way concurrent
+writes, returned identical top-10 rankings for all 25 questions.
+
+This reading has been wrong twice, both times because of the measurement
+rather than the system, and both corrections are recorded rather than
+quietly overwritten. The first claimed saturation at recall@5/@10 from a
+`hit_rate` mislabelled as `recall`. The second corrected the metric and then
+claimed the embedded leg found less at k=10 (1.000 vs 0.980), naming
+`3c1045c8` as the counter-example — true of that data, and no longer true of
+this code, because the keyless 1.000 rested on a tied score resolving
+favourably. That is precisely the nondeterminism D19 describes. With the
+tie-break in place both legs score 1/2 on `3c1045c8`. The counter-example is
+withdrawn. Treat the rank-1 gap as suggestive, not
 conclusive: the Wilson 95% CI on keyless hit_rate@1 (21/25) is [0.65, 0.94],
 a width of 0.28 — a 3-question swing at n=25 is within noise. n=25 overall
 — this is a subset validation, not the published number.

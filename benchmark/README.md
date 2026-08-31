@@ -217,24 +217,25 @@ Measured against Mnemon's **palace** layer only — LongMemEval tests recall ove
 | Metric | keyless | embedded |
 |---|---|---|
 | hit_rate@1 | 0.840 | 0.960 |
-| hit_rate@3 | 0.960 | 1.000 |
+| hit_rate@3 | 1.000 | 1.000 |
 | hit_rate@5 | 1.000 | 1.000 |
 | hit_rate@10 | 1.000 | 1.000 |
 | recall@1 | 0.620 | 0.720 |
-| recall@3 | 0.900 | 0.960 |
-| recall@5 | 0.920 | 0.960 |
-| recall@10 | 1.000 | 0.980 |
-| MRR | 0.910 | 0.980 |
+| recall@3 | 0.940 | 0.960 |
+| recall@5 | 0.960 | 0.960 |
+| recall@10 | 0.980 | 0.980 |
+| MRR | 0.907 | 0.980 |
 | questions scored | 25 | 25 |
 | errors | 0 | 0 |
-| embedding driver | n/a | n/a |
+| embedding driver | none | openai (1536d) |
 ```
 
-The "embedding driver" row reads `n/a` here because these two runs predate
-I1's `brain_status()` wiring — their `hits-{tag}.jsonl` files have no
-companion `meta-{tag}.json` for `evaluate.py` to carry forward. A run
-produced with the current `retrieve.py` records this automatically (see
-Step 4).
+These figures are **reproducible**, which earlier ones were not. They were
+produced after defect D19 — full-text search ordered by score with no
+secondary key — was fixed. Two completely independent ingests of identical
+content, into separate databases with fresh volumes and 8-way concurrent
+writes, returned **identical top-10 rankings for all 25 questions**. Before
+that fix the same comparison moved keyless hit_rate@1 from 0.880 to 0.840.
 
 Two metric families are published, and they are not interchangeable.
 `hit_rate@k` is "did *any* gold session appear in the top k"; `recall@k` is
@@ -244,18 +245,28 @@ version of this harness computed only hit_rate and published it under the
 name "recall," which is why the numbers above don't match older copies of
 this table.
 
-**What this shows.** Under standard recall, embeddings improved rank-1
-placement on both conventions — hit_rate@1 went from 0.840 to 0.960 (21/25
-to 24/25 questions) and recall@1 from 0.620 to 0.720 — but did **not**
-uniformly improve coverage at higher k: recall@10 is **1.000 keyless vs.
-0.980 embedded**, i.e. the embedded leg found *less* of the gold evidence at
-k=10, not more. Concretely, question `3c1045c8` has two gold sessions
-(`answer_c8cc60d6_1`, `answer_c8cc60d6_2`); keyless's top 10 contains both,
-embedded's top 10 contains only `_2`. (An earlier version of this section
-claimed recall@5/@10 were saturated for both legs and concluded embeddings
-"only re-rank" and cannot find more evidence — that claim is false on this
-harness's own hits files, `3c1045c8` above is the counter-example, and it
-has been retracted.)
+**What this shows.** Embeddings improve where the evidence *ranks*, and not
+how much of it is found. hit_rate@1 goes from 0.840 to 0.960 (21 of 25
+questions to 24), recall@1 from 0.620 to 0.720, and MRR from 0.907 to 0.980.
+From k=3 onward the two legs are identical on every metric, and **no
+question differs between them at recall@10**.
+
+This section has been wrong twice, in opposite directions, and both errors
+are worth knowing about because they were caused by the measurement rather
+than by the system.
+
+The first version claimed saturation at recall@5/@10 and concluded
+embeddings "only re-rank". The reasoning was invalid: it read a saturated
+`hit_rate` under the label `recall`, which hides everything about questions
+with more than one gold session.
+
+The second version corrected the metric and then claimed the embedded leg
+found *less* evidence at k=10 — 1.000 keyless against 0.980 — naming
+question `3c1045c8` as the counter-example. That was true of the data at the
+time and is no longer true of this code. The keyless 1.000 depended on a
+tied score resolving favourably, which is exactly the nondeterminism D19
+describes. With the tie-break in place both legs score 1/2 on `3c1045c8` and
+0.980 at recall@10. The counter-example is withdrawn.
 
 Treat the rank-1 gap as suggestive, not conclusive: the Wilson 95%
 confidence interval on keyless hit_rate@1 (21/25) is **[0.65, 0.94]**, a

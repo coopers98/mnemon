@@ -288,6 +288,36 @@ class MainTest(unittest.TestCase):
         self.assertEqual(1.0, metrics["by_retrieval"]["hit"]["accuracy"])
         self.assertEqual(0.0, metrics["by_retrieval"]["miss"]["accuracy"])
 
+    def test_k_and_model_are_carried_in_from_qa_meta(self):
+        # Mirrors evaluate.py's embedding-driver row: `k`/`model` live in
+        # qa_run.py's qa-meta-{tag}.json companion file, not in the answer
+        # rows, so a report reading only qa-metrics-{tag}.json still needs
+        # this stage to have carried them across.
+        self._write("answers-x.jsonl", [answer_row("1")])
+        self._write("verdicts-x.jsonl", [verdict_row("1", True, True)])
+        (config.RESULTS_DIR / "qa-meta-x.json").write_text(
+            json.dumps({"k": 5, "model": "gpt-4o"})
+        )
+        with patch.object(sys, "argv", ["qa_evaluate.py", "--tag", "x"]):
+            code = qa_evaluate.main()
+        self.assertEqual(0, code)
+        metrics = json.loads((config.RESULTS_DIR / "qa-metrics-x.json").read_text())
+        self.assertEqual(5, metrics["k"])
+        self.assertEqual("gpt-4o", metrics["model"])
+
+    def test_missing_qa_meta_renders_as_none_not_a_guess(self):
+        # A run predating qa_run.py's meta file (or one whose meta write was
+        # skipped) must show up as "unknown" rather than as a plausible-
+        # looking value nobody actually measured.
+        self._write("answers-x.jsonl", [answer_row("1")])
+        self._write("verdicts-x.jsonl", [verdict_row("1", True, True)])
+        with patch.object(sys, "argv", ["qa_evaluate.py", "--tag", "x"]):
+            code = qa_evaluate.main()
+        self.assertEqual(0, code)
+        metrics = json.loads((config.RESULTS_DIR / "qa-metrics-x.json").read_text())
+        self.assertIsNone(metrics["k"])
+        self.assertIsNone(metrics["model"])
+
     def test_nothing_scoreable_exits_nonzero(self):
         # A run whose only answer errored, judged or not, has nothing this
         # stage can score -- the exit code must say so, not report 0/0 as if

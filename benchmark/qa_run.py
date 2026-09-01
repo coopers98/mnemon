@@ -33,6 +33,22 @@ PRICING = {
 RETRIEVAL_ERROR_PREFIX = "retrieval error: "
 
 
+def _write_run_meta(tag: str, k: int, model: str) -> None:
+    """Record the reader configuration that actually produced this run.
+
+    Mirrors retrieve.py's `_write_run_meta` / `meta-{tag}.json`: neither `k`
+    nor the model name is stored anywhere in `answers-{tag}.jsonl` itself, so
+    without this file report.py would have no honest source for "the model
+    and K used" other than hardcoding a value that could silently drift from
+    what a later invocation actually passed. Written unconditionally, before
+    the resumability check, so a fully-resumed run (zero API calls) still
+    refreshes this file rather than leaving it stale or absent.
+    """
+    path = config.RESULTS_DIR / f"qa-meta-{tag}.json"
+    config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"k": k, "model": model}, indent=2))
+
+
 def answered(tag: str) -> set[str]:
     """Question ids that a resumed run should not process again.
 
@@ -138,6 +154,8 @@ def main() -> int:
     except FileNotFoundError as exc:
         print(f"[qa_run] no such file: {exc}", file=sys.stderr)
         return 1
+
+    _write_run_meta(args.tag, args.k, config.QA_MODEL)
 
     wanted = None
     if args.subset:

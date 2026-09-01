@@ -180,6 +180,23 @@ def score_rows(joined: list[dict]) -> dict:
     return out
 
 
+def _load_run_meta(tag: str) -> dict | None:
+    """Companion metadata qa_run.py writes alongside `answers-{tag}.jsonl`.
+
+    Mirrors evaluate.py's `_load_run_meta` for `meta-{tag}.json`: `k` and
+    `model` are recorded there, not in the answers themselves, so a report
+    built from an older run (before qa_run.py wrote this file) sees an
+    absent file rather than a wrong guess.
+    """
+    path = config.RESULTS_DIR / f"qa-meta-{tag}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
 def _load_jsonl(path: Path) -> tuple[dict[str, dict], list[str]]:
     """Rows keyed by question_id, plus any ids that appeared more than once.
 
@@ -238,6 +255,10 @@ def main() -> int:
     metrics["duplicate_answer_ids"] = sorted(set(answer_dupes))
     metrics["duplicate_verdict_ids"] = sorted(set(verdict_dupes))
 
+    run_meta = _load_run_meta(args.tag)
+    metrics["k"] = (run_meta or {}).get("k")
+    metrics["model"] = (run_meta or {}).get("model")
+
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = config.RESULTS_DIR / f"qa-metrics-{args.tag}.json"
     out_path.write_text(json.dumps(metrics, indent=2))
@@ -256,6 +277,7 @@ def main() -> int:
     print(f"  accuracy (verdict_a alone): {fmt(metrics['accuracy_verdict_a'])}")
     print(f"  accuracy (verdict_b alone): {fmt(metrics['accuracy_verdict_b'])}")
     print(f"  judge disagreement rate: {fmt(metrics['disagreement_rate'])}")
+    print(f"  model={metrics['model'] or 'unknown'} k={metrics['k'] if metrics['k'] is not None else 'unknown'}")
     print("  by retrieval:")
     print(f"    hit  (n={metrics['by_retrieval']['hit']['n']}): "
           f"{fmt(metrics['by_retrieval']['hit']['accuracy'])}")

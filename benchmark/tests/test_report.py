@@ -1,6 +1,13 @@
+import json
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from report import render
+import config
+import report
+from report import render, render_qa
 
 KEYLESS = {
     "total": 25, "scored": 25, "errors": 0,
@@ -138,6 +145,111 @@ class ColumnAttributionTest(unittest.TestCase):
     def test_mrr_is_attributed_per_column_too(self):
         out = render({"keyless": KEYLESS, "embedded": EMBEDDED}, ks=[10])
         self.assertIn("| MRR | 0.250 | 0.550 |", out)
+
+
+QA_KEYLESS = {
+    "scored": 500, "answer_errors": 0, "judge_errors": 0,
+    "accuracy": 0.557, "accuracy_verdict_a": 0.558, "accuracy_verdict_b": 0.556,
+    "disagreement_rate": 0.01,
+    "by_retrieval": {"hit": {"n": 455, "accuracy": 0.610}, "miss": {"n": 45, "accuracy": 0.022}},
+    "model": "gpt-4o", "k": 5,
+}
+QA_EMBEDDED = {
+    "scored": 500, "answer_errors": 0, "judge_errors": 0,
+    "accuracy": 0.627, "accuracy_verdict_a": 0.626, "accuracy_verdict_b": 0.628,
+    "disagreement_rate": 0.002,
+    "by_retrieval": {"hit": {"n": 489, "accuracy": 0.637}, "miss": {"n": 11, "accuracy": 0.182}},
+    "model": "gpt-4o", "k": 5,
+}
+
+
+class RenderQaTest(unittest.TestCase):
+    """render_qa mirrors render's own guarantees (both tags shown, values
+    attributed to the right column, missing data is n/a not 0) for the QA
+    section, which is deliberately a separate function so this section can
+    change without touching RenderTest's pinned retrieval-table output."""
+
+    def test_both_tags_and_accuracy_appear(self):
+        out = render_qa({"keyless": QA_KEYLESS, "embedded": QA_EMBEDDED})
+        self.assertIn("keyless", out)
+        self.assertIn("embedded", out)
+        self.assertIn("| accuracy | 0.557 | 0.627 |", out)
+
+    def test_verdict_alone_figures_are_both_present(self):
+        out = render_qa({"keyless": QA_KEYLESS, "embedded": QA_EMBEDDED})
+        self.assertIn("| accuracy (verdict_a alone) | 0.558 | 0.626 |", out)
+        self.assertIn("| accuracy (verdict_b alone) | 0.556 | 0.628 |", out)
+
+    def test_judge_disagreement_rate_is_shown(self):
+        out = render_qa({"keyless": QA_KEYLESS, "embedded": QA_EMBEDDED})
+        self.assertIn("| judge disagreement rate | 0.010 | 0.002 |", out)
+
+    def test_conditional_split_by_retrieval_hit_is_shown(self):
+        out = render_qa({"keyless": QA_KEYLESS, "embedded": QA_EMBEDDED})
+        self.assertIn("| accuracy | retrieval_hit=True | 0.610 | 0.637 |", out)
+        self.assertIn("| n (retrieval_hit=True) | 455 | 489 |", out)
+        self.assertIn("| accuracy | retrieval_hit=False | 0.022 | 0.182 |", out)
+        self.assertIn("| n (retrieval_hit=False) | 45 | 11 |", out)
+
+    def test_model_and_k_are_shown(self):
+        out = render_qa({"keyless": QA_KEYLESS, "embedded": QA_EMBEDDED})
+        self.assertIn("| model | gpt-4o | gpt-4o |", out)
+        self.assertIn("| k | 5 | 5 |", out)
+
+    def test_missing_model_or_k_renders_as_na_not_a_guess(self):
+        incomplete = dict(QA_KEYLESS, model=None, k=None)
+        out = render_qa({"keyless": incomplete})
+        self.assertIn("| model | n/a |", out)
+        self.assertIn("| k | n/a |", out)
+
+    def test_column_attribution_survives_tag_order(self):
+        out = render_qa({"embedded": QA_EMBEDDED, "keyless": QA_KEYLESS})
+        self.assertIn("| accuracy | 0.627 | 0.557 |", out)
+
+    def test_qa_caveat_mentions_the_pooling_rule(self):
+        out = render_qa({"keyless": QA_KEYLESS})
+        self.assertIn("0.5", out)
+
+
+class MainRendersQaSectionTest(unittest.TestCase):
+    """Drives report.main() end to end so a wiring mistake -- wrong filename,
+    forgetting to call render_qa, or overwriting instead of appending -- shows
+    up as a red test rather than only in render_qa's own unit tests. Confirms
+    the QA section is additive: the retrieval table's own content still
+    appears unchanged alongside it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._orig = config.RESULTS_DIR
+        config.RESULTS_DIR = Path(self.tmp.name)
+
+    def tearDown(self):
+        config.RESULTS_DIR = self._orig
+        self.tmp.cleanup()
+
+    def _write(self, name, obj):
+        (config.RESULTS_DIR / name).write_text(json.dumps(obj))
+
+    def test_qa_section_appended_when_qa_metrics_exist(self):
+        self._write("metrics-x.json", KEYLESS)
+        self._write("qa-metrics-x.json", QA_KEYLESS)
+        with patch.object(sys, "argv", ["report.py", "--tags", "x", "--k", "10"]):
+            code = report.main()
+        self.assertEqual(0, code)
+        out = (config.RESULTS_DIR / "report.md").read_text()
+        self.assertIn("LongMemEval-S — retrieval", out)
+        self.assertIn("LongMemEval-S — QA accuracy", out)
+        self.assertIn("| accuracy | 0.557 |", out)
+        # the pre-existing retrieval table content must still be there, unmoved
+        self.assertIn("| hit_rate@10 | 0.600 |", out)
+
+    def test_no_qa_section_when_qa_metrics_absent(self):
+        self._write("metrics-x.json", KEYLESS)
+        with patch.object(sys, "argv", ["report.py", "--tags", "x", "--k", "10"]):
+            code = report.main()
+        self.assertEqual(0, code)
+        out = (config.RESULTS_DIR / "report.md").read_text()
+        self.assertNotIn("QA accuracy", out)
 
 
 if __name__ == "__main__":

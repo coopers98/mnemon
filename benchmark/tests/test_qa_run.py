@@ -110,3 +110,50 @@ class QaRunTest(unittest.TestCase):
         self.assertIsNone(out["answer"])
         self.assertIsNotNone(out["error"])
         self.assertEqual(0, client.calls, "an empty context must never be sent to the reader")
+
+
+class TerminalVersusTransientErrorTest(unittest.TestCase):
+    """A resumed run must retry what can succeed and not what cannot.
+
+    A reader-side error is transient — a rate limit or a 5xx deserves another
+    attempt. A retrieval error is a permanent fact about a static hits file:
+    this stage never re-runs retrieval, so rerunning cannot turn it into an
+    answer. Treating them alike appended a duplicate row on every resume, and
+    Task 5 scores that file assuming one row per question.
+    """
+
+    def setUp(self):
+        import tempfile, pathlib
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig = config.RESULTS_DIR
+        config.RESULTS_DIR = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        config.RESULTS_DIR = self.orig
+        self.tmp.cleanup()
+
+    def _write(self, rows):
+        p = config.RESULTS_DIR / "answers-t.jsonl"
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    def test_a_retrieval_error_counts_as_done(self):
+        self._write([{"question_id": "q1", "error": "retrieval error: denied"}])
+        self.assertEqual({"q1"}, qa_run.answered("t"),
+                         "rerunning cannot fix it, so it must not be reprocessed")
+
+    def test_a_reader_error_is_still_retried(self):
+        self._write([{"question_id": "q1", "error": "boom"}])
+        self.assertEqual(set(), qa_run.answered("t"),
+                         "a transient reader failure deserves another attempt")
+
+    def test_a_clean_answer_still_counts_as_done(self):
+        self._write([{"question_id": "q1", "error": None}])
+        self.assertEqual({"q1"}, qa_run.answered("t"))
+
+    def test_a_mixed_file_separates_the_two(self):
+        self._write([
+            {"question_id": "a", "error": None},
+            {"question_id": "b", "error": "retrieval error: denied"},
+            {"question_id": "c", "error": "rate limited"},
+        ])
+        self.assertEqual({"a", "b"}, qa_run.answered("t"))

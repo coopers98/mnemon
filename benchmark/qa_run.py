@@ -30,12 +30,23 @@ PRICING = {
 }
 
 
-def answered(tag: str) -> set[str]:
-    """Question ids already answered without error in results/answers-{tag}.jsonl.
+RETRIEVAL_ERROR_PREFIX = "retrieval error: "
 
-    A row that errored is deliberately excluded so a resumed run retries it --
-    the same rule retrieve.py's own errors follow: an error is never a stand-in
-    for a finished result.
+
+def answered(tag: str) -> set[str]:
+    """Question ids that a resumed run should not process again.
+
+    A reader-side error is excluded, so a rerun retries it -- the same rule
+    retrieve.py follows: an error is never a stand-in for a finished result,
+    and a transient rate limit or 5xx deserves another attempt.
+
+    A *retrieval* error is different, and treating the two alike was a real
+    bug. It is a permanent fact about a static hits file: this stage never
+    re-runs retrieval, so rerunning can never turn it into an answer. Excluding
+    it meant every resumed run appended another duplicate row for the same
+    question id -- and Task 5 scores that file assuming one row per question,
+    so the duplicates would quietly skew the denominator. Terminal errors count
+    as done.
     """
     path = config.RESULTS_DIR / f"answers-{tag}.jsonl"
     if not path.exists():
@@ -45,7 +56,8 @@ def answered(tag: str) -> set[str]:
         if not line.strip():
             continue
         row = json.loads(line)
-        if not row.get("error"):
+        error = row.get("error") or ""
+        if not error or error.startswith(RETRIEVAL_ERROR_PREFIX):
             done.add(row["question_id"])
     return done
 
@@ -69,7 +81,7 @@ def answer_question(client, row: dict, record: dict, k: int) -> dict:
     }
 
     if row.get("error"):
-        out["error"] = f"retrieval error: {row['error']}"
+        out["error"] = f"{RETRIEVAL_ERROR_PREFIX}{row['error']}"
         return out
 
     sessions = sessions_for_row(row, record, k)

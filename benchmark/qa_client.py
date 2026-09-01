@@ -8,6 +8,7 @@ instead of estimating afterwards.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -67,7 +68,12 @@ class QaClient:
                 raise QaError(f"HTTP {resp.status_code} after {retries} retries")
 
             if not resp.ok:
-                raise QaError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+                # This is the one branch whose message embeds provider output.
+                # The key travels in a header and providers do not echo it, but
+                # that is their behaviour to change, not ours — redact anything
+                # key-shaped rather than trusting it.
+                body = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "<redacted>", resp.text[:300])
+                raise QaError(f"HTTP {resp.status_code}: {body}")
 
             payload = resp.json()
             try:
@@ -75,6 +81,20 @@ class QaClient:
             except (KeyError, IndexError, TypeError) as exc:
                 raise QaError(f"malformed response: {str(payload)[:300]}") from exc
 
-            return (text or "").strip(), payload.get("usage", {})
+            # `content` can be null on a real, HTTP-200 response — a
+            # content-filter refusal or a tool-call-only turn both produce it.
+            # Coercing that to "" would hand the judge a blank answer to grade,
+            # so an API refusal would be scored as a wrong answer and quietly
+            # lower the published number. It is an error, and must raise like
+            # one. The isinstance check also keeps a non-string `content` from
+            # escaping as an AttributeError that callers catching QaError would
+            # not see.
+            if not isinstance(text, str):
+                raise QaError(
+                    f"response carried no usable content (type {type(text).__name__}) — "
+                    "a refusal or a tool-call-only turn, not an answer"
+                )
+
+            return text.strip(), payload.get("usage", {})
 
         raise QaError("exhausted retries")

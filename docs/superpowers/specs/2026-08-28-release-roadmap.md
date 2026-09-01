@@ -702,10 +702,19 @@ The wiki limitation ships documented rather than fixed.
 Three things were hard requirements regardless. **D14 has landed** — the contact
 recipient is now configurable and unset by default. **The `LICENSE` file has
 also landed** — MIT, `Copyright (c) 2026 Cooper Sellers`, committed in
-`70d24d5`, present throughout this branch. One item remains open, and it is
-outside what an implementation branch can close:
+`70d24d5`, present throughout this branch. The last item — outside what an
+implementation branch could close — is now closed too:
 
-- The GitHub OAuth token embedded in the `origin` remote URL must be rotated.
+- ~~The GitHub OAuth token embedded in the `origin` remote URL must be
+  rotated.~~ **Done 2026-09-01.** The token (client id `REDACTED-CLIENT-ID`,
+  scopes `repo, admin:repo_hook, admin:public_key, user:email`) was revoked and
+  verified dead (`401` from `GET /user`). It had never been committed — no hits
+  in tracked files or history — so no history rewrite was needed. `origin` now
+  uses a credential-free URL and authenticates through
+  `credential."https://github.com".helper = !gh auth git-credential`, backed by
+  the `gh` CLI's fine-grained PAT; push access was verified by creating and
+  deleting a remote ref. Residual copies in local Claude Code transcripts were
+  redacted.
 
 Before flipping the repository public, grep the full tracked tree — not just
 `app/` — for personal addresses, tokens, and internal hostnames. This document

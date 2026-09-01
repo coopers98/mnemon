@@ -56,14 +56,21 @@ def sessions_for_row(row: dict, record: dict, k: int) -> list[tuple[str, str]]:
         by_id[sid] = sessions[index] if index < len(sessions) else []
         date_by_id[sid] = dates[index] if index < len(dates) else None
 
+    # Filter before truncating, not after. Slicing to k first means a retrieved
+    # id that does not resolve to a session burns one of the k slots, and the
+    # reader silently gets a smaller context than the run claims to be
+    # measuring — with nothing in the output to say so. k is a budget of real
+    # excerpts, not of rank positions.
     out: list[tuple[str, str]] = []
-    for sid in row.get("retrieved", [])[:k]:
+    for sid in row.get("retrieved", []):
         session = by_id.get(sid)
         if session is None:
             continue
         date = date_by_id.get(sid)
         header = f"[{date}]" if date else "[date unknown]"
         out.append((sid, f"{header}\n{session_text(session)}"))
+        if len(out) >= k:
+            break
     return out
 
 

@@ -101,3 +101,31 @@ class JudgePromptTest(unittest.TestCase):
     def test_asks_for_a_single_token_verdict(self):
         msgs = build_judge_prompt("q", "g", "a")
         self.assertIn("CORRECT", " ".join(m["content"] for m in msgs))
+
+
+class UnresolvableIdBudgetTest(unittest.TestCase):
+    """An unresolvable id must not consume one of the k slots.
+
+    Slicing to k before filtering means a phantom id in the top-k window
+    silently shrinks the reader's context below what the run reports, and
+    nothing in the output shows it. Fails if sessions_for_row goes back to
+    slicing `retrieved[:k]` before dropping ids absent from the record.
+    """
+
+    def test_a_phantom_id_does_not_shrink_the_context(self):
+        row = {"question_id": "q1", "retrieved": ["ghost", "s1", "s2", "s3"]}
+        got = sessions_for_row(row, RECORD, k=2)
+        self.assertEqual(["s1", "s2"], [sid for sid, _ in got],
+                         "k should buy two real excerpts, not one plus a hole")
+
+    def test_several_phantoms_still_fill_the_budget(self):
+        row = {"question_id": "q1", "retrieved": ["g1", "g2", "s1", "g3", "s2"]}
+        self.assertEqual(["s1", "s2"], [sid for sid, _ in sessions_for_row(row, RECORD, k=2)])
+
+    def test_the_budget_still_caps_when_everything_resolves(self):
+        row = {"question_id": "q1", "retrieved": ["s1", "s2", "s3"]}
+        self.assertEqual(2, len(sessions_for_row(row, RECORD, k=2)))
+
+    def test_fewer_resolvable_than_k_returns_what_exists(self):
+        row = {"question_id": "q1", "retrieved": ["s1", "ghost"]}
+        self.assertEqual(["s1"], [sid for sid, _ in sessions_for_row(row, RECORD, k=5)])

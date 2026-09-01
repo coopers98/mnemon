@@ -943,9 +943,8 @@ See `app/Mcp/Tools/DrawerSearchTool.php` for a complete reference.
 ## Where to next
 
 - [README](../README.md) — project overview
-- [`docs/FRD.md`](FRD.md) — functional requirements (the "what" and "why")
-- [`docs/IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) — sprint history (the "how it got built")
-- [`docs/superpowers/specs/2026-04-26-mcp-rework-design.md`](superpowers/specs/2026-04-26-mcp-rework-design.md) — full MCP rework design spec
+- [`docs/design/2026-04-26-mcp-rework-design.md`](design/2026-04-26-mcp-rework-design.md) — the MCP rework design spec (dated rationale, not current documentation)
+- [`docs/design/`](design/) — the rest of the dated design rationale
 - [Filament documentation](https://filamentphp.com/docs) — for admin panel customization
 - [`laravel/mcp` documentation](https://laravel.com/docs/12.x/mcp) — for extending the MCP server
 - [`laravel/passport` documentation](https://laravel.com/docs/passport) — for OAuth customization

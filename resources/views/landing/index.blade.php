@@ -684,7 +684,7 @@
                 <h5>Source</h5>
                 <ul>
                     <li><a href="https://github.com/coopers98/mnemon" rel="noopener noreferrer" target="_blank">github / coopers98</a></li>
-                    <li><a href="https://github.com/coopers98/mnemon/blob/main/docs/FRD.md" rel="noopener noreferrer" target="_blank">FRD</a></li>
+                    <li><a href="https://github.com/coopers98/mnemon/blob/main/docs/USERGUIDE.md" rel="noopener noreferrer" target="_blank">User guide</a></li>
                     <li><a href="https://modelcontextprotocol.io/" rel="noopener noreferrer" target="_blank">MCP protocol</a></li>
                 </ul>
             </div>

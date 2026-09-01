@@ -1,5 +1,9 @@
 # MCP Rework — Design Spec
 
+> **Dated design rationale, 2026-04-26.** This document records what was designed and
+> believed at that date. It is not maintained as current documentation, and it may
+> describe behaviour the code no longer has. Check the code before relying on it.
+
 **Date:** 2026-04-26
 **Status:** Approved (ready for implementation plan)
 **Author:** Cooper + Claude (brainstorm)

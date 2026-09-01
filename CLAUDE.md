@@ -60,7 +60,7 @@ Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` pac
 
 Access tokens expire after 1 hour; refresh tokens after 90 days.
 
-See full spec at `docs/superpowers/specs/2026-04-26-mcp-rework-design.md`.
+See full spec at `docs/design/2026-04-26-mcp-rework-design.md` (dated rationale, not current documentation).
 
 ### OAuth Clients & Tokens
 

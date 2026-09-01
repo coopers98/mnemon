@@ -253,7 +253,7 @@ All sprints complete. 440 passing, 7 skipped on SQLite; CI runs the same suite a
 - **Tier 3 — Scale & Advanced.** Knowledge graph (entities, typed relationships, graph traversal via `wiki_graph`), revision history queries via `wiki_history`.
 - **Wiki Frontend.** Browsable wiki at `/wiki`, palace browser at `/palace`, landing page at `/`. Every `/wiki` and `/palace` route requires login; only the landing page at `/` is public.
 
-See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the full breakdown of each sprint.
+The dated design documents behind these tiers are in [`docs/design/`](docs/design/); they record what was intended at the time and are not maintained as current documentation.
 
 ---
 
@@ -297,9 +297,9 @@ This is a working personal tool, not a finished product. Honest constraints toda
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — running the test suite (SQLite and Postgres), formatting, the Docker smoke test
 - [`CLAUDE.md`](CLAUDE.md) — agent / contributor conventions (canonical for AI work)
 - [`AGENTS.md`](AGENTS.md) — pointer for non-Claude agents
-- [`docs/FRD.md`](docs/FRD.md) — functional requirements
-- [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) — sprint plan, status, decisions
-- [`docs/discovery.md`](docs/discovery.md) — initial discovery + competitive analysis
+- [`docs/OPENCLAW-INTEGRATION.md`](docs/OPENCLAW-INTEGRATION.md) — wiring Mnemon into OpenClaw
+- [`benchmark/README.md`](benchmark/README.md) — the LongMemEval-S harness, both layers, and the measured results
+- [`docs/design/`](docs/design/) — dated design rationale, kept for history and not maintained as current documentation
 
 ---
 

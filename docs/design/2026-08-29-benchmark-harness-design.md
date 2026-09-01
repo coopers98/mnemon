@@ -1,5 +1,9 @@
 # Benchmark harness — design
 
+> **Dated design rationale, 2026-08-29.** This document records what was designed and
+> believed at that date. It is not maintained as current documentation, and it may
+> describe behaviour the code no longer has. Check the code before relying on it.
+
 **Status:** approved 2026-08-29, not yet implemented.
 **Roadmap piece:** 3 (Benchmark). Gates piece 4 (truth-up pass).
 

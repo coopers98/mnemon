@@ -1,5 +1,9 @@
 # Benchmark QA Layer Implementation Plan
 
+> **Deferred work, dated 2026-08-31.** This is a plan for work that has not
+> been done, kept because the roadmap points at it. It describes an intended
+> design, not the current system.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Measure LongMemEval-S QA accuracy — feed each question's retrieved sessions to a reader model, grade its answer against the gold answer with an LLM judge, and report accuracy split by whether retrieval actually found the evidence.

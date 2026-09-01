@@ -1,9 +1,13 @@
 # Mnemon benchmark harness
 
 A [LongMemEval-S](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
-retrieval benchmark for Mnemon's palace layer: it ingests conversational
-sessions as drawers, one wing per question, then measures whether
-`drawer_search` finds the sessions that actually contain the answer.
+benchmark for Mnemon's palace layer, in two layers of its own. Retrieval
+(§1–6): it ingests conversational sessions as drawers, one wing per
+question, then measures whether `drawer_search` finds the sessions that
+actually contain the answer. QA accuracy (§7): LongMemEval's own headline
+metric — an LLM reader answers each question from the retrieved sessions
+and an LLM judge grades it against the gold answer, split by whether
+retrieval actually found the evidence.
 
 **This measures the palace layer only.** LongMemEval tests recall over
 conversational history, which is exactly what the palace stores. The wiki's
@@ -207,6 +211,12 @@ Renders both metrics files as a markdown table to stdout and to
 a missing metric as `n/a` rather than `0.000` so an incomplete run can't be
 misread as a bad score.
 
+If `results/qa-metrics-{tag}.json` exists for a requested `--tag` (produced
+by the QA layer, §7 below), `report.py` appends a second "QA accuracy"
+section for it automatically — same command, no extra flag. A tag with only
+a retrieval run and no QA pass yet simply doesn't get that section; the
+retrieval table is unaffected either way.
+
 ### Results from this validation run (subset of 25, seed 1234)
 
 ```
@@ -272,10 +282,23 @@ Treat the rank-1 gap as suggestive, not conclusive: the Wilson 95%
 confidence interval on keyless hit_rate@1 (21/25) is **[0.65, 0.94]**, a
 width of 0.28 — wide enough that a 3-question swing at n=25 is within noise.
 Prefer "keyless found evidence for 21 of 25 questions at rank 1, embedded
-for 24" over quoting three decimal places as if they were precise. This
-says nothing about the LLM-judged QA layer LongMemEval's own headline
-metric uses, which this harness deliberately does not implement yet (see
-below).
+for 24" over quoting three decimal places as if they were precise.
+
+**This subset table is retained for its reproducibility story, not as the
+published retrieval figure.** It is also not the full story: at n=25 the
+keyless and embedded legs are identical on every metric from k=3 onward,
+which reads like "embeddings only re-rank, they don't find more evidence."
+Run against the full 500-question corpus, that conclusion doesn't hold —
+embeddings improve every metric at every depth, including recall@10
+(0.912 → 0.983). See the roadmap
+(`docs/superpowers/specs/2026-08-28-release-roadmap.md`, Piece 3) for the
+full 500-question retrieval table. The lesson: a saturated small-n subset
+can look like agreement between two configurations that a bigger run shows
+clearly apart — worth remembering before trusting any subset figure,
+including a QA one (§7 below).
+
+This subset table also says nothing about the LLM-judged QA layer
+LongMemEval's own headline metric uses — see §7, "The QA layer."
 
 ### Reproducibility
 
@@ -320,7 +343,195 @@ full A/B lands around **4.5–5 hours**, feasible overnight, at roughly
 **$1–3** of OpenAI usage. This is the number the scale decision should be
 made on — it comes from an actual timed run, not a guess.
 
-## 7. Cleanup
+## 7. The QA layer (LLM-judged answer accuracy)
+
+Retrieval says whether relevant evidence was found. It doesn't say whether
+the system produced a correct answer — that's LongMemEval's own headline
+metric, and it's a separate measurement: feed each question's retrieved
+sessions to a reader model, grade the reader's answer against the gold
+answer with an LLM judge, and report accuracy split by whether retrieval
+actually surfaced the evidence (`retrieval_hit`, computed in the reader
+stage from what the reader was actually shown at K, not from the full
+retrieved list).
+
+This layer never talks to the Mnemon server — it reads an existing
+`results/hits-{tag}.jsonl` (produced by `retrieve.py`, §3/§5 above) and
+`data/longmemeval_s_cleaned.json` directly, and calls OpenAI. No docker
+compose stack needs to be up to run it.
+
+```bash
+cd benchmark
+export OPENAI_API_KEY=sk-...   # never write this to results/ or a committed file
+
+python3 qa_run.py    --tag full-keyless  --k 5
+python3 qa_judge.py  --tag full-keyless
+python3 qa_evaluate.py --tag full-keyless
+
+python3 qa_run.py    --tag full-embedded --k 5
+python3 qa_judge.py  --tag full-embedded
+python3 qa_evaluate.py --tag full-embedded
+
+python3 report.py --tags full-keyless full-embedded
+```
+
+`--tag` must match an existing `hits-{tag}.jsonl` — this stage grades the
+retrieval already recorded, it does not re-run `retrieve.py`. Each command:
+
+- **`qa_run.py`** (the reader) — one call per question at `temperature=0`,
+  answering only from the top-`k` retrieved sessions or replying exactly
+  `NOT FOUND`. Writes `results/answers-{tag}.jsonl` and a companion
+  `results/qa-meta-{tag}.json` recording the `k` and model that actually
+  produced the run (mirroring `retrieve.py`'s `meta-{tag}.json` for the
+  embedding driver) — so a report built later reads the real invocation
+  instead of a value someone typed into documentation and forgot to update.
+- **`qa_judge.py`** (the judge) — grades each answer against the gold answer
+  **twice**, with two independent calls to the identical prompt. Not
+  redundancy for its own sake: a temperature-0 model is still not
+  bit-deterministic, and running it twice turns "we assume the judge is
+  stable" into a measured `disagreement_rate` that ships with the accuracy
+  number rather than being assumed away. Writes `results/verdicts-{tag}.jsonl`.
+- **`qa_evaluate.py`** — joins answers and verdicts by `question_id`, scores
+  only the cleanly-answered-and-judged rows, and writes
+  `results/qa-metrics-{tag}.json`. Every other outcome (a retrieval error
+  carried through from the hits file, a reader failure, a question not yet
+  judged, a judge-side failure, an orphaned verdict row with no matching
+  answer) is counted in the output rather than silently excluded, and a
+  duplicate `question_id` within either input file — which a naive resume
+  can produce — is detected, reported (`duplicate_answer_ids` /
+  `duplicate_verdict_ids`), and resolved last-row-wins rather than
+  collapsed with no trace. A prior version of this scorer collapsed
+  duplicates silently, which can flip a correct verdict to incorrect while
+  every count in the output still looks internally consistent — this run's
+  output was checked and both duplicate lists are empty.
+
+All three stages are resumable, the same discipline `ingest.py` and
+`retrieve.py` use: each writes its output file incrementally
+(`fh.flush()` per row) and skips `question_id`s already recorded, so a
+network blip or a killed process loses at most the one in-flight request. A
+*retrieval* error inherited from the hits file is treated as terminal (this
+stage never re-runs retrieval, so retrying can't fix it); a reader- or
+judge-side error is treated as transient and retried on the next invocation.
+This was exercised for real, not just asserted: the `full-keyless` reader
+run was interrupted mid-flight by a shell timeout partway through, and
+re-running the identical command picked up where it left off. The finished
+500-row `answers-full-keyless.jsonl` has zero duplicate `question_id`s
+(`duplicate_answer_ids: []` in the metrics file, independently re-checked
+line by line) — a resumed run added exactly the missing rows, not extra
+copies of ones already written.
+
+### Three facts the accuracy number depends on
+
+The headline `accuracy` figure is not interpretable without these. All
+three are recorded in the results files, not just asserted here.
+
+1. **A split judge verdict contributes 0.5 to the headline.** Each question
+   is judged twice; `accuracy` pools both calls as equally-weighted votes
+   rather than picking one call arbitrarily. A question where the two calls
+   disagree (`agreed: false`) contributes half a point, not a coin flip and
+   not a discard. This is mathematically equivalent to averaging
+   `accuracy_verdict_a` and `accuracy_verdict_b` — which is why both are
+   published alongside the headline: together with `disagreement_rate` they
+   bound how far the judge's own noise could have moved the number actually
+   reported. Without stating the pooling rule, a reader cannot reconstruct
+   the figure from `verdicts-{tag}.jsonl` themselves.
+2. **The reader is instructed to abstain rather than guess.** The reader
+   prompt says: answer only from the excerpts shown, and reply exactly `NOT
+   FOUND` if they don't contain the answer. A system whose reader guesses
+   instead scores higher on ambiguous or partially-evidenced items purely by
+   luck. This harness's figure is therefore **systematically conservative**
+   relative to such a baseline — a prompt-policy difference from a
+   guess-happy reader, not a memory-quality difference. (Concretely: one
+   question in the earlier validation run, `eaca4986`, came back `NOT FOUND`
+   with `retrieval_hit: true` — the evidence was shown, but a "two sad
+   songs" premise didn't cleanly match a transcript containing one sad song
+   followed by a romantic revision, and the reader correctly declined to
+   guess. Scored `INCORRECT`, and correctly so under this policy.)
+3. **Reader and judge are the same model** (`gpt-4o`, `config.QA_MODEL`) —
+   gpt-4o grading gpt-4o's own answers. This matches LongMemEval's published
+   methodology, which is *why* it's done this way: it's what makes this
+   figure comparable to other systems' published LongMemEval numbers.
+   Self-preference bias is a known effect in LLM-as-judge setups and points
+   **the opposite direction** from caveat 2 — toward a slightly generous
+   score. Swapping in a different judge model would trade this known, shared
+   bias for an unknown, unshared one, at the cost of the comparability that
+   is the entire reason to match LongMemEval's methodology here.
+
+### K trade-off
+
+`k=5` is the default because it's a measured trade-off, not an arbitrary
+choice. Reader context is billed on input tokens, and K controls how many
+retrieved sessions the reader sees:
+
+| K | ≈ tokens/question (measured) | ~cost / leg (500 questions) |
+|---|---|---|
+| 5 | ~17,000 (plan estimate); **14,294 measured** | ~$21 (plan estimate); **~$17.7–18.3 measured** |
+| 10 | ~32,000 (plan estimate, not run) | ~$40 (plan estimate, not run) |
+
+K=10 would feed the reader everything retrieval found, roughly doubling
+reader cost — but on the full 500-question run, retrieval's own recall@5
+vs. recall@10 differ by only **+0.080** (keyless, 0.833→0.912) and **+0.031**
+(embedded, 0.952→0.983): the second five sessions rarely add evidence and
+always add cost. K=5 was run for both legs; K=10 was not, on that basis.
+
+### Measured cost, against the plan's estimate
+
+The implementation plan estimated **~$0.037/question/leg** for the reader
+(from a 2-question live smoke test extrapolated to 500). The actual full
+500-question, both-legs run:
+
+| | reader | judge | total |
+|---|---|---|---|
+| full-keyless | $18.2567 | $0.4212 | $18.6779 |
+| full-embedded | $17.6521 | $0.4321 | $18.0842 |
+| **total** | **$35.9088** | **$0.8533** | **$36.7621** |
+
+**Actual: $36.76 against a plan estimate of ~$37 for the pair — within 1%.**
+Per-question-per-leg (reader + judge): $0.0374 (full-keyless) and $0.0362
+(full-embedded), averaging $0.0368 against the $0.037 estimate. The judge
+adds under $1 total across 2,000 judge calls (500 questions × 2 legs × 2
+calls each) — a rounding error next to the reader cost, because judge
+prompts are ~150 tokens against the reader's ~14,300.
+
+### Results (full 500-question corpus, both legs, K=5, gpt-4o)
+
+```
+## LongMemEval-S — QA accuracy (LLM-judged)
+
+| Metric | full-keyless | full-embedded |
+|---|---|---|
+| accuracy | 0.557 | 0.627 |
+| accuracy (verdict_a alone) | 0.558 | 0.626 |
+| accuracy (verdict_b alone) | 0.556 | 0.628 |
+| judge disagreement rate | 0.010 | 0.002 |
+| accuracy | retrieval_hit=True | 0.610 | 0.637 |
+| n (retrieval_hit=True) | 455 | 489 |
+| accuracy | retrieval_hit=False | 0.022 | 0.182 |
+| n (retrieval_hit=False) | 45 | 11 |
+| questions scored | 500 | 500 |
+| model | gpt-4o | gpt-4o |
+| k | 5 | 5 |
+```
+
+**The keyless/embedded pair separates on QA accuracy — 0.557 vs 0.627, a
++0.070 (12.6% relative) gap — the same direction retrieval separates on at
+n=500** (unlike the n=25 subset above, where retrieval was saturated from
+k=3 onward and looked nearly identical between legs). Judge disagreement is
+low for both (1.0% keyless, 0.2% embedded), so that gap is not judge noise.
+
+**The conditional split is the reason this layer exists.** A poor QA score
+has two different causes, and only the split tells them apart: when
+retrieval found the evidence (`retrieval_hit=True`), accuracy is 0.610
+(keyless) / 0.637 (embedded) — still well short of 1.0, meaning the reader
+itself is a real source of error even with the right sessions in hand. When
+retrieval missed (`retrieval_hit=False`), accuracy collapses to 0.022
+(keyless, 1 of 45 correct) / 0.182 (embedded, 2 of 11 correct) — almost
+entirely the abstention policy working as intended (caveat 2 above): no
+evidence shown, reader correctly says `NOT FOUND`, judge correctly scores it
+incorrect. Treat embedded's miss-group figure as thin: n=11, so it's exactly
+2 correct answers, not a stable rate — a Wilson 95% interval on 2/11 is wide
+enough that this cell shouldn't be read to two decimal places.
+
+## 8. Cleanup
 
 ```bash
 cd benchmark && python3 cleanup.py --yes
@@ -349,12 +560,13 @@ docker compose -p mnemon-bench --env-file .env.bench exec -T app php artisan tin
 cd benchmark && python3 cleanup.py --prefix "benchmark:q" --yes
 ```
 
-## What's not here yet
+## What's not here
 
-LongMemEval's own headline metric is LLM-judged QA accuracy over a generated
-answer, not retrieval recall. This harness deliberately stops at retrieval:
-it's the layer that validates the whole pipeline (wing addressing, ingestion,
-search) for zero marginal cost, and it's a prerequisite for interpreting any
-QA number the judged layer would produce. The QA layer is deferred to its
-own plan, to be picked up once a full 500-question run has produced retrieval
-figures worth building on.
+Both layers — retrieval (§1–6) and LLM-judged QA accuracy (§7) — are
+implemented, tested, and have been run against the full 500-question
+LongMemEval-S corpus. What remains out of scope, by design, is stated once
+at the top of this document rather than repeated per section: **this
+harness measures Mnemon's palace layer only.** LongMemEval exercises
+conversational recall, which is what the palace stores; the wiki's compiled
+synthesis (`wiki_pages`) is never touched by either layer, and no number
+from this harness says anything about wiki quality.

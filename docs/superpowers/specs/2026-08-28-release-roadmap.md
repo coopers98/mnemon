@@ -538,7 +538,7 @@ verified.
 |---|---|---|---|
 | ~~1~~ | ~~**Authorization & audit correctness**~~ | ~~D7, D8, D4.~~ **Done** — see the status blocks above. | — |
 | ~~2~~ | ~~**Install story**~~ | ~~Docker Compose with pgvector; keyless default embedding driver; `passport:keys` automated; `pdo_pgsql` + a PostgreSQL CI service.~~ **Done** — merged in #14. Adds `Dockerfile`, `compose.yaml`, `docker/entrypoint.sh`, `docker/Caddyfile`, `docker/smoke.sh`, a `compose` CI job that boots the real image, the Docker quickstart, and `CONTRIBUTING.md`. | — |
-| 3 | **Benchmark** | **In progress.** The LongMemEval-S retrieval harness in `benchmark/` (`dataset.py` through `cleanup.py`, `benchmark/README.md`) is complete and validated end-to-end, twice, from a clean stack on a seeded 25-question subset — see below. The QA layer (LLM-judged answer accuracy, LongMemEval's own headline metric) is deliberately deferred to its own plan; retrieval is the layer that validates the pipeline for zero marginal cost and is a prerequisite for interpreting any QA number. Remaining before this piece is done: run all 500 questions and publish the number, noting it exercises the palace layer only, not the wiki. | Piece 4 |
+| ~~3~~ | ~~**Benchmark**~~ | ~~The LongMemEval-S harness in `benchmark/`, both layers — retrieval (`dataset.py` through `cleanup.py`) and LLM-judged QA accuracy (`qa_run.py`/`qa_judge.py`/`qa_evaluate.py`).~~ **Done.** Full 500-question, both-legs run published for both layers — see below. Exercises the palace layer only, not the wiki (stated in `benchmark/README.md`). | Piece 4 |
 | 4 | **Truth-up pass** | README and landing page against the shipped product; `LICENSE` added; docs pruned and restructured; repository made public. | Piece 6 |
 | 5 | **Public demo** | Read-only demo instance. Requires a hardening pass — and no demo token may carry write access while D8 is open. | Piece 6 |
 | 6 | **Launch** | Positioning, surfaces, timing. |
@@ -626,11 +626,70 @@ plus the OpenAI re-embed and a second retrieval pass for roughly **4.5–5
 hours end to end** at an estimated **$1–3** of OpenAI usage. This is the
 number the scale decision — whether to run all 500 — should be made on.
 
-The LLM-judged QA layer (LongMemEval's own headline metric) remains
-deliberately deferred to its own plan, per the original task-8 self-review:
+The LLM-judged QA layer (LongMemEval's own headline metric) was deliberately
+deferred to its own plan at this point, per the original task-8 self-review:
 retrieval validates the whole pipeline at zero marginal cost and is a
-prerequisite for interpreting any QA number, and the scale decision belongs
-before that spend.
+prerequisite for interpreting any QA number, and the scale decision belonged
+before that spend. Both are now done — see below.
+
+### Piece 3 final — full 500-question run, both layers (2026-09-01)
+
+**Retrieval, full corpus.** The n=25 subset above turned out to be
+misleading, not merely imprecise: it showed the two legs identical from k=3
+onward, which reads as "embeddings only re-rank, they don't find more
+evidence." The full 500-question run overturns that:
+
+| Metric | keyless | embedded | delta |
+|---|---|---|---|
+| hit_rate@1 | 0.742 | 0.886 | +0.144 |
+| hit_rate@5 | 0.910 | 0.978 | +0.068 |
+| hit_rate@10 | 0.958 | 0.994 | +0.036 |
+| recall@1 | 0.461 | 0.560 | +0.099 |
+| recall@5 | 0.832 | 0.952 | +0.120 |
+| recall@10 | 0.912 | 0.983 | +0.071 |
+| MRR | 0.817 | 0.924 | +0.107 |
+
+0 errors, 0/500 identical top-10 rankings between legs. Embeddings improve
+*every* metric at *every* depth, including recall@10 — the metric that was
+saturated and legs-identical at n=25. The subset wasn't wrong on its own
+terms (it was reproducible, and D19's tie-break fix was real), it was just
+too small and too easy to show what a harder, larger sample shows plainly.
+This is the third self-correction of this measurement, and each came from
+improving the measurement — fixing the metric definition (hit_rate vs.
+recall), fixing the tie-break (D19), then running the full set — not from
+re-reasoning about the same data.
+
+**QA accuracy, full corpus, both legs (`benchmark/README.md` §7 has the full
+writeup, the three caveats a reader needs, and the conditional-split
+breakdown):**
+
+| Metric | keyless | embedded |
+|---|---|---|
+| accuracy | 0.557 | 0.627 |
+| accuracy \| retrieval_hit=True (n) | 0.610 (455) | 0.637 (489) |
+| accuracy \| retrieval_hit=False (n) | 0.022 (45) | 0.182 (11) |
+| judge disagreement rate | 1.0% | 0.2% |
+
+Model gpt-4o, K=5, both reader and judge (self-judged — see README caveat
+3). **The pair separates on QA accuracy too: 0.557 vs 0.627, +0.070 (12.6%
+relative)** — the same direction as retrieval, not a case where retrieval
+separates and QA doesn't (or vice versa). Unlike the n=25 subset, where
+retrieval barely separated from k=3 on, at n=500 *both* layers agree that
+embeddings help, and by a proportionally similar margin. The conditional
+split is the reason this layer was built: even with the right evidence in
+hand, the reader is wrong roughly 36–39% of the time (accuracy 0.610/0.637
+on `retrieval_hit=True`), so retrieval quality is not the whole story on
+where QA errors come from — but a retrieval *miss* is close to fatal for QA
+(accuracy collapses to 0.02–0.18), consistent with the reader's abstain-not-
+guess policy (README caveat 2) rather than a pipeline defect.
+
+**Spend: $36.76 actual against the plan's ~$37 estimate for the pair — within
+1%.** Reader $35.91 (full-keyless $18.26, full-embedded $17.65), judge $0.85
+total (2,000 calls, ~150 tokens each — a rounding error next to the reader's
+~14,300 tokens/question). Per-question-per-leg averaged $0.0368 against the
+plan's $0.037 estimate, which had been extrapolated from a 2-question live
+smoke test — a good validation that the smoke test's extrapolation held at
+250× the sample size.
 
 ## Gate on making the repository public
 
@@ -643,10 +702,19 @@ The wiki limitation ships documented rather than fixed.
 Three things were hard requirements regardless. **D14 has landed** — the contact
 recipient is now configurable and unset by default. **The `LICENSE` file has
 also landed** — MIT, `Copyright (c) 2026 Cooper Sellers`, committed in
-`70d24d5`, present throughout this branch. One item remains open, and it is
-outside what an implementation branch can close:
+`70d24d5`, present throughout this branch. The last item — outside what an
+implementation branch could close — is now closed too:
 
-- The GitHub OAuth token embedded in the `origin` remote URL must be rotated.
+- ~~The GitHub OAuth token embedded in the `origin` remote URL must be
+  rotated.~~ **Done 2026-09-01.** The token (client id `REDACTED-CLIENT-ID`,
+  scopes `repo, admin:repo_hook, admin:public_key, user:email`) was revoked and
+  verified dead (`401` from `GET /user`). It had never been committed — no hits
+  in tracked files or history — so no history rewrite was needed. `origin` now
+  uses a credential-free URL and authenticates through
+  `credential."https://github.com".helper = !gh auth git-credential`, backed by
+  the `gh` CLI's fine-grained PAT; push access was verified by creating and
+  deleting a remote ref. Residual copies in local Claude Code transcripts were
+  redacted.
 
 Before flipping the repository public, grep the full tracked tree — not just
 `app/` — for personal addresses, tokens, and internal hostnames. This document

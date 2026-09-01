@@ -67,8 +67,98 @@ class InstallClaudeCodeHooksTest extends TestCase
             ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok', '--force' => true])->assertExitCode(0);
 
         $settings = json_decode(File::get($this->home.'/.claude/settings.json'), true);
-        $hooks = $settings['hooks'] ?? [];
-        $entries = array_filter($hooks, fn ($h) => str_contains($h['command'] ?? '', 'mnemon-recall.sh'));
-        $this->assertCount(1, $entries);
+        $commands = $this->commandsFor($settings, 'UserPromptSubmit');
+        $this->assertCount(1, array_filter($commands, fn ($c) => str_contains($c, 'mnemon-recall.sh')));
+    }
+
+    /**
+     * Every command string registered under one hook event.
+     *
+     * @return array<int, string>
+     */
+    private function commandsFor(array $settings, string $event): array
+    {
+        $out = [];
+        foreach ($settings['hooks'][$event] ?? [] as $group) {
+            foreach ($group['hooks'] ?? [] as $hook) {
+                $out[] = $hook['command'] ?? '';
+            }
+        }
+
+        return $out;
+    }
+
+    public function test_hooks_are_registered_in_claude_code_schema(): void
+    {
+        Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);
+
+        $this->artisan('mnemon:install-claude-code-hooks',
+            ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok'])->assertExitCode(0);
+
+        $settings = json_decode(File::get($this->home.'/.claude/settings.json'), true);
+
+        // Claude Code's schema: hooks is an OBJECT keyed by event name, whose
+        // values are arrays of groups, each carrying a `hooks` list of
+        // {type: command, command: ...}. A flat list is silently ignored.
+        $this->assertIsArray($settings['hooks']);
+        $this->assertArrayNotHasKey(0, $settings['hooks'], 'hooks must be keyed by event, not a flat list');
+
+        foreach ([
+            'SessionStart' => 'mnemon-wake.sh',
+            'UserPromptSubmit' => 'mnemon-recall.sh',
+            'Stop' => 'mnemon-capture.sh',
+        ] as $event => $script) {
+            $this->assertArrayHasKey($event, $settings['hooks']);
+            $commands = $this->commandsFor($settings, $event);
+            $this->assertCount(1, array_filter($commands, fn ($c) => str_contains($c, $script)),
+                "expected exactly one $script under $event");
+
+            $type = $settings['hooks'][$event][0]['hooks'][0]['type'] ?? null;
+            $this->assertSame('command', $type, "hook under $event must declare type=command");
+        }
+    }
+
+    public function test_preserves_hooks_it_does_not_own(): void
+    {
+        Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);
+
+        // A user with existing hooks — one under an event we touch, one under an
+        // event we never touch. Both must survive.
+        File::put($this->home.'/.claude/settings.json', json_encode(['hooks' => [
+            'SessionStart' => [['hooks' => [['type' => 'command', 'command' => '/usr/local/bin/my-greeter.sh']]]],
+            'PostToolUse' => [['matcher' => 'Write|Edit', 'hooks' => [['type' => 'command', 'command' => 'prettier --write']]]],
+        ]]));
+
+        $this->artisan('mnemon:install-claude-code-hooks',
+            ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok'])->assertExitCode(0);
+
+        $settings = json_decode(File::get($this->home.'/.claude/settings.json'), true);
+
+        $this->assertContains('/usr/local/bin/my-greeter.sh', $this->commandsFor($settings, 'SessionStart'),
+            'a pre-existing SessionStart hook must not be destroyed');
+        $this->assertContains('prettier --write', $this->commandsFor($settings, 'PostToolUse'),
+            'an untouched event must not be destroyed');
+        $this->assertSame('Write|Edit', $settings['hooks']['PostToolUse'][0]['matcher'] ?? null,
+            'a foreign matcher must be preserved verbatim');
+    }
+
+    public function test_migrates_the_legacy_flat_hook_list(): void
+    {
+        Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);
+
+        // What earlier versions of this command wrote. Claude Code ignores it.
+        File::put($this->home.'/.claude/settings.json', json_encode(['hooks' => [
+            ['_mnemon_managed' => true, 'event' => 'SessionStart', 'command' => '/old/path/mnemon-wake.sh'],
+            ['_mnemon_managed' => true, 'event' => 'Stop', 'command' => '/old/path/mnemon-capture.sh'],
+        ]]));
+
+        $this->artisan('mnemon:install-claude-code-hooks',
+            ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok'])->assertExitCode(0);
+
+        $settings = json_decode(File::get($this->home.'/.claude/settings.json'), true);
+
+        $this->assertArrayNotHasKey(0, $settings['hooks'], 'legacy flat entries must not survive');
+        $this->assertCount(1, $this->commandsFor($settings, 'SessionStart'));
+        $this->assertStringContainsString('mnemon-wake.sh', $this->commandsFor($settings, 'SessionStart')[0]);
     }
 }

@@ -75,6 +75,17 @@ mnemon_call() {
     printf '%s' "$response" | jq -c '.result // empty'
 }
 
+# Read a scalar from config.json. Args: <key> <default>. Echoes the value.
+mnemon_config_value() {
+    local key="$1" fallback="$2" value
+    value=$(jq -r --arg k "$key" '.[$k] // empty' "$MNEMON_CONFIG" 2>/dev/null)
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        printf '%s' "$fallback"
+    else
+        printf '%s' "$value"
+    fi
+}
+
 # Read or initialize session state. Args: <session_id>. Echoes JSON.
 mnemon_session_state() {
     local sid="$1"

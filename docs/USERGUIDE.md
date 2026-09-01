@@ -104,6 +104,35 @@ The seeder writes the admin credentials to `storage/admin-password.txt` (mode 06
 
 Visit `http://localhost:8000/admin` and log in. You should see the dashboard with empty wing/drawer counts.
 
+#### Deploying with a release-based deployer
+
+Forge, Envoyer, Deployer and similar tools build each release into a fresh
+directory and repoint a `current` symlink at it. Two of the initialization steps
+above are **not** part of `composer install` or `migrate`, so a deploy pipeline
+that only runs those leaves the install unable to authenticate:
+
+```bash
+php artisan passport:keys                        # RSA keypair for token signing
+php artisan passport:client --personal \
+    --name="Personal Access Client" --no-interaction
+```
+
+Add both to the deploy script. They are idempotent — `passport:keys` declines to
+overwrite an existing keypair unless given `--force`, and the client creation can
+be guarded with a check — so they cost nothing on subsequent deploys.
+
+Without the keypair, `POST /mcp` returns **500 rather than 401** for every
+request, authenticated or not, because the token guard cannot load the public key.
+The Docker path avoids this because `docker/entrypoint.sh` runs both on boot;
+a deploy script inherits neither.
+
+Keys must also survive the next release. Most deployers share `storage/` across
+releases via a symlink, in which case `storage/oauth-*.key` persists and nothing
+more is needed. Confirm with `ls -ld storage` — if it is a real directory inside
+the release rather than a symlink, put the keys in the shared `.env` as
+`PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY` instead, so a new release cannot
+drop them.
+
 #### Verify it's running
 
 ```bash

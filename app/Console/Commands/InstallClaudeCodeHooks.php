@@ -15,6 +15,13 @@ class InstallClaudeCodeHooks extends Command
 
     protected $description = 'Install Mnemon Claude Code hooks for automatic capture and recall.';
 
+    /** Hook event => script filename, in the order Claude Code fires them. */
+    private const MANAGED_HOOKS = [
+        'SessionStart' => 'mnemon-wake.sh',
+        'UserPromptSubmit' => 'mnemon-recall.sh',
+        'Stop' => 'mnemon-capture.sh',
+    ];
+
     public function handle(): int
     {
         $home = getenv('HOME') ?: $_SERVER['HOME'] ?? null;
@@ -124,24 +131,64 @@ class InstallClaudeCodeHooks extends Command
         }
     }
 
+    /**
+     * Register the three hooks in Claude Code's settings.
+     *
+     * Claude Code's schema keys `hooks` by event name; each value is a list of
+     * groups carrying a `hooks` array of {type, command}. A flat list is
+     * silently ignored, so anything written in that shape never runs.
+     */
     private function registerHooksInSettings(string $settingsFile, string $hooksDir): void
     {
         $settings = File::exists($settingsFile)
             ? (json_decode(File::get($settingsFile), true) ?: [])
             : [];
 
-        $settings['hooks'] = $settings['hooks'] ?? [];
-        $managedKey = '_mnemon_managed';
+        $hooks = $settings['hooks'] ?? [];
 
-        $settings['hooks'] = array_values(array_filter(
-            $settings['hooks'],
-            fn ($h) => empty($h[$managedKey])
-        ));
+        // Earlier versions wrote a flat list of {_mnemon_managed, event, command}.
+        // Event names cannot be recovered from it, so it is replaced wholesale.
+        if (array_is_list($hooks)) {
+            $hooks = [];
+        }
 
-        $settings['hooks'][] = [$managedKey => true, 'event' => 'SessionStart',     'command' => "$hooksDir/mnemon-wake.sh"];
-        $settings['hooks'][] = [$managedKey => true, 'event' => 'UserPromptSubmit', 'command' => "$hooksDir/mnemon-recall.sh"];
-        $settings['hooks'][] = [$managedKey => true, 'event' => 'Stop',             'command' => "$hooksDir/mnemon-capture.sh"];
+        foreach (self::MANAGED_HOOKS as $event => $script) {
+            $groups = $hooks[$event] ?? [];
+
+            // Strip only the hooks this command owns. Everything else on this
+            // event belongs to the user and must survive untouched.
+            $groups = array_map(function (array $group) {
+                $group['hooks'] = array_values(array_filter(
+                    $group['hooks'] ?? [],
+                    fn ($hook) => ! self::ownsHook($hook['command'] ?? '')
+                ));
+
+                return $group;
+            }, $groups);
+
+            $groups = array_values(array_filter($groups, fn ($group) => $group['hooks'] !== []));
+
+            $groups[] = ['hooks' => [['type' => 'command', 'command' => "$hooksDir/$script"]]];
+
+            $hooks[$event] = $groups;
+        }
+
+        $settings['hooks'] = $hooks;
 
         File::put($settingsFile, json_encode($settings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Whether a hook command is one this installer manages.
+     */
+    private static function ownsHook(string $command): bool
+    {
+        foreach (self::MANAGED_HOOKS as $script) {
+            if (str_contains($command, $script)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

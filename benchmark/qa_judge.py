@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 import config
@@ -43,10 +44,19 @@ ANSWER_ERROR_PREFIX = "answer error: "
 def parse_verdict(text: str) -> bool:
     """Parse the judge's one-word verdict into True (CORRECT) / False (INCORRECT).
 
-    INCORRECT is checked before CORRECT. INCORRECT contains CORRECT as a
-    substring, so a naive `"CORRECT" in text` check -- or checking CORRECT
-    first -- classifies every INCORRECT verdict as correct, silently
-    inflating the accuracy number.
+    Two things protect the INCORRECT/CORRECT overlap, and it is worth being
+    clear about which does the work. The word-boundary match is the real
+    guard: `\bCORRECT\b` does not match inside INCORRECT at all, so the
+    ordering below is no longer load-bearing -- both orderings pass the suite.
+    Checking INCORRECT first is kept as belt-and-braces, because anyone who
+    "simplifies" these back to bare `in` checks would immediately need it: a
+    substring check classifies every INCORRECT verdict as correct and silently
+    inflates the accuracy number.
+
+    Word boundaries also close the subtler version of the same bug, where a
+    judge that editorialises instead of answering ("CORRECTION needed", "that
+    needs correction") reads as a CORRECT verdict. Both failures point the
+    same way -- toward a score that is too high.
 
     Tolerant of case and surrounding whitespace/punctuation (the model was
     asked for exactly one word, but "Correct." or a stray newline are cheap
@@ -55,9 +65,14 @@ def parse_verdict(text: str) -> bool:
     score in whichever direction it points, invisibly.
     """
     normalized = text.strip().upper()
-    if "INCORRECT" in normalized:
+    # Word boundaries, not bare substrings. A plain `"CORRECT" in text` also
+    # matches CORRECTION and "needs correction", so a judge that editorialised
+    # instead of answering would be read as grading the answer correct. That is
+    # the same failure as the INCORRECT/CORRECT overlap, one step subtler, and
+    # it points the same way: toward a score that is too high.
+    if re.search(r"\bINCORRECT\b", normalized):
         return False
-    if "CORRECT" in normalized:
+    if re.search(r"\bCORRECT\b", normalized):
         return True
     raise ValueError(f"unparseable verdict: {text!r}")
 

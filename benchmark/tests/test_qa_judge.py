@@ -190,3 +190,34 @@ class AnsweredResumeTest(unittest.TestCase):
             {"question_id": "c", "error": "rate limited"},
         ])
         self.assertEqual({"a", "b"}, answered("t"))
+
+
+class VerdictWordBoundaryTest(unittest.TestCase):
+    """A word merely containing CORRECT is not a verdict.
+
+    `"CORRECT" in text` also matches CORRECTION and "needs correction", so a
+    judge that editorialised rather than answering would be read as grading the
+    answer correct — the same failure as the INCORRECT/CORRECT overlap, one
+    step subtler, and biased the same way. These fail if the implementation
+    goes back to bare substring matching.
+    """
+
+    def test_correction_is_not_a_correct_verdict(self):
+        with self.assertRaises(ValueError):
+            parse_verdict("CORRECTION needed")
+
+    def test_lowercase_correction_prose_is_not_a_verdict(self):
+        with self.assertRaises(ValueError):
+            parse_verdict("That needs correction")
+
+    def test_incorrectly_is_not_an_incorrect_verdict(self):
+        with self.assertRaises(ValueError):
+            parse_verdict("answered incorrectly-ish")
+
+    def test_the_six_tolerated_shapes_still_parse(self):
+        self.assertTrue(parse_verdict("CORRECT"))
+        self.assertTrue(parse_verdict("  correct.  "))
+        self.assertTrue(parse_verdict('"CORRECT"'))
+        self.assertTrue(parse_verdict("The answer is CORRECT."))
+        self.assertFalse(parse_verdict("INCORRECT"))
+        self.assertFalse(parse_verdict("INCORRECT — the candidate says nine months"))

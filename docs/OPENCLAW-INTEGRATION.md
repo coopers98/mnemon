@@ -55,7 +55,7 @@ Mnemon's MCP endpoint is `POST /mcp` (Streamable HTTP, JSON-RPC 2.0), authentica
 **From Claude Code** — the easiest path. The MCP client handles the OAuth flow automatically:
 
 ```bash
-claude mcp add --transport http mnemon https://your-mnemon-host/mcp
+claude mcp add --transport http mnemon https://mnemon.example.com/mcp
 # Opens a browser window — log in, choose which wings to grant access to.
 # After consent, the token is stored. Scope: mcp:use (single scope, auto-granted).
 ```

@@ -134,7 +134,7 @@ Mnemon exposes 14 tools over Streamable HTTP at `POST /mcp` (JSON-RPC 2.0). Auth
 To connect from Claude Code:
 
 ```bash
-claude mcp add --transport http mnemon https://your-mnemon-host/mcp
+claude mcp add --transport http mnemon https://mnemon.example.com/mcp
 # Complete the browser OAuth flow — log in, grant scopes, select wing restrictions
 ```
 

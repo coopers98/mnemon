@@ -65,7 +65,7 @@
                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                                 <tr>
                                     <td style="font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color:#6b6452; line-height: 1.6;">
-                                        © Mnemon HQ · MIT licensed<br/>
+                                        MIT licensed<br/>
                                         Self-hosted · No telemetry · No vendor
                                     </td>
                                     <td align="right" style="font-family: Georgia, serif; font-style: italic; font-size: 12px; color:#6b6452; line-height: 1.5;">

@@ -55,7 +55,7 @@ Mnemon's MCP endpoint is `POST /mcp` (Streamable HTTP, JSON-RPC 2.0), authentica
 **From Claude Code** — the easiest path. The MCP client handles the OAuth flow automatically:
 
 ```bash
-claude mcp add --transport http mnemon https://mnemon.example.com/mcp
+claude mcp add --transport http mnemon https://your-mnemon-host/mcp
 # Opens a browser window — log in, choose which wings to grant access to.
 # After consent, the token is stored. Scope: mcp:use (single scope, auto-granted).
 ```
@@ -180,7 +180,7 @@ Content is hashed with SHA-256 and stored in `metadata.content_hash`. On re-impo
 
 ## MCP Tool Reference
 
-All tools require the single OAuth scope `mcp:use`. Wing restrictions on the token provide per-agent isolation.
+All fourteen tools require the single OAuth scope `mcp:use`. Wing restrictions on the token provide per-agent isolation **for palace content only** — wiki pages have no wing dimension, so `context_get`, `context_list`, `palace_wake_up`, `brain_status` and `recall` return wiki content regardless of the token's restrictions. See the README's Limitations.
 
 | Tool | Description |
 |------|-------------|
@@ -194,6 +194,10 @@ All tools require the single OAuth scope `mcp:use`. Wing restrictions on the tok
 | `context_list` | List all wiki pages |
 | `wiki_lint` | Health check (stale, orphan, empty, low-confidence) |
 | `wiki_compile` | Gather drawers for wiki page compilation |
+| `wiki_history` | Revision history for a wiki page |
+| `wiki_graph` | Entity and relationship traversal |
+| `recall` | Per-prompt context injection (palace + wiki) |
+| `session_digest` | End-of-session transcript digestion |
 
 ---
 

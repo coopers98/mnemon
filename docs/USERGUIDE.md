@@ -108,11 +108,10 @@ Visit `http://localhost:8000/admin` and log in. You should see the dashboard wit
 
 ```bash
 # Public discovery endpoint, no auth needed
-curl -s http://localhost:8000/api/mcp/tools 2>/dev/null || \
-  curl -s http://localhost:8000/.well-known/oauth-authorization-server | head -20
+curl -s http://localhost:8000/.well-known/oauth-authorization-server | head -20
 ```
 
-You should see either an empty tool list (legacy probe) or the OAuth discovery document (the new path).
+You should see the OAuth discovery document.
 
 ---
 
@@ -354,7 +353,7 @@ Claude calls `context_get` (wiki page lookup by name) first; if the wiki has a p
 
 Claude calls `context_list` and filters by `last_compiled_at`. The `FindStaleWikiPagesPrompt` automates this.
 
-You can also let it run automatically — `mnemon:auto-compile-stale` is on a 4-hour schedule (see [Scheduled maintenance](#scheduled-maintenance)).
+`mnemon:auto-compile-stale` is on a 4-hour schedule, but it only *reports* which pages have pending drawers — recompiling is still a call you or an agent makes (see [Scheduled maintenance](#scheduled-maintenance)).
 
 ### Use the knowledge graph
 
@@ -377,7 +376,7 @@ All Mnemon tools require the single OAuth scope **`mcp:use`**. There are no per-
 Wing restrictions control *which wings* the token can access.
 
 - **All wings (no restriction)** — token sees every wing. Use for trusted personal-device agents.
-- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing, regardless of which tool is called.
+- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's *palace* content — drawers, drawer search, and the wing, room and drawer resources. This does **not** extend to the wiki: wiki pages have no wing dimension, so any token can read any wiki page. See [Limitations](../README.md#limitations).
 
 Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each matching wing, or grant "All wings" and rely on the agent to scope its calls.
 
@@ -393,7 +392,7 @@ When tokens expire, the agent is forced through the OAuth flow again. Refresh to
 
 ### Revoking
 
-Filament admin → **Access Control → Active Tokens** → row → **Revoke**. Takes effect immediately. Revoking the parent OAuth client revokes all its tokens.
+Filament admin → **Access Control → Access Tokens** → row → **Revoke**. Takes effect immediately. Revoking the parent OAuth client revokes all its tokens.
 
 You can also revoke from `php artisan tinker`:
 
@@ -426,11 +425,11 @@ Suggested layout:
 
 All tokens carry the single `mcp:use` scope — wing restrictions are the real isolation mechanism. To create a "read-only" agent, restrict it to wings where writing would be harmless or nonexistent.
 
-This way: lose the work laptop, the attacker can't access `personal` content even if they extract the token.
+This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` *palace* content. They can read every wiki page, though — wing restrictions do not apply to the wiki layer — so anything compiled into the wiki is exposed by any leaked token regardless of its restrictions. See [Limitations](../README.md#limitations).
 
 ### Auditing what each device did
 
-Filament admin → **Access Control → Active Tokens** → click a token → see its associated `BrainSession` rows. Each row shows tool name, input, result count, timestamp.
+Filament admin → **Access Control → Access Tokens** → click a token → see its associated `BrainSession` rows. Each row shows tool name, input, result count, timestamp.
 
 Or query directly:
 
@@ -544,7 +543,7 @@ php artisan mnemon:reembed
 
 This re-embeds every drawer and wiki page using the currently configured driver. It's idempotent — running twice gives the same result.
 
-Performance: ~50 drawers/sec against OpenAI's embeddings API. Budget accordingly. Consider running it overnight if you have thousands of drawers.
+Performance: the command embeds one record per API round trip, and a timed run measured **~2 drawers/sec** (1,201 drawers in 10m18s). Budget accordingly — thousands of drawers means hours, so run it overnight.
 
 > **Note on `ollama`:** a third driver, `ollama` (`nomic-embed-text`), is implemented in
 > `config/mnemon.php` but currently can't store anything — the `embedding` column is a
@@ -575,8 +574,8 @@ The schedule (defined in `routes/console.php` or `app/Console/Kernel.php`) cover
 | Schedule | Command | Purpose |
 |---|---|---|
 | Daily, 03:00 | `mnemon:decay-confidence` | Apply time-based confidence decay |
-| Every 6h | `mnemon:auto-lint` | Run wiki_lint with auto-fix; repair stale/orphan/low-confidence pages |
-| Every 4h | `mnemon:auto-compile-stale` | Recompile wiki pages flagged stale |
+| Every 6h | `mnemon:auto-lint` | Health check. Reports stale/orphan/empty/low-confidence pages as JSON; repairs nothing |
+| Every 4h | `mnemon:auto-compile-stale` | Reports pages with pending drawers as JSON; recompiles nothing |
 | Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforce retention policies (archive past half-lives) |
 
 Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` exists as an
@@ -585,7 +584,7 @@ artisan command but is **not** scheduled — run it manually when you want it.
 You can also run any of these manually:
 
 ```bash
-php artisan mnemon:auto-lint --dry-run   # preview what auto-lint would change
+php artisan mnemon:auto-lint             # report findings as JSON (the command takes no options)
 ```
 
 ### Monitoring health
@@ -675,7 +674,7 @@ Or use Forge's "Scheduled Jobs" UI to register the same command.
 
 #### Worker queues
 
-Mnemon runs synchronous embedding generation by default. If you have a high write volume, switch the embedding driver to async via the queue (see `app/Observers/DrawerObserver.php` for the integration point). Run `php artisan queue:work` (or use Horizon).
+Mnemon generates embeddings synchronously, on write, in `DrawerObserver`. There is no asynchronous path: nothing in the application implements `ShouldQueue` or dispatches a job, and no queue worker is required or used. High write volume means slower writes; making that asynchronous would be a code change, not a configuration one.
 
 ### Docker
 
@@ -724,7 +723,7 @@ Mnemon's value compounds over time. Treat it like a primary database — back it
 
 ### What to back up
 
-1. **The Postgres database**, including the `vector` extension's columns. Standard `pg_dump` handles vector columns natively (they serialize as base64 blobs).
+1. **The Postgres database**, including the `vector` extension's columns. Standard `pg_dump` handles vector columns natively — they dump as text, in the same bracketed literal form the type accepts.
 2. **Passport encryption keys** (`storage/oauth-*.key` or the env-var versions). Without them, no OAuth tokens validate.
 3. **`.env`** — has DB credentials and `OPENAI_API_KEY`.
 
@@ -760,7 +759,7 @@ Always snapshot before destructive migrations:
 pg_dump -Fc mnemon > /backups/mnemon-pre-deploy-$(date +%Y%m%d-%H%M).dump
 ```
 
-The drop_api_keys migration in this rework is a good example of a destructive change worth snapshotting.
+A migration that drops a table is a good example of a destructive change worth snapshotting.
 
 ---
 
@@ -770,7 +769,7 @@ The drop_api_keys migration in this rework is a good example of a destructive ch
 
 - Bearer token missing → set `Authorization: Bearer <token>` header
 - Token expired → refresh via the OAuth refresh endpoint or re-authorize
-- Token revoked → check Filament admin under Active Tokens
+- Token revoked → check Filament admin under Access Tokens
 
 ### `403`-style MCP error: "Missing required scope: mcp:use"
 
@@ -883,7 +882,7 @@ If your organization has compliance requirements that prevent personal data from
 
 Drawers can be soft-deleted (default) or force-deleted. Wiki pages that cite a force-deleted drawer have a dangling reference in their `sources` JSON. The wiki page itself isn't broken — the citation just points to a non-existent ID.
 
-`wiki_lint` flags drawers with broken citations. `mnemon:auto-lint` will repair the wiki page (drop the broken citation, mark for recompile) on its next run.
+No lint detector checks drawer citations. The detectors are stale, orphan, empty and low-confidence; the auto-fixer prunes broken page-to-page `related` references, queues orphans for review and archives empty pages, and it runs only through the `wiki_lint` MCP tool — never from `mnemon:auto-lint`.
 
 Soft delete is preferred for this reason — it's reversible.
 
@@ -944,9 +943,8 @@ See `app/Mcp/Tools/DrawerSearchTool.php` for a complete reference.
 ## Where to next
 
 - [README](../README.md) — project overview
-- [`docs/FRD.md`](FRD.md) — functional requirements (the "what" and "why")
-- [`docs/IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) — sprint history (the "how it got built")
-- [`docs/superpowers/specs/2026-04-26-mcp-rework-design.md`](superpowers/specs/2026-04-26-mcp-rework-design.md) — full MCP rework design spec
+- [`docs/design/2026-04-26-mcp-rework-design.md`](design/2026-04-26-mcp-rework-design.md) — the MCP rework design spec (dated rationale, not current documentation)
+- [`docs/design/`](design/) — the rest of the dated design rationale
 - [Filament documentation](https://filamentphp.com/docs) — for admin panel customization
 - [`laravel/mcp` documentation](https://laravel.com/docs/12.x/mcp) — for extending the MCP server
 - [`laravel/passport` documentation](https://laravel.com/docs/passport) — for OAuth customization

@@ -57,18 +57,12 @@ below before you point this at anything holding real data.
    so the variable never carries over between commands. This is not
    hypothetical — it happened during this harness's own validation.
 
-3. **Mint a personal access token.** A fresh install cannot do this in one
-   step — `docker/entrypoint.sh` runs `passport:keys` but never creates a
-   personal access client, and `User::createToken()` needs one. This is
-   tracked as product defect D17 (`docs/superpowers/specs/2026-08-28-release-roadmap.md`);
-   until it's fixed, run the client-creation step yourself, once per stack:
+3. **Mint a personal access token.** `docker/entrypoint.sh` creates the
+   personal access client on boot if none exists, so there is no
+   client-creation step to run by hand. (Earlier revisions of this file told
+   you to run one, citing defect D17 — that was fixed in `13b2ec2`.)
 
-   ```bash
-   docker compose -p mnemon-bench --env-file .env.bench exec -T app \
-     php artisan passport:client --personal --name="Benchmark Personal Access Client" --no-interaction
-   ```
-
-   Then mint the token. `createToken()` needs `APP_KEY` in its own process
+   Mint the token. `createToken()` needs `APP_KEY` in its own process
    environment, which `docker compose exec` does not inherit from the
    container's entrypoint — pass it explicitly, read from where the
    entrypoint persisted it:

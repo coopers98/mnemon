@@ -1,5 +1,9 @@
 # Truth-up pass — design
 
+> **Dated design rationale, 2026-08-31.** This document records what was designed and
+> believed at that date. It is not maintained as current documentation, and it may
+> describe behaviour the code no longer has. Check the code before relying on it.
+
 **Status:** revised 2026-08-31 after an adversarial review found the first
 version audited one page and generalised. Not yet implemented.
 **Roadmap piece:** 4. Gates piece 6 (launch) and the repository going public.

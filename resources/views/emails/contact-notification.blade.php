@@ -9,7 +9,7 @@
         New <em style="color:#b34f30; font-style: italic; font-weight: 400;">dispatch</em> arrived.
     </h1>
     <p style="margin: 0 0 24px; font-family: Georgia, serif; font-style: italic; font-size: 16px; line-height: 1.45; color:#6b6452;">
-        Someone wrote in through the Mnemon frontispiece. The full message is sealed below.
+        Someone wrote in through the Mnemon frontispiece. The full message is below.
     </p>
 
     {{-- Byline --}}

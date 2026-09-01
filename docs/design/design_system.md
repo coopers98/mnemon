@@ -1,5 +1,9 @@
 # Mnemon — Design System
 
+> **Dated design rationale.** This records the visual system as designed. It is
+> not maintained as a description of the current templates — check the Blade
+> views before relying on any detail here.
+
 > **Treatise No. 001 — On the Furnishing of Memory**
 > Vol. I · Foundational
 
@@ -127,7 +131,7 @@ keep elements grouped by hairline rules rather than by extra whitespace.
 ## 5. Components
 
 Every component is documented and rendered live in
-`/public/design_system.html`. The summary below is the contract.
+`/public/design_system.html`, since removed. The summary below is the contract.
 
 ### 5.1 Colophon (top bar)
 
@@ -329,9 +333,9 @@ Motion is restrained. The page is paper; paper does not bounce.
 /wiki.html                    wiki entry
 /palace.html                  palace browser
 /docs/design_system.md        this document
-/public/design_system.html    interactive component showcase
-/public/sample_landing.html   reference copy of the landing page
-/public/sample_wiki.html      reference copy of the wiki page
+/public/design_system.html    (removed — frozen showcase, deleted in the truth-up pass)
+/public/sample_landing.html   (removed — frozen copy of the landing page)
+/public/sample_wiki.html      (removed — frozen copy of the wiki page)
 /public/sample_palace.html    reference copy of the palace browser
 ```
 

@@ -15,7 +15,7 @@
     <div class="toc-foot">
         {{ $revisions->total() ?? $revisions->count() }} revision{{ ($revisions->total() ?? $revisions->count()) !== 1 ? 's' : '' }}<br/>
         @if ($page->last_compiled_at)
-            head sealed {{ $page->last_compiled_at->diffForHumans() }}
+            head compiled {{ $page->last_compiled_at->diffForHumans() }}
         @endif
     </div>
 @endsection
@@ -28,7 +28,7 @@
     <h1 class="doc-title">Revision <em>history</em>.</h1>
     <p class="doc-sub">
         Every compilation of <em>{{ $page->title }}</em>, in order. The current head sits at the top.
-        Each row is a sealed snapshot — a content hash that can be replayed against its source drawers.
+        Each row stores a SHA-256 of the page content at that revision, so you can tell whether a revision's text has since been altered. It is not a hash of the source drawers, and there is no replay.
     </p>
 
     @if ($revisions->isEmpty())
@@ -72,7 +72,7 @@
         <div class="lab">Why this exists</div>
         <div class="text">
             Compilation is <em>lossy</em>; the source drawers are not. History gives you the audit trail
-            from any past entry back to its sealed inputs.
+            from any past entry back to the drawers it was compiled from.
         </div>
     </div>
 

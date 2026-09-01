@@ -5,8 +5,8 @@
 @section('sidebar')
     <h6>Recall — hybrid</h6>
     <p style="font-family:var(--serif);font-size:0.95rem;line-height:1.5;color:var(--ink-soft);">
-        BM25 over <code>tsvector</code> joined to <code>pgvector</code> cosine. Wiki and palace are
-        searched together; results carry <em>provenance</em>.
+        Postgres full-text over <code>tsvector</code>, blended with <code>pgvector</code> cosine and a
+        recency boost. Wiki and palace are searched together; results carry <em>provenance</em>.
     </p>
 
     <div class="toc-foot">

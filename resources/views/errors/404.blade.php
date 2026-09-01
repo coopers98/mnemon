@@ -2,7 +2,7 @@
 
 @section('lede')
     The room you tried to enter has no <em>drawer</em> by that name. The palace is faithful — if it is not
-    here, it was never sealed. Try a different door, or ask the wiki to recall the entry by some other
+    here, it was never stored. Try a different door, or ask the wiki to recall the entry by some other
     handle.
 @endsection
 

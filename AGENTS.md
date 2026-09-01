@@ -4,6 +4,6 @@ This project's agent instructions live in [`CLAUDE.md`](./CLAUDE.md). It applies
 
 For deeper context, see:
 
-- [`docs/FRD.md`](./docs/FRD.md) — functional requirements
-- [`docs/IMPLEMENTATION-PLAN.md`](./docs/IMPLEMENTATION-PLAN.md) — sprint plan and current status
-- [`docs/discovery.md`](./docs/discovery.md) — initial discovery notes
+- [`docs/USERGUIDE.md`](./docs/USERGUIDE.md) — day-to-day playbook: setup, connecting agents, OAuth, troubleshooting
+- [`README.md`](./README.md) — what the project is, why it exists, and its limitations
+- [`docs/design/`](./docs/design/) — dated design rationale, kept for history and not maintained as current documentation

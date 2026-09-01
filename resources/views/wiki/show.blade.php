@@ -33,9 +33,9 @@
         @endif
         From {{ $sourceDrawers->count() }} verbatim sources<br/>
         @if ($page->last_compiled_at)
-            <span class="rubric">●</span> sealed
+            <span class="rubric">●</span> compiled
         @else
-            <span class="rubric">○</span> unsealed
+            <span class="rubric">○</span> not compiled
         @endif
     </div>
 @endsection
@@ -50,9 +50,9 @@
         <span>{{ $page->word_count ?? 0 }} words</span>
         <span>est. read {{ max(1, (int) round(($page->word_count ?? 0) / 220)) }} min</span>
         @if ($page->last_compiled_at)
-            <span class="rubric">● sealed</span>
+            <span class="rubric">● compiled</span>
         @else
-            <span class="rubric">○ unsealed</span>
+            <span class="rubric">○ not compiled</span>
         @endif
     </div>
 
@@ -66,7 +66,7 @@
         <span><b>Backlinks</b> {{ $page->backlinks_count ?? 0 }}</span>
         <span><b>Type</b> {{ ucfirst($page->type) }}</span>
         @if ($page->last_compiled_at)
-            <span><b>Last sealed</b> {{ $page->last_compiled_at->format('Y-m-d') }}</span>
+            <span><b>Last compiled</b> {{ $page->last_compiled_at->format('Y-m-d') }}</span>
         @endif
     </div>
 
@@ -138,8 +138,8 @@
     <div class="margin-block">
         <div class="lab">Glyph</div>
         <div class="text">
-            The vermilion mark denotes a <em>sealed</em> entry. An <em>unsealed</em> entry is a draft —
-            no audit yet.
+            The vermilion mark denotes a <em>compiled</em> entry — one with a recorded compile time. An entry
+            without the mark has never been compiled.
         </div>
     </div>
 @endsection

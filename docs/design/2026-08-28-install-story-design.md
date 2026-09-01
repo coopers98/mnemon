@@ -1,5 +1,9 @@
 # Design: Install Story (Piece 2)
 
+> **Dated design rationale, 2026-08-28.** This document records what was designed and
+> believed at that date. It is not maintained as current documentation, and it may
+> describe behaviour the code no longer has. Check the code before relying on it.
+
 **Date:** 2026-08-28
 **Roadmap:** `2026-08-28-release-roadmap.md`, Piece 2
 

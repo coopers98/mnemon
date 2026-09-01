@@ -41,7 +41,7 @@
             <span class="num">§ {{ strtoupper($wing->slug) }} / {{ strtoupper($room->slug) }}</span>
             <div>
                 <div class="title">Drawers, in order of seal.</div>
-                <span class="lede">Append-only. Each drawer is a sealed verbatim record — newest on top.</span>
+                <span class="lede">Append-only. Each drawer is a verbatim record — newest on top.</span>
             </div>
         </div>
 

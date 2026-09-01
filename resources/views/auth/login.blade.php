@@ -88,7 +88,7 @@
         <div class="marks">
             <span><b>MIT</b> · self-hosted</span>
             <span><b>Postgres</b> · pgvector</span>
-            <span><b>MCP</b> · stdio + sse</span>
+            <span><b>MCP</b> · streamable http</span>
         </div>
     </aside>
 </main>

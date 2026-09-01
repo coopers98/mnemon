@@ -1,5 +1,9 @@
 # Mnemon Release Roadmap
 
+> **Dated design rationale, 2026-08-28.** This document records what was designed and
+> believed at that date. It is not maintained as current documentation, and it may
+> describe behaviour the code no longer has. Check the code before relying on it.
+
 **Date:** 2026-08-28
 **Supersedes:** `2026-08-27-release-roadmap.md` and `2026-08-27-mcp-surface-design.md`, both written against a stale snapshot and deleted.
 
@@ -727,8 +731,23 @@ the earlier check was scoped to application code.
 the MCP rework and Layer 2 specs) and superseded build artifacts
 (`FRD.md`, `IMPLEMENTATION-PLAN.md`, `GAP-ANALYSIS.md`,
 `WIKI-FRONTEND-PLAN.md`) that describe an architecture two rewrites out of
-date. `discovery.md` is worth keeping and promoting — its competitive
-landscape is the positioning argument.
+date.
+
+**Superseded by the truth-up pass.** All five were deleted, along with
+`discovery.md`. This paragraph previously said `discovery.md` was "worth
+keeping and promoting — its competitive landscape is the positioning
+argument"; the pass deleted it instead, because README's "Why it exists"
+already carries that argument in a comparison of the three approaches
+(extract-and-store, retrieve-raw, compile-knowledge) with the tradeoff each
+makes and the reason Mnemon takes all three.
+
+What was *not* carried across was `discovery.md`'s wider feature matrix. Its
+rows promised a temporal graph in "Phase 2" and a Composer package in
+"Phase 3" — the second contradicted by `composer.json` being `type: project` —
+and listed the LongMemEval result as "TBD". Importing them would have added
+three unverified forward-looking claims to the document the pass was cleaning,
+so they were dropped rather than moved. The remaining specs moved to
+`docs/design/`, each with a header marking it dated rationale.
 
 The prune and restructure belong to Piece 4. No documentation site before
 launch: README plus in-repo `docs/` is sufficient for a project with no users

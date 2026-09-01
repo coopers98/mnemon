@@ -95,7 +95,7 @@
         <span><b>{{ $wings->sum('drawers_count') }}</b> drawers</span>
     </div>
     <div class="group">
-        <span class="rubric">●</span><span>sealed</span>
+        <span class="rubric">●</span><span>stored</span>
     </div>
     <div class="group">
         <span>postgres · localhost:5432</span>

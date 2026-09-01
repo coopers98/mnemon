@@ -110,7 +110,7 @@
 
 @section('body')
 
-@include('partials.colophon', ['edition' => 'v0.4 · primer', 'active' => 'overview'])
+@include('partials.colophon', ['edition' => 'overview', 'active' => 'overview'])
 
 <main>
     {{-- Frontispiece --}}
@@ -157,7 +157,7 @@
                     </div>
 
                     <div class="front-meta">
-                        <span><b>Laravel</b> · native package</span>
+                        <span><b>Laravel</b> · application</span>
                         <span><b>Postgres</b> · pgvector + tsvector</span>
                         <span><b>MCP</b> · first-class</span>
                     </div>
@@ -221,12 +221,12 @@
         <div class="axiom">
             <span class="num">i.</span>
             <h4 class="h serif">Store <em class="italic rubric">verbatim</em>.</h4>
-            <p class="b">Every message, every transcript, every artefact, byte-perfect. Extraction is a derivative, never the original.</p>
+            <p class="b">Every message, every transcript, every artefact, stored as written — save for credentials, which are redacted on the way in. Extraction is a derivative, never the original.</p>
         </div>
         <div class="axiom">
             <span class="num">ii.</span>
             <h4 class="h serif">Retrieve <em class="italic rubric">hybrid</em>.</h4>
-            <p class="b">BM25 over tsvector, joined to pgvector cosine. Ranked, deduped, attributed. No black-box re-rankers.</p>
+            <p class="b">Postgres full-text over a stored tsvector, blended with pgvector cosine. Ranked, deduped, attributed — the blend is the final order.</p>
         </div>
         <div class="axiom">
             <span class="num">iii.</span>
@@ -249,7 +249,7 @@
             </div>
             <div class="stats-grid">
                 <div class="stat-cell">
-                    <div class="lab">Drawers · sealed</div>
+                    <div class="lab">Drawers · verbatim</div>
                     <div class="v">{{ number_format($stats['drawers']) }}<span style="font-family:var(--mono);font-size:0.45em;color:var(--ink-faint);margin-left:0.4em;">verbatim</span></div>
                 </div>
                 <div class="stat-cell">
@@ -286,7 +286,8 @@
                     </div>
                     <p>
                         The base layer is a faithful archive: original messages, original files, original
-                        timestamps, sealed by content hash. Nothing is rewritten, nothing is destroyed. The
+                        timestamps, appended and never overwritten. One thing is rewritten on the way in: API keys,
+                        tokens and credentials in URLs are redacted before storage. Nothing is destroyed. The
                         compiled layer reads from the base and produces something the model can actually use —
                         a wiki of <em>entries</em>, each with a clear lineage back to the verbatim record that
                         authored it.
@@ -298,9 +299,9 @@
                     </p>
 
                     <ul class="layer-list">
-                        <li><span class="n">01</span><span class="h serif">Capture</span><span class="meta">verbatim · sealed</span></li>
+                        <li><span class="n">01</span><span class="h serif">Capture</span><span class="meta">verbatim · append-only</span></li>
                         <li><span class="n">02</span><span class="h serif">Index</span><span class="meta">tsvector + pgvector</span></li>
-                        <li><span class="n">03</span><span class="h serif">Compile</span><span class="meta">jobs · queued</span></li>
+                        <li><span class="n">03</span><span class="h serif">Compile</span><span class="meta">on demand</span></li>
                         <li><span class="n">04</span><span class="h serif">Recall</span><span class="meta">MCP · hybrid</span></li>
                         <li><span class="n">05</span><span class="h serif">Reason</span><span class="meta">in your model</span></li>
                     </ul>
@@ -324,14 +325,14 @@
                             <span class="lab">L₁.₅</span>
                             <div>
                                 <div class="ttl serif">Hybrid retrieval</div>
-                                <div class="desc">BM25 · cosine · re-rank · attribution</div>
+                                <div class="desc">full-text · cosine · recency · attribution</div>
                             </div>
                         </div>
                         <div class="row">
                             <span class="lab">L₁</span>
                             <div>
                                 <div class="ttl serif">Verbatim archive</div>
-                                <div class="desc">drawers · rooms · wings · sealed</div>
+                                <div class="desc">drawers · rooms · wings · append-only</div>
                             </div>
                         </div>
                         <div class="row">
@@ -462,38 +463,38 @@
                 <div class="spec">
                     <div class="corner">a.</div>
                     <div class="lab">Substrate</div>
-                    <div class="v serif">Postgres <span class="unit">≥ 15</span></div>
+                    <div class="v serif">Postgres <span class="unit">17 · tested</span></div>
                     <p class="desc">Single dependency. <code>pgvector</code> for embeddings, <code>tsvector</code> for full-text. No Pinecone, no Weaviate, no surprises.</p>
                 </div>
                 <div class="spec">
                     <div class="corner">b.</div>
                     <div class="lab">Host language</div>
                     <div class="v serif">Laravel <span class="unit">13.x</span></div>
-                    <p class="desc">Composer-installable package. Drops cleanly into existing apps. Uses the framework's queue, cache, jobs, and broadcasting.</p>
+                    <p class="desc">A Laravel application you run, not a package you install into one. Nothing is queued — no job in the codebase implements <code>ShouldQueue</code>.</p>
                 </div>
                 <div class="spec">
                     <div class="corner">c.</div>
                     <div class="lab">Agent protocol</div>
-                    <div class="v serif">MCP <span class="unit">stdio + sse</span></div>
-                    <p class="desc">First-class. A dozen tools out of the box: <code>recall</code>, <code>seal</code>, <code>compile</code>, <code>walk</code>, <code>cite</code>…</p>
+                    <div class="v serif">MCP <span class="unit">streamable http</span></div>
+                    <p class="desc">First-class. Fourteen tools over <code>POST /mcp</code>: <code>recall</code>, <code>drawer_search</code>, <code>drawer_add</code>, <code>context_get</code>, <code>wiki_compile</code>…</p>
                 </div>
                 <div class="spec">
                     <div class="corner">d.</div>
                     <div class="lab">Retrieval</div>
-                    <div class="v serif">Hybrid · BM25 + cosine</div>
-                    <p class="desc">Reciprocal-rank fusion by default. Tunable per-room. Every result carries provenance to the verbatim row.</p>
+                    <div class="v serif">Hybrid · full-text + cosine</div>
+                    <p class="desc">A weighted linear blend — 0.6 semantic, 0.3 full-text, 0.1 recency — set in <code>config/mnemon.php</code> and applied globally, not per room. Every result carries provenance to the verbatim row. On LongMemEval-S (500 questions) the correct session is ranked first for 443 of 500 questions with embeddings, 371 of 500 without.</p>
                 </div>
                 <div class="spec">
                     <div class="corner">e.</div>
                     <div class="lab">Embeddings</div>
                     <div class="v serif">Bring your own</div>
-                    <p class="desc">Local <code>nomic-embed</code>, <code>bge-m3</code>, <code>text-embedding-3</code> — anything that returns a vector. Swap them; we re-index in the background.</p>
+                    <p class="desc">OpenAI <code>text-embedding-3-small</code>, or none at all — the keyless default falls back to full-text and recency. An Ollama driver exists but cannot store its 768-dimension vectors in the fixed <code>vector(1536)</code> column, so it is unusable today.</p>
                 </div>
                 <div class="spec">
                     <div class="corner">f.</div>
                     <div class="lab">Egress</div>
-                    <div class="v serif">Zero <span class="unit">by default</span></div>
-                    <p class="desc">No telemetry, no analytics, no phone-home. Outbound calls require an allow-list and live on the audit log.</p>
+                    <div class="v serif">Zero <span class="unit">on the docker default</span></div>
+                    <p class="desc">No telemetry, no analytics, no phone-home; fonts are served locally. The Docker default embeds nothing. Set <code>MNEMON_EMBEDDING_DRIVER=openai</code> and every drawer is sent to OpenAI as it is written.</p>
                 </div>
             </div>
         </div>
@@ -505,8 +506,8 @@
             <div class="sec-head">
                 <span class="num">§ IV — The install rite</span>
                 <div>
-                    <div class="title">Three commands. One migration. One key.</div>
-                    <span class="lede">If you have run <code>composer require</code> before, you have already finished the difficult part.</span>
+                    <div class="title">One command with Docker. Rather more without.</div>
+                    <span class="lede">Compose brings up Postgres, runs the migrations and seeds an admin. The native path is about ten commands — the guide walks them.</span>
                 </div>
             </div>
 
@@ -518,41 +519,54 @@
                         front door.
                     </p>
                     <p>
-                        Issue an API key in the admin, point your client at the local socket or HTTP endpoint,
-                        and your agents begin recalling. The compile worker runs on Laravel's queue. Embeddings
-                        are computed lazily — only when an agent actually asks. The wiki rebuilds itself each
-                        night, on demand, or never. The choice is yours; the archive is always the truth.
+                        Authorize a client through the OAuth consent screen, point it at <code>POST /mcp</code>,
+                        and your agents begin recalling. Compilation happens when something asks for it — there is
+                        no queue worker and no nightly rebuild. Embeddings are computed eagerly, on write, before
+                        the drawer is stored. The archive is always the truth.
                     </p>
 
                     <ul class="layer-list" style="margin-top:1rem;">
-                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">git clone &amp; composer install</span><span class="meta">step 1</span></li>
-                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">php artisan migrate --seed</span><span class="meta">step 2</span></li>
-                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">php artisan serve</span><span class="meta">step 3</span></li>
+                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">git clone &amp; cd mnemon</span><span class="meta">step 1</span></li>
+                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">cp .env.example .env</span><span class="meta">step 2</span></li>
+                        <li><span class="n">▸</span><span class="h mono" style="font-size:0.875rem;">docker compose up</span><span class="meta">step 3</span></li>
                     </ul>
                 </div>
 
                 <aside class="layer-fig" aria-label="Sample MCP recall">
                     <div class="flex between" style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:0.85rem;">
                         <span>Fig. 4 · MCP recall</span>
-                        <span class="rubric">stdio</span>
+                        <span class="rubric">POST /mcp</span>
                     </div>
                     <pre style="font-family: var(--mono); font-size: 0.82rem; line-height: 1.7; background: oklch(0.16 0.012 50); color: oklch(0.92 0.012 80); padding: 1.5rem 1.25rem; border: var(--hairline) solid var(--rule-strong); overflow-x: auto; white-space: pre-wrap;"><span style="color: oklch(0.55 0.012 60); font-style: italic;"># request — your agent</span>
-<span style="color: oklch(0.78 0.10 30);">POST</span> /mcp/wiki.search
+<span style="color: oklch(0.78 0.10 30);">POST</span> /mcp
 {
-  <span style="color: oklch(0.85 0.012 80);">"query"</span>: <span style="color: oklch(0.85 0.06 90);">"webhook retry policy"</span>,
-  <span style="color: oklch(0.85 0.012 80);">"k"</span>: <span style="color: oklch(0.85 0.012 80);">8</span>, <span style="color: oklch(0.85 0.012 80);">"hybrid"</span>: <span style="color: oklch(0.85 0.012 80);">true</span>
+  <span style="color: oklch(0.85 0.012 80);">"jsonrpc"</span>: <span style="color: oklch(0.85 0.06 90);">"2.0"</span>,
+  <span style="color: oklch(0.85 0.012 80);">"id"</span>: <span style="color: oklch(0.85 0.012 80);">1</span>,
+  <span style="color: oklch(0.85 0.012 80);">"method"</span>: <span style="color: oklch(0.85 0.06 90);">"tools/call"</span>,
+  <span style="color: oklch(0.85 0.012 80);">"params"</span>: {
+    <span style="color: oklch(0.85 0.012 80);">"name"</span>: <span style="color: oklch(0.85 0.06 90);">"drawer_search"</span>,
+    <span style="color: oklch(0.85 0.012 80);">"arguments"</span>: { <span style="color: oklch(0.85 0.012 80);">"query"</span>: <span style="color: oklch(0.85 0.06 90);">"webhook retry policy"</span> }
+  }
 }
 
 <span style="color: oklch(0.55 0.012 60); font-style: italic;"># response — mnemon</span>
 {
-  <span style="color: oklch(0.85 0.012 80);">"entries"</span>: [
-    {
-      <span style="color: oklch(0.85 0.012 80);">"name"</span>: <span style="color: oklch(0.85 0.06 90);">"project:aurelia"</span>,
-      <span style="color: oklch(0.85 0.012 80);">"score"</span>: <span style="color: oklch(0.85 0.012 80);">0.94</span>,
-      <span style="color: oklch(0.85 0.012 80);">"drawers"</span>: [<span style="color: oklch(0.85 0.06 90);">"d_8821"</span>, <span style="color: oklch(0.85 0.06 90);">"d_8843"</span>]
+  <span style="color: oklch(0.85 0.012 80);">"jsonrpc"</span>: <span style="color: oklch(0.85 0.06 90);">"2.0"</span>,
+  <span style="color: oklch(0.85 0.012 80);">"id"</span>: <span style="color: oklch(0.85 0.012 80);">1</span>,
+  <span style="color: oklch(0.85 0.012 80);">"result"</span>: {
+    <span style="color: oklch(0.85 0.012 80);">"isError"</span>: <span style="color: oklch(0.85 0.012 80);">false</span>,
+    <span style="color: oklch(0.85 0.012 80);">"structuredContent"</span>: {
+      <span style="color: oklch(0.85 0.012 80);">"results"</span>: [
+        {
+          <span style="color: oklch(0.85 0.012 80);">"id"</span>: <span style="color: oklch(0.85 0.012 80);">8821</span>,
+          <span style="color: oklch(0.85 0.012 80);">"content"</span>: <span style="color: oklch(0.85 0.06 90);">"retries back off 1s, 4s, 16s then dead-letter"</span>,
+          <span style="color: oklch(0.85 0.012 80);">"wing"</span>: <span style="color: oklch(0.85 0.06 90);">"Work"</span>, <span style="color: oklch(0.85 0.012 80);">"wing_slug"</span>: <span style="color: oklch(0.85 0.06 90);">"work"</span>,
+          <span style="color: oklch(0.85 0.012 80);">"room"</span>: <span style="color: oklch(0.85 0.06 90);">"Meeting Notes"</span>, <span style="color: oklch(0.85 0.012 80);">"room_slug"</span>: <span style="color: oklch(0.85 0.06 90);">"meeting-notes"</span>,
+          <span style="color: oklch(0.85 0.012 80);">"tier"</span>: <span style="color: oklch(0.85 0.06 90);">"raw"</span>, <span style="color: oklch(0.85 0.012 80);">"score"</span>: <span style="color: oklch(0.85 0.012 80);">0.4</span>
+        }
+      ]
     }
-  ],
-  <span style="color: oklch(0.85 0.012 80);">"sealed"</span>: <span style="color: oklch(0.85 0.012 80);">true</span>
+  }
 }</pre>
                 </aside>
             </div>
@@ -566,20 +580,20 @@
                 <span class="num">§ V — Correspondence</span>
                 <div>
                     <div class="title">Questions, RFCs, or a quiet hello.</div>
-                    <span class="lede">The shortest path. Replies arrive from a real person, not a queue.</span>
+                    <span class="lede">Submissions are stored in this instance and listed in its admin panel. Whether anyone replies is up to whoever runs it.</span>
                 </div>
             </div>
 
             <div class="contact-grid">
                 <div class="contact-prose">
                     <p>
-                        We read every note. If you have an idea about the schema, an objection to the
-                        compile pipeline, or a request for a feature that would make Mnemon useful in your
-                        own house — write it down here.
+                        If you have an idea about the schema, an objection to the compile pipeline, or a
+                        request for a feature that would make Mnemon useful in your own house — write it
+                        down here. Set <code>MNEMON_CONTACT_TO</code> to have submissions emailed as well
+                        as stored.
                     </p>
                     <p style="margin-top:1.25rem;">
-                        For source, issues, and patches, find us on
-                        <a href="https://github.com/coopers98/mnemon" style="color:var(--ink);border-bottom:1px dotted var(--ink);">github / coopers98 / mnemon</a>.
+                        For source, issues, and patches, see the project's repository.
                     </p>
                 </div>
 
@@ -670,7 +684,7 @@
                 <h5>Source</h5>
                 <ul>
                     <li><a href="https://github.com/coopers98/mnemon" rel="noopener noreferrer" target="_blank">github / coopers98</a></li>
-                    <li><a href="https://github.com/coopers98/mnemon/blob/main/docs/FRD.md" rel="noopener noreferrer" target="_blank">FRD</a></li>
+                    <li><a href="https://github.com/coopers98/mnemon/blob/main/docs/USERGUIDE.md" rel="noopener noreferrer" target="_blank">User guide</a></li>
                     <li><a href="https://modelcontextprotocol.io/" rel="noopener noreferrer" target="_blank">MCP protocol</a></li>
                 </ul>
             </div>
@@ -687,7 +701,7 @@
 
         <hr class="rule mt-4 mb-3" />
         <div class="flex between" style="flex-wrap:wrap;gap:1rem;">
-            <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">© Mnemon HQ · MIT License</span>
+            <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">MIT License</span>
             <span class="mono" style="font-size:var(--t-micro);letter-spacing:0.14em;text-transform:uppercase;">No SaaS. No telemetry. No vendor.</span>
         </div>
     </div>

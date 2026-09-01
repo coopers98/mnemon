@@ -1,9 +1,9 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "coopers98/mnemon",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "A self-hosted second brain for AI agents: verbatim palace storage, a compiled wiki layer, and an MCP server over both.",
+    "keywords": ["mcp", "model-context-protocol", "second-brain", "memory", "pgvector", "laravel", "filament"],
     "license": "MIT",
     "require": {
         "php": "^8.4",

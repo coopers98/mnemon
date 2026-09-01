@@ -240,7 +240,7 @@ The classical **method of loci** is the naming convention. A wing is a section o
 
 ## What's built
 
-All sprints complete. 436 passing, 7 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
+All sprints complete. 440 passing, 7 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.

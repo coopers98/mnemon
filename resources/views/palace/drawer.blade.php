@@ -13,7 +13,7 @@
         <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">tier</span>
         <span style="color: var(--ink);">{{ $drawer->tier }}</span>
 
-        <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">sealed</span>
+        <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">stored</span>
         <span style="color: var(--ink);">{{ $drawer->created_at->format('Y-m-d H:i') }}</span>
 
         @if ($drawer->source)
@@ -43,7 +43,7 @@
         <span>/</span>
         <span class="here">d_{{ str_pad((string)$drawer->id, 6, '0', STR_PAD_LEFT) }}</span>
         <span class="rubric" style="margin-left:0.75rem;">●</span>
-        <span>sealed</span>
+        <span>stored</span>
     </div>
 @endsection
 
@@ -60,8 +60,9 @@
             <em style="color: var(--rubric); font-style: italic; font-weight: 400;">drawer.</em>{{ str_pad((string)$drawer->id, 6, '0', STR_PAD_LEFT) }}
         </h1>
         <p style="font-family: var(--serif); font-style: italic; font-size: 1.2rem; line-height: 1.45; color: var(--ink-faint); margin: 0 0 2rem;">
-            One sealed verbatim record from <em>{{ $drawer->room->name }}</em>. The contents below are
-            byte-perfect; nothing has been rewritten.
+            One verbatim record from <em>{{ $drawer->room->name }}</em>. The contents below are stored as
+            written, except that credentials — API keys, tokens, and passwords in URLs — are redacted
+            before storage.
         </p>
 
         <div style="display: flex; gap: 2rem; flex-wrap: wrap; padding: 0.85rem 0; border-top: var(--hairline) solid var(--rule-strong); border-bottom: var(--hairline) solid var(--rule-strong); font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2.5rem;">
@@ -69,7 +70,7 @@
             @if ($drawer->source)
                 <span><b style="color: var(--ink); font-weight: 500;">Source</b> {{ $drawer->source }}</span>
             @endif
-            <span><b style="color: var(--ink); font-weight: 500;">Sealed</b> {{ $drawer->created_at->format('Y-m-d H:i') }}</span>
+            <span><b style="color: var(--ink); font-weight: 500;">Stored</b> {{ $drawer->created_at->format('Y-m-d H:i') }}</span>
             @if ($drawer->retention_score !== null)
                 <span><b style="color: var(--ink); font-weight: 500;">Retention</b> {{ round($drawer->retention_score * 100) }}%</span>
             @endif
@@ -101,7 +102,7 @@
         @endif
 
         <span class="stamp" style="display: inline-block; margin-top: 2rem; padding: 0.5rem 0.75rem; border: 1px solid var(--rubric); font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.16em; text-transform: uppercase; color: var(--rubric); transform: rotate(-1deg);">
-            Sealed · {{ $drawer->created_at->format('Y-m-d') }}
+            Stored · {{ $drawer->created_at->format('Y-m-d') }}
         </span>
     </div>
 @endsection
@@ -112,7 +113,7 @@
         <span><b>{{ strlen($drawer->content) }}</b> chars</span>
     </div>
     <div class="group">
-        <span class="rubric">●</span><span>sealed</span>
+        <span class="rubric">●</span><span>stored</span>
     </div>
     <div class="group">
         <span>{{ $drawer->room->wing->slug }}/{{ $drawer->room->slug }}</span>

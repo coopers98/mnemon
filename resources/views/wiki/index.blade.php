@@ -32,7 +32,7 @@
     <div class="toc-foot">
         Compiled <span class="rubric">●</span> {{ $stats['last_compiled']?->diffForHumans() ?? 'never' }}<br/>
         From {{ number_format($stats['total_drawers']) }} verbatim sources<br/>
-        {{ number_format($stats['total_pages']) }} entries · sealed
+        {{ number_format($stats['total_pages']) }} entries · compiled
     </div>
 @endsection
 
@@ -45,7 +45,7 @@
 
     <h1 class="doc-title">The <em>atlas</em>.</h1>
     <p class="doc-sub">
-        Compiled entries, distilled from the verbatim archive. Every page traces back to a sealed
+        Compiled entries, distilled from the verbatim archive. Every page traces back to a verbatim
         drawer; every drawer back to a wing. Walk the index, or jump to a specific kind of memory.
     </p>
 
@@ -80,9 +80,9 @@
                     <div style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);text-align:right;line-height:1.6;white-space:nowrap;">
                         {{ $page->word_count ?? 0 }} words<br/>
                         @if ($page->last_compiled_at)
-                            sealed {{ $page->last_compiled_at->format('Y-m-d') }}
+                            compiled {{ $page->last_compiled_at->format('Y-m-d') }}
                         @else
-                            <span class="rubric">unsealed</span>
+                            <span class="rubric">not compiled</span>
                         @endif
                     </div>
                 </a>
@@ -104,16 +104,16 @@
         <div class="lab">Editor's note</div>
         <div class="text">
             Entries are <em>compiled</em> — distilled from one or more verbatim drawers. The drawer is
-            always the truth; the entry is a useful lie until it is re-sealed.
+            always the truth; the entry is a useful lie until it is recompiled.
         </div>
-        <span class="ref">— mnemon-hq · {{ now()->format('Y-m-d') }}</span>
+        <span class="ref">— {{ now()->format('Y-m-d') }}</span>
     </div>
 
     <div class="margin-block">
         <div class="lab">Glyph</div>
         <div class="text">
-            The vermilion mark denotes a <em>sealed</em> entry — its source drawers have all been hashed
-            and are accounted for in the audit log.
+            The vermilion mark denotes a <em>compiled</em> entry — one with a recorded compile time. Drawers
+            are not hashed, and the mark says nothing about the audit log.
         </div>
     </div>
 

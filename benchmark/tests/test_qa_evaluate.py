@@ -312,3 +312,94 @@ class MainTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateRowDetectionTest(unittest.TestCase):
+    """Collapsing duplicates is fine; collapsing them silently is not.
+
+    A duplicate can flip a scored row to an error, or a correct verdict to an
+    incorrect one, while every count in the output stays internally consistent
+    — so nothing looks wrong. qa_run.py's answered() docstring warns this stage
+    about exactly that. These fail if _load_jsonl stops reporting duplicates.
+    """
+
+    def setUp(self):
+        import tempfile, pathlib
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, name, rows):
+        p = self.dir / name
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+        return p
+
+    def test_a_duplicate_id_is_reported(self):
+        p = self._write("answers-d.jsonl", [
+            {"question_id": "1", "error": None},
+            {"question_id": "2", "error": None},
+            {"question_id": "1", "error": "boom"},
+        ])
+        rows, dupes = qa_evaluate._load_jsonl(p)
+        self.assertEqual(2, len(rows), "last-wins collapse is still the merge rule")
+        self.assertEqual(["1"], dupes)
+
+    def test_the_surviving_row_is_the_last_one(self):
+        p = self._write("answers-d.jsonl", [
+            {"question_id": "1", "error": None},
+            {"question_id": "1", "error": "boom"},
+        ])
+        rows, _ = qa_evaluate._load_jsonl(p)
+        self.assertEqual("boom", rows["1"]["error"])
+
+    def test_a_clean_file_reports_no_duplicates(self):
+        p = self._write("answers-d.jsonl", [
+            {"question_id": "1", "error": None},
+            {"question_id": "2", "error": None},
+        ])
+        _, dupes = qa_evaluate._load_jsonl(p)
+        self.assertEqual([], dupes)
+
+
+class ErrorsExcludedFromRetrievalSplitTest(unittest.TestCase):
+    """The conditional split must exclude errored rows, with a fixture that
+    can actually detect it.
+
+    The original tests hardcoded retrieval_hit=None on every non-scored bucket,
+    but real join_rows output keeps the true/false value from the answer row
+    for ANSWER_ERROR, JUDGE_ERROR and NOT_JUDGED. Since None matches neither
+    `is True` nor `is False`, that fixture could never catch a split that read
+    from the joined rows instead of the scored ones — the mutation passed all
+    21 tests. These use realistic retrieval_hit values so the leak is visible.
+    """
+
+    def test_an_errored_row_with_a_real_hit_stays_out_of_the_split(self):
+        rows = [
+            {"question_id": "a", "status": qa_evaluate.SCORED, "question_type": "t",
+             "retrieval_hit": True, "verdict_a": True, "verdict_b": True,
+             "agreed": True, "error": None},
+            # Errored, but carries a real retrieval_hit exactly as join_rows leaves it.
+            {"question_id": "b", "status": qa_evaluate.ANSWER_ERROR, "question_type": "t",
+             "retrieval_hit": True, "verdict_a": None, "verdict_b": None,
+             "agreed": None, "error": "retrieval error: denied"},
+        ]
+        m = qa_evaluate.score_rows(rows)
+        self.assertEqual(1, m["by_retrieval"]["hit"]["n"],
+                         "the errored row must not inflate the hit denominator")
+        self.assertEqual(1.0, m["by_retrieval"]["hit"]["accuracy"])
+
+    def test_an_errored_miss_row_does_not_create_a_miss_group(self):
+        rows = [
+            {"question_id": "a", "status": qa_evaluate.SCORED, "question_type": "t",
+             "retrieval_hit": True, "verdict_a": True, "verdict_b": True,
+             "agreed": True, "error": None},
+            {"question_id": "b", "status": qa_evaluate.NOT_JUDGED, "question_type": "t",
+             "retrieval_hit": False, "verdict_a": None, "verdict_b": None,
+             "agreed": None, "error": None},
+        ]
+        m = qa_evaluate.score_rows(rows)
+        self.assertEqual(0, m["by_retrieval"]["miss"]["n"])
+        self.assertIsNone(m["by_retrieval"]["miss"]["accuracy"],
+                          "an empty group is n/a, never 0.0")

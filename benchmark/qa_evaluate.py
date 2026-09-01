@@ -180,16 +180,30 @@ def score_rows(joined: list[dict]) -> dict:
     return out
 
 
-def _load_jsonl(path: Path) -> dict[str, dict]:
+def _load_jsonl(path: Path) -> tuple[dict[str, dict], list[str]]:
+    """Rows keyed by question_id, plus any ids that appeared more than once.
+
+    Last-wins is the right merge -- a resumed run appends a retry after the
+    attempt it replaces -- but doing it silently is not. A duplicate can flip a
+    scored row to an error or a correct verdict to an incorrect one while every
+    count in the output stays internally consistent, so nothing looks wrong.
+    qa_run.py's own answered() docstring warns about this by name, for this
+    stage. Collapsing is fine; collapsing without saying so is how a wrong
+    headline gets published.
+    """
     if not path.exists():
         raise FileNotFoundError(path)
     rows: dict[str, dict] = {}
+    duplicates: list[str] = []
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
         row = json.loads(line)
-        rows[row["question_id"]] = row
-    return rows
+        qid = row["question_id"]
+        if qid in rows:
+            duplicates.append(qid)
+        rows[qid] = row
+    return rows, duplicates
 
 
 def main() -> int:
@@ -206,12 +220,12 @@ def main() -> int:
     verdicts_path = config.RESULTS_DIR / f"verdicts-{args.tag}.jsonl"
 
     try:
-        answers = _load_jsonl(answers_path)
+        answers, answer_dupes = _load_jsonl(answers_path)
     except FileNotFoundError as exc:
         print(f"[qa_evaluate] no such file: {exc}", file=sys.stderr)
         return 1
     try:
-        verdicts = _load_jsonl(verdicts_path)
+        verdicts, verdict_dupes = _load_jsonl(verdicts_path)
     except FileNotFoundError as exc:
         print(f"[qa_evaluate] no such file: {exc}", file=sys.stderr)
         return 1
@@ -221,6 +235,8 @@ def main() -> int:
     metrics["tag"] = args.tag
     metrics["answers_total"] = len(answers)
     metrics["verdicts_total"] = len(verdicts)
+    metrics["duplicate_answer_ids"] = sorted(set(answer_dupes))
+    metrics["duplicate_verdict_ids"] = sorted(set(verdict_dupes))
 
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = config.RESULTS_DIR / f"qa-metrics-{args.tag}.json"
@@ -250,6 +266,17 @@ def main() -> int:
         for qtype, entry in metrics["by_type"].items():
             print(f"    {qtype} (n={entry['n']}): {fmt(entry['accuracy'])}")
     print(f"[qa_evaluate] wrote {out_path}")
+
+    for label, dupes in (("answers", answer_dupes), ("verdicts", verdict_dupes)):
+        if dupes:
+            unique = sorted(set(dupes))
+            print(
+                f"[qa_evaluate] WARNING: {len(dupes)} duplicate row(s) in {label} for "
+                f"{len(unique)} question(s): {', '.join(unique[:5])}"
+                f"{' ...' if len(unique) > 5 else ''}. Last row wins, so an earlier "
+                "result was discarded -- re-check the run that produced this file.",
+                file=sys.stderr,
+            )
 
     if metrics["scored"] == 0:
         print("[qa_evaluate] FAILED: nothing was scored", file=sys.stderr)

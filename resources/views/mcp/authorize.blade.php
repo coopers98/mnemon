@@ -62,7 +62,7 @@
                 </h3>
 
                 <p class="text-sm text-muted-foreground text-center mt-2">
-                    Authorize {{ $client->name }} to access your Mnemon brain. Choose which wings this agent can see.
+                    Authorize {{ $client->name }} to access your Mnemon brain. Choose which palace wings this agent can read and write.
                 </p>
             </div>
 
@@ -130,6 +130,11 @@
                                 </div>
                             @endif
                         </div>
+                        <p class="text-xs text-muted-foreground mt-2">
+                            Wing restrictions apply to palace content — drawers and drawer search.
+                            They do not apply to the wiki: this agent will be able to read every
+                            wiki page regardless of the selection above.
+                        </p>
                     </div>
                 </div>
 

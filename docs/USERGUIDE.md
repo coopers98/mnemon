@@ -377,7 +377,7 @@ All Mnemon tools require the single OAuth scope **`mcp:use`**. There are no per-
 Wing restrictions control *which wings* the token can access.
 
 - **All wings (no restriction)** — token sees every wing. Use for trusted personal-device agents.
-- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing, regardless of which tool is called.
+- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's *palace* content — drawers, drawer search, and the wing, room and drawer resources. This does **not** extend to the wiki: wiki pages have no wing dimension, so any token can read any wiki page. See [Limitations](../README.md#limitations).
 
 Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each matching wing, or grant "All wings" and rely on the agent to scope its calls.
 
@@ -426,7 +426,7 @@ Suggested layout:
 
 All tokens carry the single `mcp:use` scope — wing restrictions are the real isolation mechanism. To create a "read-only" agent, restrict it to wings where writing would be harmless or nonexistent.
 
-This way: lose the work laptop, the attacker can't access `personal` content even if they extract the token.
+This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` *palace* content. They can read every wiki page, though — wing restrictions do not apply to the wiki layer — so anything compiled into the wiki is exposed by any leaked token regardless of its restrictions. See [Limitations](../README.md#limitations).
 
 ### Auditing what each device did
 

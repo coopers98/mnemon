@@ -236,9 +236,21 @@ git grep -niE "deployed at" -- . ':!docs/design/' ':!*.lock'
 # 2. No page reaches an external host
 grep -rnE "https?://(fonts\.googleapis|fonts\.gstatic|cdn\.|unpkg|jsdelivr)" public/styles/ resources/views/
 
-# 3. No routable address in the tracked tree
+# 3. No routable address in the tracked tree.
+# Note: a naive grep -v of loopback is NOT sufficient — minified vendor assets
+# contain digit runs like 1.21.997.997 that look address-shaped but have octets
+# over 255. Parse them properly.
 git grep -ohE '\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b' -- . ':!composer.lock' ':!package-lock.json' \
-  | sort -u | grep -vE '^(127\.0\.0\.1|0\.0\.0\.0)'
+  | sort -u | python3 -c "
+import sys, ipaddress
+real = []
+for line in sys.stdin:
+    try: ip = ipaddress.IPv4Address(line.strip())
+    except Exception: continue
+    if not (ip.is_loopback or ip.is_unspecified or ip.is_private or ip.is_reserved):
+        real.append(str(ip))
+print(', '.join(real) if real else 'none — no routable address in the tracked tree')
+"
 
 # 4. Every relative markdown link resolves
 python3 - <<'PY'

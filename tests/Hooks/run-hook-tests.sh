@@ -295,13 +295,54 @@ for _ in $(seq 1 40); do
     [ -s "$MNEMON_DIR/capture-errors.log" ] && break
     sleep 0.25
 done
-if grep -qi 'non-JSON\|HTTP error\|not JSON' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
-    PASS=$((PASS+1)); printf '  ok: a non-JSON error response is logged as such\n'
+if grep -qiE 'non-JSON|HTTP [0-9]{3}|too large' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: a proxy error is logged with its status, not as a jq parse error\n'
 else
     FAIL=$((FAIL+1)); printf '  FAIL: non-JSON response not reported clearly: %s\n' "$(head -1 "$MNEMON_DIR/capture-errors.log" 2>/dev/null)"
 fi
 kill $ERR_PID 2>/dev/null
 mv "$MNEMON_DIR/config.err.json" "$MNEMON_DIR/config.json"
+
+# Test 10d: an expired token is reported. Laravel answers 401 with valid JSON
+# carrying "message", so `.error // empty` is empty and `.result // empty` is
+# empty -- the call returns nothing with exit 0 and nothing is ever logged. The
+# USERGUIDE's "401 errors in capture log" cannot happen while that is true.
+AUTH_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+FAKE_PORT="$AUTH_PORT" FAKE_STATUS=401 "$THIS_DIR/fixtures/server.sh" &
+AUTH_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.auth.json"
+jq --arg e "http://127.0.0.1:$AUTH_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_DIR/capture-errors.log"
+
+tp7="$MNEMON_DIR/transcript-auth.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"anything"}]}}' > "$tp7"
+rm -f "$MNEMON_DIR/sessions/s13.json"
+printf '{"session_id":"s13","transcript_path":"%s","hook_event_name":"Stop"}' "$tp7" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do
+    [ -s "$MNEMON_DIR/capture-errors.log" ] && break
+    sleep 0.25
+done
+if grep -qiE '401|unautheni?ticated|expired|auth' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: an expired token (401) is logged\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: 401 produced no log entry (silent auth failure)\n'
+fi
+kill $AUTH_PID 2>/dev/null
+mv "$MNEMON_DIR/config.auth.json" "$MNEMON_DIR/config.json"
+
+# Test 10e: SessionStart must not rewind the digest pointer. It fires on resume
+# and after compaction too, so resetting last_digest_turn to 0 makes the next
+# Stop re-digest the entire transcript -- re-paying the reader for content
+# already stored, and re-creating drawers.
+printf '{"last_digest_turn":5,"last_recall_at":0,"recent_drawer_ids":[7,8],"nomemo":false,"disabled":false}' \
+  > "$MNEMON_DIR/sessions/s14.json"
+printf '{"session_id":"s14","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+  | "$HOOKS_DIR/mnemon-wake.sh" >/dev/null 2>&1 || true
+kept=$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s14.json" 2>/dev/null)
+assert_eq "$kept" "5" "wake: does not rewind last_digest_turn on SessionStart"
 
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"

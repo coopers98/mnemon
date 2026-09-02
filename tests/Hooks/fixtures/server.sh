@@ -42,9 +42,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # rather than JSON -- the shape that used to surface as a jq parse error.
         status = int(os.environ.get("FAKE_STATUS", "0"))
         if status:
-            page = b"<html>\r\n<head><title>%d</title></head>\r\n</html>\r\n" % status
+            # Laravel answers 401/403 with JSON carrying "message" (not "error"),
+            # which is exactly why an expired token used to pass unnoticed.
+            if status in (401, 403):
+                page = b'{"message":"Unauthenticated."}'
+            else:
+                page = b"<html>\r\n<head><title>%d</title></head>\r\n</html>\r\n" % status
             self.send_response(status)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "application/json" if status in (401, 403) else "text/html")
             self.send_header("Content-Length", str(len(page)))
             self.end_headers()
             self.wfile.write(page)

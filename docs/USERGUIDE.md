@@ -501,15 +501,35 @@ Mnemon's MCP tools work for any agent that thinks to call them. For Claude Code 
 
 ### Install
 
+Mint a personal access token first, on the machine running Mnemon:
+
 ```bash
-php artisan mnemon:install-claude-code-hooks
+php artisan tinker --execute='echo App\Models\User::first()
+    ->createToken("claude-code@<device>", ["mcp:use"])->accessToken;'
 ```
 
+Then install the hooks, passing that token:
+
+```bash
+php artisan mnemon:install-claude-code-hooks --token='<the token>'
+```
+
+**Use a personal access token, not the OAuth flow.** The hooks store the token
+once and have no refresh logic, and `AppServiceProvider` expires OAuth access
+tokens after **one hour** — so an install that mirrors Claude Code's own OAuth
+token stops working within the hour. Personal access tokens last 90 days
+(`Passport::personalAccessTokensExpireIn`).
+
+Name the token per device. `agentSource()` prefers the token name, so it becomes
+the `source` on every `BrainSession` row, and one device can be revoked without
+touching the others.
+
 The command:
-1. Reads your existing OAuth bearer token from `~/.claude.json`.
-2. Verifies it against `/mcp`.
+1. Takes the token from `--token`, or falls back to `~/.claude.json`, or prompts.
+2. Verifies it against `/mcp` before writing anything.
 3. Copies hook scripts to `~/.claude/hooks/`.
-4. Registers them in `~/.claude/settings.json`.
+4. Registers them in `~/.claude/settings.json`, preserving hooks it does not own.
+5. Merges `~/.mnemon/config.json`, so tuned settings survive a re-run.
 
 ### What each hook does
 
@@ -530,7 +550,12 @@ For new-wing proposals: `/admin` → Access Control → Pending Wings.
 
 - **No recall is firing.** Check `~/.mnemon/sessions/<session_id>.json` exists. If `nomemo: true` or `disabled: true`, that session is suppressed. Start a new Claude Code session.
 - **Capture isn't producing drawers.** Tail `~/.mnemon/capture-errors.log`. Common: `OPENAI_API_KEY` missing or rate-limited.
-- **401 errors in capture log.** Token expired. Re-run `php artisan mnemon:install-claude-code-hooks --force` after refreshing the OAuth flow in Claude Code.
+- **`HTTP 401 ... token rejected or expired` in the capture log.** Mint a fresh
+  personal access token (see Install) and re-run the installer with `--token`.
+  Do not re-run it against Claude Code's OAuth token: that one expires in an hour.
+- **Recall is silent and nothing is logged.** Against a remote instance the
+  default 800ms budget can be shorter than the round trip. Set
+  `recall_timeout_ms` in `~/.mnemon/config.json` (3000 is a reasonable start).
 - **`@nomemo` accidentally turned on.** Delete `~/.mnemon/sessions/<session_id>.json` to reset.
 
 ---

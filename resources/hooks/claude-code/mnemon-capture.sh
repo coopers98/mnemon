@@ -98,16 +98,18 @@ run_once() {
     state=$(mnemon_session_state "$session_id")
     recent_ids=$(printf '%s' "$state" | jq -c '.recent_drawer_ids')
 
-    text=$(cat "$tfile")
-    rm -f "$tfile"
-
+    # --rawfile, not --arg: a transcript passed through argv dies with
+    # "Argument list too long" past MAX_ARG_STRLEN (~128KB on Linux), and real
+    # sessions run to megabytes.
     params=$(jq -n \
         --arg sid "$session_id" \
         --argjson ts "$sstart" \
         --argjson te "$send" \
-        --arg t "$text" \
+        --rawfile t "$tfile" \
         --argjson r "$recent_ids" \
         '{name:"session_digest",arguments:{session_id:$sid,harness:"claude-code",turn_range:{start:$ts,end:$te},transcript:$t,recent_drawer_ids:$r}}')
+
+    rm -f "$tfile"
 
     result=$(mnemon_call "tools/call" "$params" 60000 "${pair%|*}" "${pair#*|}") \
         || { mnemon_log_error "digest call failed for session=$session_id"; return 1; }

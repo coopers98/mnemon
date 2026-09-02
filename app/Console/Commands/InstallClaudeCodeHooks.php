@@ -96,6 +96,12 @@ class InstallClaudeCodeHooks extends Command
             chmod($dst, 0755);
         }
 
+        // mnemon-capture.sh writes lib/digest-worker.sh lazily and skips the
+        // write when an executable copy already exists, so a worker left by an
+        // older release would shadow the current source indefinitely. Clear it
+        // and let the freshly copied capture script regenerate it.
+        File::delete($hooksDir.'/lib/digest-worker.sh');
+
         $this->registerHooksInSettings($claudeDir.'/settings.json', $hooksDir);
 
         $this->info('Mnemon Claude Code hooks installed.');

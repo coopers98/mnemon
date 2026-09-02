@@ -111,15 +111,31 @@ directory and repoint a `current` symlink at it. Two of the initialization steps
 above are **not** part of `composer install` or `migrate`, so a deploy pipeline
 that only runs those leaves the install unable to authenticate:
 
+Run both once, by hand, on a new server:
+
 ```bash
 php artisan passport:keys                        # RSA keypair for token signing
 php artisan passport:client --personal \
     --name="Personal Access Client" --no-interaction
 ```
 
-Add both to the deploy script. They are idempotent — `passport:keys` declines to
-overwrite an existing keypair unless given `--force`, and the client creation can
-be guarded with a check — so they cost nothing on subsequent deploys.
+**If you put them in the deploy script, guard them.** Neither is safe to re-run
+bare: `passport:keys` **exits 1** with *"Encryption keys already exist"* once a
+keypair is present, which fails the whole deploy under `set -e`, and re-running
+the client command mints a duplicate personal access client every time. Guard on
+the artifacts instead:
+
+```bash
+[ -f storage/oauth-private.key ] || php artisan passport:keys
+
+php artisan tinker --execute='exit(\Laravel\Passport\Client::all()
+    ->filter(fn ($c) => $c->hasGrantType("personal_access"))->count() ? 0 : 1);' \
+  || php artisan passport:client --personal \
+       --name="Personal Access Client" --no-interaction
+```
+
+Do not reach for `--force` on `passport:keys` in a deploy script: it overwrites
+the keypair on every deploy, invalidating every token that was ever issued.
 
 Without the keypair, `POST /mcp` returns **500 rather than 401** for every
 request, authenticated or not, because the token guard cannot load the public key.

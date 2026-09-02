@@ -110,6 +110,25 @@ class InstallClaudeCodeHooksTest extends TestCase
             'a tuned budget must survive a reinstall, or recall silently reverts');
     }
 
+    public function test_reinstall_clears_a_stale_generated_worker(): void
+    {
+        Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);
+
+        // mnemon-capture.sh writes lib/digest-worker.sh lazily, guarded by
+        // [ ! -x "$worker" ]. A copy left from an older release therefore
+        // shadows the heredoc forever: fixes to the source never take effect.
+        $hooks = $this->home.'/.claude/hooks/lib';
+        File::ensureDirectoryExists($hooks);
+        File::put($hooks.'/digest-worker.sh', "#!/usr/bin/env bash\n# stale worker from an older release\n");
+        chmod($hooks.'/digest-worker.sh', 0o755);
+
+        $this->artisan('mnemon:install-claude-code-hooks',
+            ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok'])->assertExitCode(0);
+
+        $this->assertFileDoesNotExist($hooks.'/digest-worker.sh',
+            'a stale generated worker must be cleared so it regenerates from the current source');
+    }
+
     public function test_hooks_are_registered_in_claude_code_schema(): void
     {
         Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);

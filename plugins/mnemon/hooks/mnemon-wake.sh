@@ -14,7 +14,9 @@ if [ -z "$session_id" ]; then
 fi
 
 pair=$(mnemon_token) || {
-    printf 'Mnemon: not connected — run `claude mcp add --transport http mnemon <url>` to enable memory.\n'
+    # Point at a personal access token, not the OAuth flow: hooks store the
+    # token once with no refresh, and OAuth access tokens expire in an hour.
+    printf 'Mnemon: not connected. Create ~/.mnemon/config.json with {"endpoint":"https://<your-instance>/mcp","bearer_token":"<personal access token>"} (chmod 600), or set MNEMON_ENDPOINT and MNEMON_TOKEN.\n'
     exit 0
 }
 

@@ -56,7 +56,11 @@ mnemon_session_state_write "$session_id" "$state"
 
 # Call recall.
 params=$(jq -n --arg p "$prompt" '{name:"recall",arguments:{prompt:$p,token_budget:1500}}')
-result=$(mnemon_call "tools/call" "$params" 800 "${pair%|*}" "${pair#*|}") || exit 0
+# Budget for the recall round trip. 800ms suits a localhost instance; a remote
+# one needs more (a hosted instance measures ~1.2s), and a budget that is too
+# tight makes recall a silent no-op. Override with recall_timeout_ms in config.
+budget=$(mnemon_config_value 'recall_timeout_ms' 800)
+result=$(mnemon_call "tools/call" "$params" "$budget" "${pair%|*}" "${pair#*|}") || exit 0
 [ -z "$result" ] && exit 0
 
 payload=$(printf '%s' "$result" | jq -c '.structuredContent // empty')

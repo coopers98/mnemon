@@ -9,9 +9,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 input=$(cat 2>/dev/null || echo '{}')
 session_id=$(printf '%s' "$input" | jq -r '.session_id // empty')
 transcript=$(printf '%s' "$input" | jq -c '.transcript // empty')
-turn_index=$(printf '%s' "$input" | jq -r '.turn_index // 0')
+transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
 
 [ -z "$session_id" ] && exit 0
+
+# Claude Code's Stop payload carries `transcript_path` -- a path to the session
+# JSONL -- and neither an inline transcript nor a turn index. Reading a
+# `.transcript` key that is never sent makes capture a permanent silent no-op.
+# An inline array is still accepted so callers that supply one keep working.
+if [ -z "$transcript" ] || [ "$transcript" = "null" ]; then
+    [ -n "$transcript_path" ] && [ -r "$transcript_path" ] || exit 0
+    transcript=$(jq -s -c '.' "$transcript_path" 2>/dev/null) || exit 0
+    # No turn index is supplied; the transcript's line count is monotonic, so it
+    # serves as one and lets the digest advance only over what is new.
+    turn_index=$(wc -l < "$transcript_path" | tr -d ' ')
+else
+    turn_index=$(printf '%s' "$input" | jq -r '.turn_index // 0')
+fi
+
 [ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
 
 mnemon_token > /dev/null || exit 0
@@ -24,9 +39,18 @@ last_turn=$(printf '%s' "$state" | jq -r '.last_digest_turn')
 [ "$turn_index" -le "$last_turn" ] && exit 0
 
 # Structural sanitize: drop tool_use, tool_result, thinking blocks.
+# Tool I/O and thinking appear at two levels: as whole records, and -- in real
+# Claude Code transcripts -- as blocks nested under .message.content. Filtering
+# only the top level lets tool output through.
 cleaned=$(printf '%s' "$transcript" | jq -c '
+    def strip_blocks: map(select((.type // "") | test("tool_use|tool_result|thinking") | not));
     if type == "array" then
-        map(select((.type // "") | test("tool_use|tool_result|thinking") | not))
+        strip_blocks
+        | map(
+            if (.message? | type) == "object" and (.message.content? | type) == "array"
+            then .message.content |= strip_blocks
+            else . end
+          )
     else . end
 ')
 

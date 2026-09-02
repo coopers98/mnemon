@@ -9,7 +9,8 @@ reply_recall='{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"found":tru
 
 while true; do
     {
+        sleep "${FAKE_DELAY:-0}"
         body="$reply_recall"
         printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "${#body}" "$body"
-    } | nc -l "$FAKE_PORT" >/dev/null 2>&1 || true
+    } | nc -l "$FAKE_PORT" >> "${FAKE_REQUEST_LOG:-/dev/null}" 2>/dev/null || true
 done

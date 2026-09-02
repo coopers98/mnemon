@@ -104,6 +104,18 @@ jobs:
       - name: Check formatting
         run: ./vendor/bin/pint --test
 
+  hooks:
+    name: hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install netcat
+        run: sudo apt-get update && sudo apt-get install -y netcat-openbsd
+
+      - name: Run the Claude Code hook tests
+        run: bash tests/Hooks/run-hook-tests.sh
+
   compose:
     name: compose
     runs-on: ubuntu-latest

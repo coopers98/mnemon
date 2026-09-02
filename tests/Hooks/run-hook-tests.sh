@@ -303,6 +303,35 @@ fi
 kill $ERR_PID 2>/dev/null
 mv "$MNEMON_DIR/config.err.json" "$MNEMON_DIR/config.json"
 
+# Test 10f: requests carry the Accept header MCP Streamable HTTP requires.
+# Without it a Laravel instance answers an auth failure with a 302 redirect to
+# an HTML login page rather than a 401, so the token-expired branch can never
+# fire against a real server no matter how correct it looks against a fixture.
+# Self-contained: earlier tests repoint the endpoint and do not all restore it.
+HDR_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+HDR_LOG="$MNEMON_DIR/headers.log"
+: > "$HDR_LOG"
+FAKE_PORT="$HDR_PORT" FAKE_HEADER_LOG="$HDR_LOG" "$THIS_DIR/fixtures/server.sh" &
+HDR_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.hdr.json"
+jq --arg e "http://127.0.0.1:$HDR_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+
+printf '{"session_id":"s15","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+  | "$HOOKS_DIR/mnemon-wake.sh" >/dev/null 2>&1 || true
+for _ in $(seq 1 20); do
+    [ -s "$HDR_LOG" ] && break
+    sleep 0.25
+done
+if grep -qi '^Accept:.*application/json' "$HDR_LOG" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: requests send an Accept header for JSON\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: no JSON Accept header sent (auth failures come back as 302 HTML)\n'
+fi
+kill $HDR_PID 2>/dev/null
+mv "$MNEMON_DIR/config.hdr.json" "$MNEMON_DIR/config.json"
+
 # Test 10d: an expired token is reported. Laravel answers 401 with valid JSON
 # carrying "message", so `.error // empty` is empty and `.result // empty` is
 # empty -- the call returns nothing with exit 0 and nothing is ever logged. The

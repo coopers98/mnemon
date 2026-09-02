@@ -74,9 +74,13 @@ mnemon_call() {
     rm -f "$params_file"
 
     local response raw status
+    # Accept is required by MCP Streamable HTTP, and it is what makes a Laravel
+    # instance answer an auth failure with a 401 instead of a 302 redirect to an
+    # HTML login page -- without it the token-expired branch below never fires.
     raw=$(curl -s -m "$timeout_s" -w '\n%{http_code}' -X POST "$endpoint" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
         --data-binary @"$body" 2>/dev/null) || { rm -f "$body"; return 1; }
     rm -f "$body"
 

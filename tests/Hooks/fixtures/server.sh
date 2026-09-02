@@ -59,6 +59,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(LOG, "ab") as fh:
                 fh.write(body + b"\n")
 
+        hdr_log = os.environ.get("FAKE_HEADER_LOG", "")
+        if hdr_log:
+            with open(hdr_log, "a") as fh:
+                for k, v in self.headers.items():
+                    fh.write(f"{k}: {v}\n")
+
         if DELAY:
             time.sleep(DELAY)
 

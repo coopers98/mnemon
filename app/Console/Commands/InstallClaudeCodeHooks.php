@@ -61,10 +61,18 @@ class InstallClaudeCodeHooks extends Command
         $mnemonDir = $home.'/.mnemon';
         File::ensureDirectoryExists($mnemonDir);
         File::ensureDirectoryExists($mnemonDir.'/sessions');
-        File::put($mnemonDir.'/config.json', json_encode([
+        // Merge rather than overwrite: the file also holds settings the user
+        // tuned, such as recall_timeout_ms, and a reinstall that dropped them
+        // would silently revert behaviour they had deliberately changed.
+        $configFile = $mnemonDir.'/config.json';
+        $config = File::exists($configFile)
+            ? (json_decode(File::get($configFile), true) ?: [])
+            : [];
+
+        File::put($configFile, json_encode(array_merge($config, [
             'endpoint' => $endpoint,
             'bearer_token' => $token,
-        ], JSON_PRETTY_PRINT));
+        ]), JSON_PRETTY_PRINT));
         chmod($mnemonDir.'/config.json', 0600);
 
         $hooksDir = $claudeDir.'/hooks';

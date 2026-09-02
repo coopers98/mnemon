@@ -88,6 +88,28 @@ class InstallClaudeCodeHooksTest extends TestCase
         return $out;
     }
 
+    public function test_rerun_preserves_settings_the_user_added_to_config(): void
+    {
+        Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);
+
+        File::ensureDirectoryExists($this->home.'/.mnemon');
+        File::put($this->home.'/.mnemon/config.json', json_encode([
+            'endpoint' => 'http://old/mcp',
+            'bearer_token' => 'old',
+            'recall_timeout_ms' => 3000,
+        ]));
+
+        $this->artisan('mnemon:install-claude-code-hooks',
+            ['--endpoint' => 'http://localhost/mcp', '--token' => 'tok'])->assertExitCode(0);
+
+        $config = json_decode(File::get($this->home.'/.mnemon/config.json'), true);
+
+        $this->assertSame('http://localhost/mcp', $config['endpoint'], 'endpoint should be updated');
+        $this->assertSame('tok', $config['bearer_token'], 'token should be updated');
+        $this->assertSame(3000, $config['recall_timeout_ms'] ?? null,
+            'a tuned budget must survive a reinstall, or recall silently reverts');
+    }
+
     public function test_hooks_are_registered_in_claude_code_schema(): void
     {
         Http::fake(['localhost/mcp' => Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []])]);

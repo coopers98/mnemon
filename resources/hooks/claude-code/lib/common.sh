@@ -56,15 +56,29 @@ mnemon_call() {
     local timeout_s
     timeout_s=$(awk "BEGIN{print $timeout_ms/1000}")
 
-    local payload
-    payload=$(jq -n --arg m "$method" --argjson p "$params" \
-        '{jsonrpc:"2.0",id:1,method:$m,params:$p}')
+    # Build the request body in a file and post it from there. A session
+    # transcript runs to megabytes, and both `jq --argjson` and `curl -d` take
+    # their value through argv, which dies with "Argument list too long" past
+    # MAX_ARG_STRLEN (~128KB on Linux). Shell builtins and redirection have no
+    # such limit.
+    local body params_file
+    body=$(mktemp "${TMPDIR:-/tmp}/mnemon-body.XXXXXX") || return 1
+    params_file="$body.params"
+    printf '%s' "$params" > "$params_file"
+
+    if ! jq -n --arg m "$method" --slurpfile p "$params_file" \
+        '{jsonrpc:"2.0",id:1,method:$m,params:$p[0]}' > "$body" 2>/dev/null; then
+        rm -f "$body" "$params_file"
+        return 1
+    fi
+    rm -f "$params_file"
 
     local response
     response=$(curl -s -m "$timeout_s" -X POST "$endpoint" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null) || return 1
+        --data-binary @"$body" 2>/dev/null) || { rm -f "$body"; return 1; }
+    rm -f "$body"
 
     local err
     err=$(printf '%s' "$response" | jq -r '.error // empty' 2>/dev/null)

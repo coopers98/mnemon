@@ -136,6 +136,35 @@ for _ in $(seq 1 40); do
 done
 assert_ne "$ldt" "0" "capture: real Stop payload (transcript_path) dispatches a digest"
 
+# Test 10: capture survives a transcript larger than the argv limit. Passing the
+# transcript as a jq --arg makes the worker die with "Argument list too long"
+# once it exceeds MAX_ARG_STRLEN (~128KB on Linux) -- and real sessions run to
+# megabytes, so every genuine capture failed while the tests, with their
+# two-line fixtures, passed.
+: > "$REQ_LOG"
+tp3="$MNEMON_DIR/transcript-big.jsonl"
+: > "$tp3"
+big=$(head -c 200000 /dev/zero | tr '\0' 'x')
+for i in 1 2 3; do
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}\n' "$big" >> "$tp3"
+done
+printf '{"session_id":"s9","transcript_path":"%s","hook_event_name":"Stop"}' "$tp3" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$REQ_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+if grep -q 'session_digest' "$REQ_LOG" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: capture: handles a transcript larger than the argv limit\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: a >128KB transcript never reached the server\n'
+    if [ -s "$MNEMON_DIR/capture-errors.log" ]; then
+        printf '    worker log: %s\n' "$(tail -3 "$MNEMON_DIR/capture-errors.log")"
+    else
+        printf '    worker log: (empty)\n'
+    fi
+fi
+
 # Test 10: capture strips tool I/O nested inside message.content. Real Claude
 # Code records are {"type":"assistant","message":{"content":[{"type":"tool_result",...}]}},
 # so a filter that only inspects the top-level .type lets tool output through --

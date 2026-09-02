@@ -19,15 +19,14 @@ transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
 # An inline array is still accepted so callers that supply one keep working.
 if [ -z "$transcript" ] || [ "$transcript" = "null" ]; then
     [ -n "$transcript_path" ] && [ -r "$transcript_path" ] || exit 0
-    transcript=$(jq -s -c '.' "$transcript_path" 2>/dev/null) || exit 0
     # No turn index is supplied; the transcript's line count is monotonic, so it
-    # serves as one and lets the digest advance only over what is new.
+    # serves as one. The content itself is read later, once the last digested
+    # turn is known, so only the new turns are loaded.
     turn_index=$(wc -l < "$transcript_path" | tr -d ' ')
 else
     turn_index=$(printf '%s' "$input" | jq -r '.turn_index // 0')
+    [ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
 fi
-
-[ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
 
 mnemon_token > /dev/null || exit 0
 
@@ -37,6 +36,29 @@ state=$(mnemon_session_state "$session_id")
 
 last_turn=$(printf '%s' "$state" | jq -r '.last_digest_turn')
 [ "$turn_index" -le "$last_turn" ] && exit 0
+
+# Send only the turns added since the last digest. Re-sending the whole
+# transcript every time re-digests content already stored and grows without
+# bound: a reverse proxy rejects the request with 413 once the body passes its
+# limit (1MiB by default), and the HTML error page comes back to the caller as
+# a jq parse error rather than anything resembling "too big".
+if [ -n "$transcript_path" ]; then
+    slice_file="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
+    tail -n +"$((last_turn + 1))" "$transcript_path" > "$slice_file" 2>/dev/null || exit 0
+
+    # Even one digest can exceed the limit on a long first run, so cap it.
+    # Trim whole records from the front: tail -c can land mid-line, and the
+    # leading partial is dropped so the slice stays valid JSONL.
+    max_bytes=$(mnemon_config_value 'max_digest_bytes' 262144)
+    if [ "$(wc -c < "$slice_file")" -gt "$max_bytes" ]; then
+        tail -c "$max_bytes" "$slice_file" | tail -n +2 > "$slice_file.cap" \
+            && mv "$slice_file.cap" "$slice_file"
+    fi
+
+    transcript=$(jq -s -c '.' "$slice_file" 2>/dev/null)
+    rm -f "$slice_file"
+    [ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
+fi
 
 # Structural sanitize: drop tool_use, tool_result, thinking blocks.
 # Tool I/O and thinking appear at two levels: as whole records, and -- in real

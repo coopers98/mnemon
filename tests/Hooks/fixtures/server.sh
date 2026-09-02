@@ -38,6 +38,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else b""
 
+        # FAKE_STATUS lets a test exercise a proxy error, whose body is HTML
+        # rather than JSON -- the shape that used to surface as a jq parse error.
+        status = int(os.environ.get("FAKE_STATUS", "0"))
+        if status:
+            page = b"<html>\r\n<head><title>%d</title></head>\r\n</html>\r\n" % status
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
+
         if LOG:
             with open(LOG, "ab") as fh:
                 fh.write(body + b"\n")

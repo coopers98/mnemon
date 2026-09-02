@@ -73,12 +73,23 @@ mnemon_call() {
     fi
     rm -f "$params_file"
 
-    local response
-    response=$(curl -s -m "$timeout_s" -X POST "$endpoint" \
+    local response raw status
+    raw=$(curl -s -m "$timeout_s" -w '\n%{http_code}' -X POST "$endpoint" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
         --data-binary @"$body" 2>/dev/null) || { rm -f "$body"; return 1; }
     rm -f "$body"
+
+    status="${raw##*$'\n'}"
+    response="${raw%$'\n'*}"
+
+    # A proxy rejecting the request answers with an HTML page, not JSON. Piping
+    # that to jq yields "Invalid numeric literal", which says nothing about what
+    # went wrong -- so say it here instead.
+    if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+        mnemon_log_error "non-JSON response (HTTP $status) from $endpoint: $(printf '%s' "$response" | head -c 80 | tr -d '\r\n')"
+        return 1
+    fi
 
     local err
     err=$(printf '%s' "$response" | jq -r '.error // empty' 2>/dev/null)

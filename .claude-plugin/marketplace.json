@@ -10,7 +10,7 @@
       "name": "mnemon",
       "source": "./plugins/mnemon",
       "description": "Automatic memory for Claude Code, backed by a self-hosted Mnemon instance.",
-      "version": "0.1.2"
+      "version": "0.2.0"
     }
   ]
 }

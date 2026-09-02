@@ -18,8 +18,12 @@ pair=$(mnemon_token) || {
     exit 0
 }
 
-state=$(printf '{"last_digest_turn":0,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}')
-mnemon_session_state_write "$session_id" "$state"
+# Ensure state exists, but never rewind it. SessionStart also fires on resume
+# and after compaction, so resetting last_digest_turn to 0 here would make the
+# next Stop re-digest the whole transcript: re-paying the reader for content
+# already stored, and duplicating drawers. A genuinely new session has a new
+# session_id and so gets fresh defaults anyway.
+mnemon_session_state "$session_id" > /dev/null
 
 result=$(mnemon_call "tools/call" \
     "$(jq -n '{name:"palace_wake_up",arguments:{}}')" \

@@ -83,6 +83,19 @@ mnemon_call() {
     status="${raw##*$'\n'}"
     response="${raw%$'\n'*}"
 
+    # Check the status before the body. Laravel answers 401 with valid JSON
+    # carrying "message" (not "error"), so an expired token otherwise slips
+    # through every check below and the call returns empty with exit 0 --
+    # indistinguishable from "nothing found", and logged nowhere.
+    if [ "${status:-0}" -ge 400 ] 2>/dev/null; then
+        case "$status" in
+            401|403) mnemon_log_error "HTTP $status from $endpoint - token rejected or expired; re-run the Mnemon setup to refresh it" ;;
+            413)     mnemon_log_error "HTTP $status from $endpoint - request too large for the server or its proxy" ;;
+            *)       mnemon_log_error "HTTP $status from $endpoint: $(printf '%s' "$response" | head -c 80 | tr -d '\r\n')" ;;
+        esac
+        return 1
+    fi
+
     # A proxy rejecting the request answers with an HTML page, not JSON. Piping
     # that to jq yields "Invalid numeric literal", which says nothing about what
     # went wrong -- so say it here instead.

@@ -4,7 +4,7 @@
 
 set -uo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOKS_DIR="$(cd "$THIS_DIR/../../resources/hooks/claude-code" && pwd)"
+HOOKS_DIR="$(cd "$THIS_DIR/../../plugins/mnemon/hooks" && pwd)"
 # Pick a free port rather than hardcoding one: a collision makes the hooks talk
 # to whatever else is listening, which surfaces as confusing jq parse errors
 # rather than an honest failure.
@@ -45,11 +45,6 @@ assert_eq() {
     fi
 }
 
-# mnemon-capture.sh writes lib/digest-worker.sh lazily and skips the write when
-# an executable copy exists, so a worker left by an earlier run would shadow the
-# current source and the suite would test stale code.
-rm -f "$HOOKS_DIR/lib/digest-worker.sh"
-
 # Start the fake server in the background.
 REQ_LOG="$MNEMON_DIR/requests.log"
 : > "$REQ_LOG"
@@ -58,6 +53,31 @@ export FAKE_REQUEST_LOG="$REQ_LOG"
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; rm -rf "$MNEMON_DIR"' EXIT
 sleep 0.5
+
+# Test 0: the digest worker ships as a real, version-controlled file rather than
+# being written at runtime from a heredoc. Under a plugin the hooks directory is
+# a cache that is wholesale-replaced on update and is not a place to write to;
+# the lazy write was also guarded by [ ! -x ], so a stale copy shadowed its own
+# source indefinitely. Checked against git, not the filesystem: a leftover
+# generated copy would otherwise make this pass for the wrong reason.
+if git -C "$THIS_DIR/../.." ls-files --error-unmatch "${HOOKS_DIR#"$(cd "$THIS_DIR/../.." && pwd)/"}/lib/digest-worker.sh" >/dev/null 2>&1; then
+    PASS=$((PASS+1)); printf '  ok: digest worker is version-controlled, not generated\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: digest worker is not tracked in git; still generated at runtime\n'
+fi
+if grep -qE "<<'WORKER'|cat > \"\$worker\"" "$HOOKS_DIR/mnemon-capture.sh" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture still writes the worker from a heredoc\n'
+else
+    PASS=$((PASS+1)); printf '  ok: capture does not generate the worker at runtime\n'
+fi
+
+# Test 0b: environment variables take precedence over config.json. A plugin can
+# supply credentials to its hooks as env vars, which keeps the token out of a
+# world-readable-by-mistake file and out of any conversation transcript. The
+# config file remains the fallback for installs that have no plugin.
+env_out=$(MNEMON_ENDPOINT="http://env.example/mcp" MNEMON_TOKEN="env-token" \
+    bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token" 2>/dev/null)
+assert_eq "$env_out" "http://env.example/mcp|env-token" "token: environment overrides config.json"
 
 # Test 1: recall hook short-circuits on too-short prompt.
 out=$(printf '{"session_id":"s1","prompt":"hi"}' | "$HOOKS_DIR/mnemon-recall.sh" || true)

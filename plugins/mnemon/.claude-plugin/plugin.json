@@ -1,0 +1,10 @@
+{
+  "name": "mnemon",
+  "description": "Automatic memory for Claude Code, backed by a self-hosted Mnemon instance: recalls relevant context per prompt and digests each session into the palace.",
+  "version": "0.1.0",
+  "author": { "name": "Cooper Sellers" },
+  "homepage": "https://github.com/coopers98/mnemon",
+  "repository": "https://github.com/coopers98/mnemon",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "second-brain", "recall", "mnemon"]
+}

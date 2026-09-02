@@ -78,8 +78,8 @@ class InstallClaudeCodeHooks extends Command
         $hooksDir = $claudeDir.'/hooks';
         File::ensureDirectoryExists($hooksDir.'/lib');
 
-        $repoHooks = base_path('resources/hooks/claude-code');
-        foreach (['lib/common.sh', 'mnemon-wake.sh', 'mnemon-recall.sh', 'mnemon-capture.sh'] as $file) {
+        $repoHooks = base_path('plugins/mnemon/hooks');
+        foreach (['lib/common.sh', 'lib/digest-worker.sh', 'mnemon-wake.sh', 'mnemon-recall.sh', 'mnemon-capture.sh'] as $file) {
             $src = "$repoHooks/$file";
             $dst = "$hooksDir/$file";
             if (! File::exists($src)) {
@@ -95,12 +95,6 @@ class InstallClaudeCodeHooks extends Command
             File::copy($src, $dst);
             chmod($dst, 0755);
         }
-
-        // mnemon-capture.sh writes lib/digest-worker.sh lazily and skips the
-        // write when an executable copy already exists, so a worker left by an
-        // older release would shadow the current source indefinitely. Clear it
-        // and let the freshly copied capture script regenerate it.
-        File::delete($hooksDir.'/lib/digest-worker.sh');
 
         $this->registerHooksInSettings($claudeDir.'/settings.json', $hooksDir);
 

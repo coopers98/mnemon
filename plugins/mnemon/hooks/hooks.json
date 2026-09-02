@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/mnemon-wake.sh\"",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "Mnemon: waking the palace"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/mnemon-recall.sh\"",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "Mnemon: recalling"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/mnemon-capture.sh\"",
+            "shell": "bash",
+            "timeout": 20,
+            "statusMessage": "Mnemon: capturing session"
+          }
+        ]
+      }
+    ]
+  }
+}

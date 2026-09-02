@@ -13,6 +13,17 @@ mkdir -p "$MNEMON_SESSIONS_DIR" 2>/dev/null || true
 
 # Read endpoint + bearer token. Echoes "<endpoint>|<token>" or empty if not configured.
 mnemon_token() {
+    # Environment first. A plugin can hand its hooks credentials this way, which
+    # keeps the token out of a file on disk and out of any transcript. Both
+    # Mnemon's own names and Claude Code's plugin-option names are accepted.
+    local env_endpoint env_token
+    env_endpoint="${MNEMON_ENDPOINT:-${CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT:-}}"
+    env_token="${MNEMON_TOKEN:-${CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN:-}}"
+    if [ -n "$env_endpoint" ] && [ -n "$env_token" ]; then
+        printf '%s|%s' "$env_endpoint" "$env_token"
+        return 0
+    fi
+
     if [ -f "$MNEMON_CONFIG" ]; then
         local endpoint token
         endpoint=$(jq -r '.endpoint // empty' "$MNEMON_CONFIG" 2>/dev/null)

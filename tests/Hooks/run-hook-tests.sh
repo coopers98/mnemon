@@ -115,6 +115,42 @@ else
     PASS=$((PASS+1)); printf '  ok: capture recovers from a zero-byte state file\n'
 fi
 
+# Test 0d: the session start warns before the token expires. Passport tokens are
+# JWTs carrying their own exp, so this needs no server call. Without it the only
+# notice of expiry is a line in capture-errors.log that nothing surfaces, and
+# memory simply stops -- which is how this feature has failed every other time.
+make_jwt() {  # $1 = seconds from now until exp
+    local exp payload
+    exp=$(( $(date +%s) + $1 ))
+    payload=$(printf '{"aud":"1","jti":"x","iat":0,"nbf":0,"exp":%s,"sub":"1","scopes":["mcp:use"]}' "$exp" \
+        | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    printf 'eyJhbGciOiJSUzI1NiJ9.%s.sig' "$payload"
+}
+
+days_left=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 259200)\"" 2>/dev/null)
+assert_eq "$days_left" "3" "token: reads days remaining from the JWT exp"
+
+far=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 5184000)\"" 2>/dev/null)
+assert_eq "$far" "60" "token: reads a distant expiry correctly"
+
+opaque=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left not-a-jwt" 2>/dev/null; echo "rc=$?")
+case "$opaque" in
+    *rc=1*) PASS=$((PASS+1)); printf '  ok: token: a non-JWT token reports unknown rather than failing\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: token: non-JWT should return non-zero, got [%s]\n' "$opaque";;
+esac
+
+# End to end: wake warns when the token is close to expiry.
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.exp.json"
+jq --arg t "$(make_jwt 259200)" '.bearer_token=$t' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+warn=$(printf '{"session_id":"s16","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+  | "$HOOKS_DIR/mnemon-wake.sh" 2>&1 || true)
+case "$warn" in
+    *"expire"*) PASS=$((PASS+1)); printf '  ok: wake warns when the token is near expiry\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake gave no expiry warning for a token 3 days from expiring\n';;
+esac
+mv "$MNEMON_DIR/config.exp.json" "$MNEMON_DIR/config.json"
+
 # Test 1: recall hook short-circuits on too-short prompt.
 out=$(printf '{"session_id":"s1","prompt":"hi"}' | "$HOOKS_DIR/mnemon-recall.sh" || true)
 assert_eq "$out" "" "recall: short prompt → no output"

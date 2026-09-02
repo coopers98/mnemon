@@ -27,6 +27,20 @@ pair=$(mnemon_token) || {
 # session_id and so gets fresh defaults anyway.
 mnemon_session_state "$session_id" > /dev/null
 
+# Warn before the token expires rather than after. Expiry is otherwise silent:
+# the hooks simply stop returning anything, and the only trace is a line in
+# capture-errors.log that nothing surfaces.
+warn_days=$(mnemon_config_value 'token_warn_days' 14)
+if days_left=$(mnemon_token_days_left "${pair#*|}"); then
+    if [ "$days_left" -le "$warn_days" ]; then
+        if [ "$days_left" -le 0 ]; then
+            printf 'Mnemon: the access token has expired — memory is off until it is replaced.\n'
+        else
+            printf 'Mnemon: the access token expires in %s day(s). Mint a replacement before then or memory stops silently.\n' "$days_left"
+        fi
+    fi
+fi
+
 result=$(mnemon_call "tools/call" \
     "$(jq -n '{name:"palace_wake_up",arguments:{}}')" \
     2000 \

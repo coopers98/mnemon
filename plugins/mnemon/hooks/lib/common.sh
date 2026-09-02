@@ -139,6 +139,32 @@ mnemon_config_value() {
     fi
 }
 
+# Days remaining before a token expires. Args: <token>. Echoes an integer and
+# returns 0, or returns 1 when the token carries no readable expiry.
+#
+# Passport issues JWTs, so the expiry travels with the token and no request is
+# needed. A token that is not a JWT is not an error -- it just cannot be checked.
+mnemon_token_days_left() {
+    local token="$1" payload pad exp now
+    case "$token" in
+        *.*.*) ;;
+        *) return 1 ;;
+    esac
+
+    payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
+    # base64 needs the padding a JWT omits.
+    pad=$(( (4 - ${#payload} % 4) % 4 ))
+    while [ "$pad" -gt 0 ]; do payload="${payload}="; pad=$((pad - 1)); done
+
+    exp=$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r '.exp // empty' 2>/dev/null)
+    case "$exp" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+
+    now=$(date +%s)
+    printf '%s' "$(( (exp - now) / 86400 ))"
+}
+
 # Read or initialize session state. Args: <session_id>. Echoes JSON.
 mnemon_session_state() {
     local sid="$1"

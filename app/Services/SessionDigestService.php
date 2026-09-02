@@ -4,8 +4,10 @@ namespace App\Services;
 
 use App\Models\Drawer;
 use App\Models\Room;
+use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 
 class SessionDigestService
@@ -31,6 +33,14 @@ class SessionDigestService
         array $recentDrawerIds,
         ?array $allowedWingPatterns,
     ): array {
+        // A slice already digested is returned as-is rather than digested again.
+        // The capture hook can dispatch the same range twice -- two workers
+        // racing, or a session replaying a range after a resume -- and each
+        // dispatch otherwise costs a reader call and duplicates drawers.
+        if ($replay = $this->replayFor($sessionId, $turnRange)) {
+            return $replay;
+        }
+
         $floor = (float) config('mnemon.digest.confidence_floor', 0.5);
 
         $existingWings = $this->wingsForToken($allowedWingPatterns);
@@ -128,12 +138,73 @@ class SessionDigestService
             ];
         }
 
+        $this->recordSlice($sessionId, $turnRange, $persisted);
+
         return [
             'proposals' => $proposals,
             'persisted' => $persisted,
             'queued_for_review' => [],
             'pending_wings' => $pendingWings,
         ];
+    }
+
+    /**
+     * The result of a slice that has already been digested, or null.
+     *
+     * @param  array{start: int, end: int}  $turnRange
+     * @return array<string, mixed>|null
+     */
+    private function replayFor(string $sessionId, array $turnRange): ?array
+    {
+        $digest = SessionDigest::query()
+            ->where('session_id', $sessionId)
+            ->where('turn_start', $turnRange['start'])
+            ->where('turn_end', $turnRange['end'])
+            ->first();
+
+        if ($digest === null) {
+            return null;
+        }
+
+        // Report the drawers the first run produced. The caller feeds these
+        // back as recent_drawer_ids, so an empty list would lose that context.
+        $persisted = Drawer::query()
+            ->whereIn('id', $digest->drawer_ids)
+            ->with('room.wing')
+            ->get()
+            ->map(fn (Drawer $drawer) => [
+                'id' => $drawer->id,
+                'wing' => $drawer->room?->wing?->slug,
+                'room' => $drawer->room?->slug,
+            ])
+            ->all();
+
+        return [
+            'proposals' => [],
+            'persisted' => $persisted,
+            'queued_for_review' => [],
+            'pending_wings' => [],
+            'replayed' => true,
+        ];
+    }
+
+    /**
+     * @param  array{start: int, end: int}  $turnRange
+     * @param  array<int, array{id: int}>  $persisted
+     */
+    private function recordSlice(string $sessionId, array $turnRange, array $persisted): void
+    {
+        try {
+            SessionDigest::create([
+                'session_id' => $sessionId,
+                'turn_start' => $turnRange['start'],
+                'turn_end' => $turnRange['end'],
+                'drawer_ids' => collect($persisted)->pluck('id')->all(),
+            ]);
+        } catch (QueryException) {
+            // A concurrent worker recorded the same slice first. The unique
+            // index is the arbiter; losing the race is not an error.
+        }
     }
 
     /**

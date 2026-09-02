@@ -143,9 +143,19 @@ mnemon_config_value() {
 mnemon_session_state() {
     local sid="$1"
     local f="$MNEMON_SESSIONS_DIR/${sid}.json"
-    if [ ! -f "$f" ]; then
-        printf '{"last_digest_turn":0,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' > "$f"
+
+    # Existence is not validity. A zero-byte or unparseable file used to be
+    # returned as-is, and the digest worker then handed "" to jq --argjson,
+    # which fails -- and because the failure stopped the state from ever being
+    # rewritten, the session stayed wedged, retrying forever. Reinitialise
+    # instead, writing atomically so an interrupted write cannot leave the
+    # truncated file that causes this in the first place.
+    if [ ! -s "$f" ] || ! jq -e . "$f" >/dev/null 2>&1; then
+        local tmp="${f}.init.$$"
+        printf '{"last_digest_turn":0,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' > "$tmp" \
+            && mv -f "$tmp" "$f"
     fi
+
     cat "$f"
 }
 

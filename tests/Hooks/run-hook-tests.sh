@@ -79,6 +79,42 @@ env_out=$(MNEMON_ENDPOINT="http://env.example/mcp" MNEMON_TOKEN="env-token" \
     bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token" 2>/dev/null)
 assert_eq "$env_out" "http://env.example/mcp|env-token" "token: environment overrides config.json"
 
+# Test 0c: a zero-byte or unparseable state file must be treated as missing.
+# mnemon_session_state only checked existence, so an empty file returned empty
+# content -- and the digest worker then passed "" to jq --argjson, which fails.
+# Because the failure prevented the state from ever being rewritten, the session
+# stayed wedged: observed retrying every 20 minutes for hours against the live
+# instance, with the only symptom in a log nothing surfaces.
+: > "$MNEMON_DIR/sessions/zerobyte.json"
+zb=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_session_state zerobyte" 2>/dev/null)
+if printf '%s' "$zb" | jq -e . >/dev/null 2>&1; then
+    PASS=$((PASS+1)); printf '  ok: a zero-byte state file is reinitialised\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: zero-byte state file returned unparseable state: [%s]\n' "$zb"
+fi
+
+printf 'not json at all' > "$MNEMON_DIR/sessions/corrupt.json"
+cs=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_session_state corrupt" 2>/dev/null)
+if printf '%s' "$cs" | jq -e . >/dev/null 2>&1; then
+    PASS=$((PASS+1)); printf '  ok: a corrupt state file is reinitialised\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: corrupt state file returned unparseable state: [%s]\n' "$cs"
+fi
+
+# And end to end: capture must recover rather than wedge.
+: > "$MNEMON_DIR/sessions/wedged.json"
+: > "$MNEMON_DIR/capture-errors.log"
+tp8="$MNEMON_DIR/transcript-wedged.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"a normal turn"}]}}' > "$tp8"
+printf '{"session_id":"wedged","transcript_path":"%s","hook_event_name":"Stop"}' "$tp8" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+sleep 2
+if grep -q 'argjson' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture still wedges on a zero-byte state file\n'
+else
+    PASS=$((PASS+1)); printf '  ok: capture recovers from a zero-byte state file\n'
+fi
+
 # Test 1: recall hook short-circuits on too-short prompt.
 out=$(printf '{"session_id":"s1","prompt":"hi"}' | "$HOOKS_DIR/mnemon-recall.sh" || true)
 assert_eq "$out" "" "recall: short prompt → no output"

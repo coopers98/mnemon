@@ -8,6 +8,7 @@ use App\Models\WikiPage;
 use App\Models\Wing;
 use App\Observers\DrawerObserver;
 use App\Observers\WikiPageObserver;
+use App\Passport\GuardsMalformedClientIds;
 use App\Services\Digest\OpenAiDigestDriver;
 use App\Services\DrawerWriteService;
 use App\Services\EmbeddingManager;
@@ -17,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 
@@ -49,6 +51,14 @@ class AppServiceProvider extends ServiceProvider
     {
         Drawer::observe(DrawerObserver::class);
         WikiPage::observe(WikiPageObserver::class);
+
+        // Reject malformed client ids before they reach a uuid-typed column.
+        // Without this, /oauth/authorize, the refresh_token grant and
+        // /oauth/device/code all answer a bad client id with a 500.
+        $this->app->singleton(
+            ClientRepository::class,
+            GuardsMalformedClientIds::class,
+        );
 
         Passport::tokensExpireIn(now()->addHour());
         Passport::refreshTokensExpireIn(now()->addDays(90));

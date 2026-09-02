@@ -36,8 +36,3 @@ Thumbs.db
 /benchmark/state/
 __pycache__/
 *.pyc
-
-# Generated at runtime by mnemon-capture.sh from an inline heredoc. Committing
-# it would shadow the heredoc permanently, since the lazy write is guarded by
-# [ ! -x "$worker" ] — edits to the source would then never take effect.
-resources/hooks/claude-code/lib/digest-worker.sh

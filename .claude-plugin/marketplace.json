@@ -1,0 +1,16 @@
+{
+  "name": "mnemon",
+  "description": "Automatic memory for Claude Code, backed by a self-hosted Mnemon instance.",
+  "owner": {
+    "name": "Cooper Sellers",
+    "url": "https://github.com/coopers98"
+  },
+  "plugins": [
+    {
+      "name": "mnemon",
+      "source": "./plugins/mnemon",
+      "description": "Automatic memory for Claude Code, backed by a self-hosted Mnemon instance.",
+      "version": "0.1.0"
+    }
+  ]
+}

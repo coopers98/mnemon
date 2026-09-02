@@ -150,6 +150,7 @@ assert_ne "$ldt" "0" "capture: real Stop payload (transcript_path) dispatches a 
 # Runs against its own server on its own port: the fixture serves one connection
 # per loop iteration, so sharing it with the preceding capture test makes this a
 # race that a slow runner loses.
+BIG_PORT2=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 BIG_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 BIG_LOG="$MNEMON_DIR/requests-big.log"
 : > "$BIG_LOG"
@@ -185,6 +186,67 @@ fi
 kill $BIG_PID 2>/dev/null
 mv "$MNEMON_DIR/config.big.json" "$MNEMON_DIR/config.json"
 
+# Test 10a: capture sends only the turns added since the last digest. The
+# protocol carries turn_range{start,end} and the state tracks last_digest_turn,
+# but sending the whole transcript every time re-digests content already stored
+# and grows without bound.
+: > "$BIG_LOG"
+FAKE_PORT="$BIG_PORT2" FAKE_REQUEST_LOG="$BIG_LOG" "$THIS_DIR/fixtures/server.sh" &
+SLICE_PID=$!
+sleep 0.5
+jq --arg e "http://127.0.0.1:$BIG_PORT2/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+
+tp4="$MNEMON_DIR/transcript-slice.jsonl"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"OLD-ALREADY-DIGESTED"}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"OLD-ALREADY-DIGESTED"}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"NEW-SINCE-LAST-DIGEST"}]}}'
+} > "$tp4"
+printf '{"last_digest_turn":2,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' \
+  > "$MNEMON_DIR/sessions/s10.json"
+printf '{"session_id":"s10","transcript_path":"%s","hook_event_name":"Stop"}' "$tp4" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+if ! grep -q 'NEW-SINCE-LAST-DIGEST' "$BIG_LOG" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: the new turn never reached the server\n'
+elif grep -q 'OLD-ALREADY-DIGESTED' "$BIG_LOG" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: re-sent turns that were already digested\n'
+else
+    PASS=$((PASS+1)); printf '  ok: capture: sends only turns added since the last digest\n'
+fi
+
+# Test 10b: the request body stays under a reverse proxy's default 1MiB limit
+# even for a huge first digest. A 413 comes back as an HTML page, which the
+# caller feeds to jq -- surfacing as "Invalid numeric literal", not as a size
+# problem, which is what made this hard to see.
+: > "$BIG_LOG"
+tp5="$MNEMON_DIR/transcript-huge.jsonl"
+: > "$tp5"
+chunk=$(head -c 100000 /dev/zero | tr '\0' 'y')
+for i in $(seq 1 40); do
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}\n' "$chunk" >> "$tp5"
+done
+rm -f "$MNEMON_DIR/sessions/s11.json"
+printf '{"session_id":"s11","transcript_path":"%s","hook_event_name":"Stop"}' "$tp5" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+body_bytes=$(wc -c < "$BIG_LOG" 2>/dev/null || echo 0)
+if ! grep -q 'session_digest' "$BIG_LOG" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: a 4MB transcript produced no request at all\n'
+elif [ "$body_bytes" -gt 1048576 ]; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: request body %s bytes exceeds the 1MiB proxy limit\n' "$body_bytes"
+else
+    PASS=$((PASS+1)); printf '  ok: capture: caps the request body below the 1MiB proxy limit (%s bytes)\n' "$body_bytes"
+fi
+kill $SLICE_PID 2>/dev/null
+
 # Test 10: capture strips tool I/O nested inside message.content. Real Claude
 # Code records are {"type":"assistant","message":{"content":[{"type":"tool_result",...}]}},
 # so a filter that only inspects the top-level .type lets tool output through --
@@ -210,6 +272,36 @@ elif grep -q 'KEEPOUT-TOOL-OUTPUT-MARKER' "$REQ_LOG" 2>/dev/null; then
 else
     PASS=$((PASS+1)); printf '  ok: capture: strips tool I/O nested in message.content\n'
 fi
+
+# Test 10c: a non-JSON error response is reported as such. A proxy 413 returns
+# an HTML page; piping that to jq yields "Invalid numeric literal at line 1,
+# column 7", which says nothing about the request being too large and cost real
+# hours to trace.
+ERR_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+FAKE_PORT="$ERR_PORT" FAKE_STATUS=413 "$THIS_DIR/fixtures/server.sh" &
+ERR_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.err.json"
+jq --arg e "http://127.0.0.1:$ERR_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_DIR/capture-errors.log"
+
+tp6="$MNEMON_DIR/transcript-err.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"anything at all"}]}}' > "$tp6"
+rm -f "$MNEMON_DIR/sessions/s12.json"
+printf '{"session_id":"s12","transcript_path":"%s","hook_event_name":"Stop"}' "$tp6" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do
+    [ -s "$MNEMON_DIR/capture-errors.log" ] && break
+    sleep 0.25
+done
+if grep -qi 'non-JSON\|HTTP error\|not JSON' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: a non-JSON error response is logged as such\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: non-JSON response not reported clearly: %s\n' "$(head -1 "$MNEMON_DIR/capture-errors.log" 2>/dev/null)"
+fi
+kill $ERR_PID 2>/dev/null
+mv "$MNEMON_DIR/config.err.json" "$MNEMON_DIR/config.json"
 
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"

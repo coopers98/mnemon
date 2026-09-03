@@ -119,9 +119,21 @@ mnemon_call() {
         return 1
     fi
 
+    # A JSON-RPC protocol error.
     local err
-    err=$(printf '%s' "$response" | jq -r '.error // empty' 2>/dev/null)
+    err=$(printf '%s' "$response" | jq -r '.error.message // .error // empty' 2>/dev/null)
     if [ -n "$err" ]; then
+        mnemon_log_error "rpc error from $endpoint: $(printf '%s' "$err" | head -c 160)"
+        return 1
+    fi
+
+    # A tool-level error. These arrive as HTTP 200 with isError on the *result*,
+    # not as a JSON-RPC error -- a wing denial is Response::error(), which is
+    # exactly this shape. Checking only .error made an authorisation failure
+    # indistinguishable from an empty palace, on every hook, logged nowhere.
+    if [ "$(printf '%s' "$response" | jq -r '.result.isError // false' 2>/dev/null)" = "true" ]; then
+        mnemon_log_error "tool error from $endpoint: $(printf '%s' "$response" \
+            | jq -r '[.result.content[]?.text] | join(" ") // "(no message)"' 2>/dev/null | head -c 160)"
         return 1
     fi
 

@@ -165,13 +165,23 @@ Wing restrictions on a token short-circuit before the tool even runs — a token
 
 The MCP server exposes Mnemon to any agent that asks. **Layer 2** is automatic capture and recall for Claude Code: every prompt is silently primed with relevant palace context, and every session quietly digests to drawers in the background.
 
-Install with:
+Install it as a Claude Code plugin — no repository, no PHP, no Composer on the
+device:
 
 ```bash
-php artisan mnemon:install-claude-code-hooks
+claude plugin marketplace add coopers98/mnemon
+claude plugin install mnemon@mnemon
 ```
 
-This adds three hooks to `~/.claude/hooks/`:
+Then point it at your instance with a personal access token — see
+[the user guide](docs/USERGUIDE.md#automatic-memory-in-claude-code) for the token
+step and why an OAuth token will not do.
+
+The artisan installer (`php artisan mnemon:install-claude-code-hooks`) does the
+same thing on a machine that already has the repository checked out. Use one or
+the other, not both: their hooks coexist and each would fire twice.
+
+Three hooks:
 
 - `mnemon-wake.sh` (SessionStart) — injects recent palace state at session start.
 - `mnemon-recall.sh` (UserPromptSubmit) — injects relevant wiki + drawer context per prompt, gated to skip chitchat.

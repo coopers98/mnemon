@@ -501,17 +501,15 @@ Mnemon's MCP tools work for any agent that thinks to call them. For Claude Code 
 
 ### Install
 
-Mint a personal access token first, on the machine running Mnemon:
+Two steps: a token, then the plugin.
+
+#### 1. Mint a token for the device
+
+On the machine running Mnemon:
 
 ```bash
 php artisan tinker --execute='echo App\Models\User::first()
     ->createToken("claude-code@<device>", ["mcp:use"])->accessToken;'
-```
-
-Then install the hooks, passing that token:
-
-```bash
-php artisan mnemon:install-claude-code-hooks --token='<the token>'
 ```
 
 **Use a personal access token, not the OAuth flow.** The hooks store the token
@@ -520,16 +518,68 @@ tokens after **one hour** — so an install that mirrors Claude Code's own OAuth
 token stops working within the hour. Personal access tokens last 90 days
 (`Passport::personalAccessTokensExpireIn`).
 
-Name the token per device. `agentSource()` prefers the token name, so it becomes
-the `source` on every `BrainSession` row, and one device can be revoked without
+Name it per device. `agentSource()` prefers the token name, so it becomes the
+`source` on every `BrainSession` row, and one device can be revoked without
 touching the others.
 
-The command:
-1. Takes the token from `--token`, or falls back to `~/.claude.json`, or prompts.
-2. Verifies it against `/mcp` before writing anything.
-3. Copies hook scripts to `~/.claude/hooks/`.
-4. Registers them in `~/.claude/settings.json`, preserving hooks it does not own.
-5. Merges `~/.mnemon/config.json`, so tuned settings survive a re-run.
+Tokens expire. From v0.2.0 the session-start hook warns once you are within 14
+days (`token_warn_days` in config); before that, expiry was silent.
+
+#### 2. Install the plugin
+
+On the device — no repository, no PHP, no Composer. The hooks need only `jq`,
+`curl` and coreutils:
+
+```bash
+claude plugin marketplace add coopers98/mnemon
+claude plugin install mnemon@mnemon
+```
+
+Then write `~/.mnemon/config.json`:
+
+```bash
+mkdir -p ~/.mnemon && chmod 700 ~/.mnemon
+cat > ~/.mnemon/config.json <<'JSON'
+{
+  "endpoint": "https://<your-instance>/mcp",
+  "bearer_token": "<the token from step 1>",
+  "recall_timeout_ms": 3000
+}
+JSON
+chmod 600 ~/.mnemon/config.json
+```
+
+`recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted
+one measures around 1.2s, and a budget below the round trip makes recall a
+silent no-op — set it to 3000 for a remote instance.
+
+Credentials can come from `MNEMON_ENDPOINT` and `MNEMON_TOKEN` in the
+environment instead, which take precedence over the file.
+
+Restart Claude Code, then confirm:
+
+```bash
+echo '{"session_id":"t","cwd":"/tmp"}' | ~/.claude/hooks/mnemon-wake.sh   # a <system-reminder>
+tail ~/.mnemon/capture-errors.log                                        # should not exist
+```
+
+**Every change to the hooks needs a plugin version bump to reach installed
+devices** — `claude plugin update` refetches only when the version string
+changes. If a fix seems not to have arrived, check the installed version first.
+
+#### The artisan installer
+
+`php artisan mnemon:install-claude-code-hooks --token='<token>'` still works and
+is useful on the machine that already has the repository checked out. It copies
+the same scripts from `plugins/mnemon/hooks/` and registers them in
+`~/.claude/settings.json`.
+
+**Do not use both on one machine.** The plugin's hooks and any `settings.json`
+entries coexist, so each hook fires twice — double context injection and two
+digests per turn. Duplicate digests are harmless (`session_digest` is idempotent
+per `(session_id, turn_range)`), but the recall cost is real. Prefer the plugin;
+if you have previously used the artisan installer, remove its entries from
+`settings.json` first.
 
 ### What each hook does
 

@@ -126,12 +126,14 @@ the client command mints a duplicate personal access client every time. Guard on
 the artifacts instead:
 
 ```bash
+# `passport:keys` exits 1 when keys already exist, which fails the deploy.
 [ -f storage/oauth-private.key ] || php artisan passport:keys
 
-php artisan tinker --execute='exit(\Laravel\Passport\Client::all()
-    ->filter(fn ($c) => $c->hasGrantType("personal_access"))->count() ? 0 : 1);' \
-  || php artisan passport:client --personal \
-       --name="Personal Access Client" --no-interaction
+# Capture the count and test it in bash: `exit()` inside `tinker --execute` does
+# NOT reach the shell, so a guard written that way fires every time and mints a
+# new client on every deploy — the failure it was meant to prevent.
+PAC=$(php artisan tinker --execute='echo \Laravel\Passport\Client::all()->filter(fn ($c) => $c->hasGrantType("personal_access"))->count();' 2>/dev/null | tail -1 | tr -dc '0-9')
+[ "${PAC:-0}" -gt 0 ] || php artisan passport:client --personal --name="Personal Access Client" --no-interaction
 ```
 
 Do not reach for `--force` on `passport:keys` in a deploy script: it overwrites

@@ -87,6 +87,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(REPLY)
 
+    def handle_one_request(self):
+        # The budget tests make curl disconnect mid-reply on purpose, which
+        # raises BrokenPipeError from sendall. That is the expected outcome, not
+        # a fault, and its traceback is noise that would hide a real failure.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def log_message(self, *args):
         pass
 

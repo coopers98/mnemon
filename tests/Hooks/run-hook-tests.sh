@@ -127,10 +127,13 @@ make_jwt() {  # $1 = seconds from now until exp
     printf 'eyJhbGciOiJSUzI1NiJ9.%s.sig' "$payload"
 }
 
-days_left=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 259200)\"" 2>/dev/null)
+# Offset by half a day so the assertions are not on a truncation boundary:
+# days_left floors (exp - now) / 86400, so a token generated at exactly N days
+# reads as N-1 the moment a second elapses. That passed locally and failed in CI.
+days_left=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 302400)\"" 2>/dev/null)
 assert_eq "$days_left" "3" "token: reads days remaining from the JWT exp"
 
-far=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 5184000)\"" 2>/dev/null)
+far=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 5227200)\"" 2>/dev/null)
 assert_eq "$far" "60" "token: reads a distant expiry correctly"
 
 opaque=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left not-a-jwt" 2>/dev/null; echo "rc=$?")
@@ -141,7 +144,7 @@ esac
 
 # End to end: wake warns when the token is close to expiry.
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.exp.json"
-jq --arg t "$(make_jwt 259200)" '.bearer_token=$t' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+jq --arg t "$(make_jwt 302400)" '.bearer_token=$t' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 warn=$(printf '{"session_id":"s16","cwd":"/tmp","hook_event_name":"SessionStart"}' \
   | "$HOOKS_DIR/mnemon-wake.sh" 2>&1 || true)

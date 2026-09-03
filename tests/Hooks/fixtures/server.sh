@@ -65,6 +65,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for k, v in self.headers.items():
                     fh.write(f"{k}: {v}\n")
 
+        # FAKE_TOOL_ERROR serves what a wing denial actually looks like: HTTP 200
+        # with isError on the *result*, not a JSON-RPC .error. That shape used to
+        # read to the hooks as "found nothing".
+        if os.environ.get("FAKE_TOOL_ERROR"):
+            err = (b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
+                   b'"text":"Token does not have access to wing: personal"}],"isError":true}}')
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(err)))
+            self.end_headers()
+            self.wfile.write(err)
+            return
+
         if DELAY:
             time.sleep(DELAY)
 

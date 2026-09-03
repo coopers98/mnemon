@@ -151,6 +151,30 @@ case "$warn" in
 esac
 mv "$MNEMON_DIR/config.exp.json" "$MNEMON_DIR/config.json"
 
+# Test 0e: a tool-level error must be reported. A wing denial is
+# Response::error() -> isError on the *result* with HTTP 200, not a JSON-RPC
+# .error -- so mnemon_call's `.error // empty` check misses it entirely and the
+# hook reads a denial as "found nothing". Silent authorisation failures are the
+# worst version of this project's signature bug.
+TE_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+FAKE_PORT="$TE_PORT" FAKE_TOOL_ERROR=1 "$THIS_DIR/fixtures/server.sh" &
+TE_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.te.json"
+jq --arg e "http://127.0.0.1:$TE_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_DIR/capture-errors.log"
+
+printf '{"session_id":"s17","cwd":"/tmp","prompt":"a substantive prompt that reaches the server"}' \
+  | "$HOOKS_DIR/mnemon-recall.sh" >/dev/null 2>&1 || true
+if grep -qiE 'does not have access|tool error|isError' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: a tool-level error is logged, not read as "found nothing"\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: tool-level error was silent: [%s]\n' "$(head -1 "$MNEMON_DIR/capture-errors.log" 2>/dev/null)"
+fi
+kill $TE_PID 2>/dev/null
+mv "$MNEMON_DIR/config.te.json" "$MNEMON_DIR/config.json"
+
 # Test 1: recall hook short-circuits on too-short prompt.
 out=$(printf '{"session_id":"s1","prompt":"hi"}' | "$HOOKS_DIR/mnemon-recall.sh" || true)
 assert_eq "$out" "" "recall: short prompt → no output"

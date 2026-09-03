@@ -23,6 +23,27 @@ authorization grant. When the change is done:
   silently; the design below treats "fails loudly" as a requirement equal to
   "works".
 
+### Who this is for, and why that decides the whole question
+
+**Third-party users of the published plugin.** The plugin is MIT-licensed and
+installable from GitHub (`plugins/mnemon/.claude-plugin/plugin.json`). When a
+stranger installs it and sees "not connected", the answer cannot be "SSH to your
+server and run tinker". That is the entire justification for RFC 8628 and its
+machinery.
+
+It is deliberately **not** justified by the owner's two devices. For those, a
+Filament "mint device token, pick wings" action reaches both stated goals — no
+SSH ritual, real wing restrictions — at a fraction of the cost, keeps revocation
+trivially correct (personal access tokens cannot refresh, so `revoke()` is
+final), and adds no concurrent bash to the credential path. That alternative was
+weighed and rejected **only** because it leaves a third party with no
+self-service enrolment at all.
+
+The consequence to hold onto: if this repository stays private, this design is
+over-built and the Filament action is the right answer. It is being built
+because the repository is expected to go public, which is Piece 4's last open
+item.
+
 ## Locked decisions
 
 | Decision | Choice |
@@ -31,9 +52,64 @@ authorization grant. When the change is done:
 | Client topology | **One OAuth client per device**, confidential, named `claude-code@<device>`. Argued in §3. |
 | Refresh location | Inside `mnemon_call()` in `plugins/mnemon/hooks/lib/common.sh`, behind a portable lock. Argued in §4. |
 | Credential file | `~/.mnemon/config.json` keeps the key `bearer_token` for the live access token and gains refresh fields. A PAT config is the same file minus those fields. §5. |
-| Restriction continuity | Wing restrictions are copied forward to each refreshed token by the `AccessTokenCreated` listener; a missing source row fails **closed** (deny-all) and logs, never open. §4.3. |
-| The 500s | Fixed first, as piece 0. One guard fixes all three. §7. |
+| Restriction continuity | **Restrictions are keyed on the client, not the token**, and written synchronously in the approve request. Refresh needs no restriction logic at all. Revised after review — see "Revisions" below. §4.3. |
+| The 500s | **Done** — fixed in PR #28 before this design proceeds. One guard fixed all three; verified live, 500 → 401. §7. |
+| Revocation | **Done** — fixed in PR #29. Revoking a token now revokes its refresh token; revoking a client revokes the client. Without this, every refresh capability below would have made revocation a silent no-op. |
+| Tool-level errors | **Done** — fixed in PR #30. `mnemon_call` now reports `isError` results, so a wing denial is visible on the device rather than reading as "found nothing". |
 | PATs | Retained as a documented fallback for non-Claude-Code agents; the two devices' PATs are revoked manually after cutover. §6. |
+
+## Revisions after adversarial review
+
+An independent review of the first draft returned APPROVE WITH CHANGES. Four of
+its findings were verified against the code and three were shipped before this
+revision. What changed here:
+
+1. **Restrictions move from per-token to per-client** (§4.3 rewritten). The draft
+   proposed copying restrictions forward on every refresh via the
+   `AccessTokenCreated` listener, with a deny-all fallback when the chain broke —
+   and asked whether failing closed was correct. The review's answer: the right
+   design is the one where the question does not arise. Since the topology is
+   already one client per device (§3), keying restrictions on the client removes
+   the cache handoff, the carry-forward listener, the deny-all fallback, and the
+   `passport:purge` cascade hazard. Enforcement resolves `token → client_id`.
+   Roughly ten changed lines instead of a subsystem.
+
+2. **Refresh-token rotation is evaluated rather than assumed** (§4.2). Under
+   rotation, League revokes the old pair *before* issuing the new one, so a lost
+   response leaves the device holding a consumed token — the draft classified
+   that as "unlucky, retry later", but it deterministically becomes
+   `invalid_grant` and a browser re-auth. `Passport::$revokeRefreshTokenAfterUse
+   = false` removes that failure mode and most of the locking design with it.
+   The draft cited that same line for the opposite fact without considering
+   turning it off.
+
+3. **The lock's cited precedent was wrong.** The draft said its mkdir lock
+   matched `digest-worker.sh`. That file uses a check-then-write PID file with a
+   TOCTOU race. `mkdir` is the right choice *because* the existing pattern is
+   racy, which is what the text should say.
+
+4. **Setup verification must exercise what can fail** (§1.1). Verifying with
+   `tools/list` proves nothing: it exercises neither scope enforcement nor wing
+   checks, so a no-scope token and a deny-all token both pass and the script
+   reports success on a bricked device. It must make a real `tools/call` and
+   report which wings the token can actually reach.
+
+5. **Migration gains a rollback** (§6). The draft's single atomic config write
+   replaced the PAT, whose plaintext exists nowhere else — so a first-day failure
+   would mean SSH and tinker on both devices, the exact ritual this removes. Back
+   the config up first and print the restore command. Also audit each device's
+   `~/.claude.json` MCP entry, which may carry the same PAT, before revoking it.
+
+6. **Mixed credentials must not livelock** (§5). `MNEMON_TOKEN` in the
+   environment takes precedence over the config file. Set alongside a
+   refresh-capable config, every call 401s, refresh "succeeds", and the next call
+   does it again — permanent double round trips, converging never.
+
+Two findings were fixed in code before this revision rather than designed
+around: revocation leaving refresh tokens usable (PR #29), which would have made
+this design's own kill switch a no-op, and tool-level errors being invisible to
+the hooks (PR #30), without which a wing denial — including a deny-all — would
+be silent on the device.
 
 ## What already exists (verified in code)
 
@@ -330,32 +406,58 @@ try again. Marking a device dead on a flaky connection would be a
 self-inflicted outage; retrying a dead refresh token forever would be the
 15-defect silence pattern.
 
-### 4.3 Wing restrictions must survive refresh
+### 4.3 Wing restrictions are keyed on the client, not the token
 
-This is the bug this design exists to not ship. `RequiresWingAccess` treats a
-missing restriction row as unrestricted
-(`app/Mcp/Concerns/RequiresWingAccess.php:18`) — that is how PATs get full
-access. A refreshed token has a brand-new token id, `AccessTokenCreated`
-fires with no cached consent, and the listener returns early
-(`app/Listeners/PersistMcpTokenRestrictions.php:47-50`). Untouched, every
-restricted device silently becomes an all-wings device **one hour after
-consent**, and nothing anywhere would say so.
+*Rewritten after review. The draft is summarised in "Revisions" above.*
 
-Fix, in `PersistMcpTokenRestrictions::handle()`: when there is no cached
-consent *and the token's client has the device grant* (the personal-access
-client does not, so PAT behaviour is untouched):
+The bug this design must not ship: `RequiresWingAccess` treats a missing
+restriction row as **unrestricted** (`app/Mcp/Concerns/RequiresWingAccess.php:18`)
+— that is how PATs get full access. A refreshed token has a brand-new token id,
+`AccessTokenCreated` fires with no cached consent, and the listener returns early
+(`app/Listeners/PersistMcpTokenRestrictions.php:47-50`, whose own comment names
+"refresh token grant" as a skip case). Untouched, a restricted device silently
+becomes an all-wings device **one hour after consent**.
 
-- Copy `wing_patterns` from the newest earlier token of the same
-  `(user, client)` that has a restriction row. Note that an all-wings consent
-  stores a row with `wing_patterns = null` (`:34-36`), so every consented
-  device token has a row — the chain never legitimately starts empty.
-- If no source row exists, write `wing_patterns: []` — which
-  `McpTokenRestriction::matches()` evaluates as deny-all
-  (`app/Models/McpTokenRestriction.php:26-49`) — and log an error. Denials
-  are additionally audited per-call by `BrainSessionLogger::logDenial`
-  (`RequiresWingAccess.php:23`), so the failure is visible in the admin panel
-  the moment the device tries anything. Fail closed and loud; never open and
-  silent.
+This is live in the `authorization_code` flow today, not merely a hazard this
+design would introduce. It is latent only because nobody has used that flow
+against this instance: **0** `mcp_token_restriction` rows and **0**
+non-personal-access clients, verified on the deployed database.
+
+**The fix is to stop keying restrictions on a value that changes.** The topology
+is already one OAuth client per device (§3), and a device's permitted wings are a
+property of *the device*, not of whichever hour-long access token it currently
+holds. So:
+
+- The approve request writes the restriction row keyed on `client_id`,
+  **synchronously, in the request that captured the consent**. No cache handoff,
+  no TTL, no listener, no hidden form field.
+- `RequiresWingAccess::resolveRestriction` resolves `token → client_id →
+  restriction` instead of `token → restriction`.
+- Refresh needs **no restriction logic whatsoever**. A refreshed token belongs to
+  the same client, so it inherits the same row by construction.
+
+What this deletes rather than builds: the carry-forward listener, the "newest
+earlier token for this (user, client)" lookup, the deny-all fallback, the
+extension of `CaptureConsentWings` to the device route, and the open question
+about whether to fail closed. If the synchronous write fails, the approve request
+itself errors — in front of the human who just clicked the button, which is the
+loudest place a failure can occur.
+
+It also removes a hazard the draft did not mention. `mcp_token_restrictions.access_token_id`
+cascades on delete of the token row
+(`database/migrations/2026_04_27_040447_create_mcp_token_restrictions_table.php:19-21`).
+Under a per-token design, this grant turns `oauth_access_tokens` into an
+append-only log growing a row per refresh, so `passport:purge` — ordinary
+Passport hygiene — would eventually delete the token whose row a dormant device's
+chain depends on, producing a silent deny-all despite valid consent. Client-keyed
+rows are unaffected by purging tokens.
+
+**Migration of the existing table.** `mcp_token_restrictions` currently keys on
+`access_token_id`. The new column is `client_id`, nullable during transition, with
+enforcement preferring a client row and falling back to a token row so existing
+restricted tokens keep working. There are zero rows today, so this migration is
+theoretical here and matters only for an instance that has used the auth-code
+flow.
 
 ### 4.4 When refresh happens, relative to the hooks' budgets
 
@@ -628,26 +730,55 @@ server halves, as real HTTP against the app:
 
 ## Open questions
 
-1. **The refresh-grant 500 is attributed, not reproduced.** All ten live
-   clients are `personal_access`, so the refresh grant has never been
-   exercised with a valid client. Piece 0 must reproduce it after the UUID
-   guard lands; a surviving 500 is a new defect that blocks §4.
-2. **Confidential vs public device client.** Recommended confidential (§3);
-   the cost is a client secret on each device's disk. If the owner prefers
-   fewer moving parts over the flow-initiation gate, public works with two
-   fields removed — the rest of the design is unchanged.
-3. **Fail-closed deny-all** (§4.3) means a bug in the carry-forward listener
-   hard-stops a device's memory (loudly) rather than widening its access
-   (silently). This design says that trade is correct; confirm.
-4. **What OS is the second device?** The mkdir-lock was chosen because
-   `flock` doesn't exist on macOS. If both devices are Linux, `flock -n`
-   would be simpler and worth the swap.
-5. **Does `mnemon:install-claude-code-hooks` learn the device flow**, or does
-   the plugin's `mnemon-authorize.sh` become the only supported entry point?
-   Two install paths exist today (artisan installer and plugin); this design
-   only commits the plugin path.
-6. **The `GET /oauth/device` 500 is code-derived** (unbound
-   `DeviceUserCodeViewResponse`), consistent with — but not identical to —
-   the confirmed 500 on `POST /oauth/device/code`. Confirm against the live
-   instance before any release note claims the device screens "already
-   existed".
+Six were raised in the draft. Four are now answered; two remain.
+
+**Resolved**
+
+1. ~~The refresh-grant 500 is attributed, not reproduced.~~ **Reproduced and
+   fixed.** PR #28 traced all three 500s to one cause: `oauth_clients.id` is a
+   native `uuid` column and Passport's repository puts the raw id straight into
+   the query, so PostgreSQL raises `SQLSTATE[22P02]` and a `QueryException` is
+   not catchable by `HandlesOAuthErrors`. Verified live afterwards: all three
+   endpoints answer 401. Note the tests pass on SQLite with or without the fix —
+   the engine gap `CONTRIBUTING.md` warns about is why this reached production.
+2. ~~Fail-closed deny-all.~~ **Moot.** §4.3 now keys restrictions on the client,
+   so no chain exists to break and nothing has to fail either way.
+3. ~~What OS is the second device?~~ **Ubuntu.** Both devices are Linux, so
+   `flock -n` is available. §4.2 should still prefer the portable `mkdir` lock if
+   rotation stays on, since the plugin is published for other people's machines —
+   but the choice is now a portability decision for third parties rather than a
+   local constraint.
+4. ~~The `GET /oauth/device` 500 is code-derived.~~ **Confirmed live.** It
+   returns 500 because no device view responses are bound — only
+   `Passport::authorizationView` (`app/Providers/AppServiceProvider.php:57`).
+   Tracked as task #13; the release note must not claim the device screens
+   "already existed".
+
+**Still open**
+
+5. **Confidential vs public device client.** The draft recommended confidential.
+   The review's counter is fair: initiating a flow needs a valid `client_id`,
+   which is an unguessable UUID living only in the device's 0600 config — and an
+   attacker who can read that file already has the refresh token *and* the
+   secret, since they share the file. The secret gates nothing the file's
+   confidentiality does not already gate. PKCE is not the alternative (RFC 8628
+   has no redirect to bind), so the real choice is public-vs-confidential and it
+   is close to a wash. Recommendation stands at confidential — it is cheap, and
+   it does gate flow *initiation* on a public endpoint — but the rationale is
+   "marginal", not "the anti-phishing story".
+6. **Does `mnemon:install-claude-code-hooks` learn the device flow**, or does the
+   plugin become the only supported entry point? Since PR #31 the docs lead with
+   the plugin and describe the artisan installer as a convenience for a machine
+   that already has the repo. Recommendation: the device flow lives only in the
+   plugin, and the artisan installer keeps taking `--token`. Two paths that both
+   provision credentials is how the collision in task #7 got interesting.
+
+## Release checklist
+
+- Bump the plugin version. `claude plugin update` refetches only when the version
+  string changes, so hook changes shipped without a bump reach zero devices. This
+  has already happened once.
+- Re-run the truth-up sweeps: no falsehood vocabulary outside `docs/design/`,
+  every relative link resolves, and no claim of a live deployment.
+- Verify against PostgreSQL, not only SQLite. Two defects in this feature were
+  invisible on SQLite.

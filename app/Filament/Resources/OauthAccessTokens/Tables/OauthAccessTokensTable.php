@@ -4,6 +4,7 @@ namespace App\Filament\Resources\OauthAccessTokens\Tables;
 
 use App\Models\McpTokenRestriction;
 use App\Models\User;
+use App\Support\TokenRevoker;
 use Filament\Actions\Action;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -65,7 +66,7 @@ class OauthAccessTokensTable
                     ->requiresConfirmation()
                     ->modalHeading('Revoke this access token?')
                     ->modalDescription('The client will lose access immediately and will need to re-authorize.')
-                    ->action(fn (Token $record) => $record->revoke()),
+                    ->action(fn (Token $record) => TokenRevoker::token($record)),
             ])
             ->toolbarActions([]);
     }

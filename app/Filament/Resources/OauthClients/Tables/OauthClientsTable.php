@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\OauthClients\Tables;
 
+use App\Support\TokenRevoker;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
@@ -46,8 +47,8 @@ class OauthClientsTable
                     ->color('danger')
                     ->requiresConfirmation()
                     ->modalHeading('Revoke all tokens for this client?')
-                    ->modalDescription('This will revoke all access tokens issued to this client. The client itself will remain registered.')
-                    ->action(fn (Client $record) => $record->tokens()->update(['revoked' => true])),
+                    ->modalDescription('Revokes the client and every access and refresh token issued to it. Nothing can be exchanged in its name afterwards.')
+                    ->action(fn (Client $record) => TokenRevoker::client($record)),
             ])
             ->toolbarActions([]);
     }

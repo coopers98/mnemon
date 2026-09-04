@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\PurgeTokens;
 use App\Models\Drawer;
 use App\Models\WikiPage;
 use App\Models\Wing;
@@ -46,6 +47,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Registered in boot, after every provider's register(), so this wins the
+        // name over Passport's own purge command. See PurgeTokens for why the
+        // stock one is unsafe here.
+        if ($this->app->runningInConsole()) {
+            $this->commands([PurgeTokens::class]);
+        }
+
         Drawer::observe(DrawerObserver::class);
         WikiPage::observe(WikiPageObserver::class);
 

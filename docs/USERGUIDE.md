@@ -648,6 +648,16 @@ client's revoked flag is what the OAuth server actually enforces on every grant.
 The device shows a banner at its next session start naming the reason, and stops
 trying. It does not fail silently.
 
+**A note on `passport:purge`.** Mnemon replaces Passport's purge command with one
+that will not delete an access token while a valid refresh token still points at
+it. `oauth_refresh_tokens` has no `client_id` — a refresh token is tied to a
+client only through its access token — so deleting that row orphans the refresh
+token and `TokenRevoker::client` can no longer reach it. The client's revoked
+flag would still stop the device, but it would be the only thing left doing so.
+The command reports how many rows it kept for this reason. The cost is that
+access-token rows live as long as the refresh tokens referencing them rather than
+a week.
+
 ### For other agents (fallback)
 
 A personal access token is still right for an agent that will never run a

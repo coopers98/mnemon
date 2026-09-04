@@ -80,4 +80,57 @@ class ClientRestrictionTest extends TestCase
         $this->assertNull(McpClientRestriction::find($client->id)->wing_patterns);
         $this->assertSame(1, McpClientRestriction::count());
     }
+
+    public function test_a_forged_approval_does_not_write_a_restriction(): void
+    {
+        // The middleware runs before Passport validates the approval, so without
+        // a guard any authenticated POST naming a client_id could rewrite that
+        // client's wings — including widening them to all — without ever
+        // completing a genuine consent.
+        $user = User::factory()->create();
+        $client = Client::factory()->create(['redirect_uris' => ['http://localhost/cb']]);
+        $this->actingAs($user);
+
+        $this->post('/oauth/authorize', [
+            'auth_token' => 'not-the-session-token',
+            'client_id' => $client->id,
+            'scopes' => ['mcp:use'],
+            'all_wings' => '1',
+        ]);
+
+        $this->assertNull(McpClientRestriction::find($client->id),
+            'a POST that Passport did not accept must not mutate restrictions');
+    }
+
+    public function test_a_forged_approval_cannot_widen_an_existing_restriction(): void
+    {
+        $client = $this->approveConsent(['wings' => ['work']]);
+        $this->assertSame(['work'], McpClientRestriction::find($client->id)->wing_patterns);
+
+        // Same session, but a forged token and an attempt to widen to all wings.
+        $this->post('/oauth/authorize', [
+            'auth_token' => 'not-the-session-token',
+            'client_id' => $client->id,
+            'scopes' => ['mcp:use'],
+            'all_wings' => '1',
+        ]);
+
+        $this->assertSame(['work'], McpClientRestriction::find($client->id)->wing_patterns,
+            'a rejected approval must not widen wings that a real consent narrowed');
+    }
+
+    public function test_an_unknown_client_id_writes_nothing(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+
+        $this->post('/oauth/authorize', [
+            'auth_token' => app('session.store')->get('authToken') ?? 'x',
+            'client_id' => '0199a1f4-1b2c-7000-8000-00000000dead',
+            'scopes' => ['mcp:use'],
+            'all_wings' => '1',
+        ]);
+
+        $this->assertSame(0, McpClientRestriction::count());
+    }
 }

@@ -54,6 +54,11 @@ fi
 state=$(printf '%s' "$state" | jq --arg n "$now" '.last_recall_at=($n|tonumber)')
 mnemon_session_state_write "$session_id" "$state"
 
+# One recall per prompt, however many copies of the hook are registered. Claimed
+# here rather than at the top so every gate above behaves exactly as before; only
+# the round trip and the injected context are deduplicated.
+mnemon_claim_once "$session_id" recall 5 || exit 0
+
 # Call recall.
 params=$(jq -n --arg p "$prompt" '{name:"recall",arguments:{prompt:$p,token_budget:1500}}')
 # Budget for the recall round trip. 800ms suits a localhost instance; a remote

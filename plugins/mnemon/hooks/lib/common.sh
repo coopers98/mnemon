@@ -13,6 +13,9 @@ MNEMON_DIR="${MNEMON_DIR:-$HOME/.mnemon}"
 MNEMON_CONFIG="$MNEMON_DIR/config.json"
 MNEMON_SESSIONS_DIR="$MNEMON_DIR/sessions"
 MNEMON_ERROR_LOG="$MNEMON_DIR/capture-errors.log"
+# Where Claude Code's own hook registrations live. Overridable so the tests can
+# point at a fixture instead of the real one.
+MNEMON_CLAUDE_SETTINGS="${MNEMON_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 
 mkdir -p "$MNEMON_SESSIONS_DIR" 2>/dev/null || true
 
@@ -371,6 +374,51 @@ mnemon_instance_url() {
         return 0
     fi
     printf '%s' "${endpoint%/mcp}"
+}
+
+# Deliver an event once. Args: <session_id> <event> [ttl_seconds].
+# Returns 0 to the first caller inside the window and 1 to every other.
+#
+# The hooks can end up registered twice -- once by the plugin, once by leftover
+# settings.json entries from the pre-plugin installer. Both copies then fire on
+# the same event, concurrently. The recent-fire suppression in recall does not
+# help: both processes read the session state before either writes it, so both
+# pass the check. The result is the same context injected twice for two round
+# trips.
+#
+# mkdir is the atomic primitive here, as it is for the refresh lock; nothing
+# else is available everywhere these hooks run.
+mnemon_claim_once() {
+    local sid="$1" event="$2" ttl="${3:-10}"
+    local claim="$MNEMON_SESSIONS_DIR/${sid}.${event}.claim"
+
+    if mkdir "$claim" 2>/dev/null; then
+        return 0
+    fi
+
+    # The claim has to expire. SessionStart fires again on resume and after
+    # compaction, and a hook killed mid-run must not silence its session for
+    # good -- silence is the failure mode this whole file exists to avoid.
+    local mtime now
+    mtime=$(stat -c %Y "$claim" 2>/dev/null || stat -f %m "$claim" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    if [ $(( now - mtime )) -ge "$ttl" ]; then
+        rm -rf "$claim" 2>/dev/null
+        mkdir "$claim" 2>/dev/null && return 0
+    fi
+
+    return 1
+}
+
+# Whether this device registers the hooks twice.
+#
+# Only detectable from inside a plugin run: CLAUDE_PLUGIN_ROOT is set by Claude
+# Code for plugin hooks, so finding our scripts in settings.json as well means
+# both are live.
+mnemon_double_registration() {
+    [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || return 1
+    [ -f "$MNEMON_CLAUDE_SETTINGS" ] || return 1
+    grep -qE 'mnemon-(wake|recall|capture)\.sh' "$MNEMON_CLAUDE_SETTINGS" 2>/dev/null
 }
 
 # Read or initialize session state. Args: <session_id>. Echoes JSON.

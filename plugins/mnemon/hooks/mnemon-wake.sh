@@ -13,6 +13,16 @@ if [ -z "$session_id" ]; then
     exit 0
 fi
 
+# One wake per session start, however many copies of the hook are registered.
+mnemon_claim_once "$session_id" wake 10 || exit 0
+
+# Preventing the double injection is not the same as reporting the cause: a
+# device paying twice per prompt should be told once how to stop.
+if mnemon_double_registration; then
+    printf 'Mnemon: the hooks are registered twice — by the plugin and in %s. Every prompt costs two round trips; remove the mnemon entries from that file.\n' \
+        "$MNEMON_CLAUDE_SETTINGS"
+fi
+
 pair=$(mnemon_token) || {
     # The device flow is the way in now: the hooks can refresh, so an enrolled
     # device stays connected without anyone minting a long-lived token by hand.

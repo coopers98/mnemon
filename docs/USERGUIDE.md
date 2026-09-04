@@ -577,6 +577,24 @@ version. The device also reports its own version on every wake, so a stale
 machine is visible in Brain Sessions without anyone noticing on the machine
 itself.
 
+#### If you installed the hooks before the plugin existed
+
+The pre-plugin installer wrote hook entries into `~/.claude/settings.json`. If
+those are still there alongside the plugin, both copies fire on every event.
+Capture is idempotent so nothing is duplicated in the palace, but recall and wake
+are not: each prompt costs two round trips and the same context is injected
+twice.
+
+From **v0.3.2** the hooks deduplicate this themselves — each event is delivered
+once no matter how many copies are registered — and session start says so:
+
+```
+Mnemon: the hooks are registered twice — by the plugin and in /home/you/.claude/settings.json.
+```
+
+The fix is to delete the `mnemon-*` entries from that file and let the plugin own
+the registration.
+
 #### Tuning
 
 `recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted

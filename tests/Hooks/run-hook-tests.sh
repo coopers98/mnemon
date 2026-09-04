@@ -953,6 +953,78 @@ case "$v3_out" in
 esac
 rf_stop_all
 
+# --- Double registration -----------------------------------------------------
+# A device can end up with the hooks registered twice: once by the plugin and
+# once by leftover ~/.claude/settings.json entries from the pre-plugin installer.
+# Capture is idempotent so the database shrugs, but recall and wake are not: both
+# copies fire concurrently, both read the session state before either writes, and
+# the agent gets the same context injected twice for two round trips.
+C_PORT=$(rf_free_port); C_LOG="$MNEMON_DIR/c.log"; C_STATE=$(mktemp -d)
+rf_start "$C_PORT" "$C_LOG" "$C_STATE"
+jq -n --arg e "http://127.0.0.1:$C_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"t", recall_timeout_ms:5000}' > "$MNEMON_DIR/config.json"
+
+# C1: two recalls on one prompt deliver context once.
+: > "$C_LOG"
+C_KIDS=""
+for i in 1 2; do
+    printf '{"session_id":"dup1","prompt":"a substantive prompt delivered twice over"}' \
+        | "$HOOKS_DIR/mnemon-recall.sh" > "$MNEMON_DIR/c-out.$i" 2>/dev/null &
+    C_KIDS="$C_KIDS $!"
+done
+# shellcheck disable=SC2086
+wait $C_KIDS
+assert_eq "$(grep -l 'Mnemon recall' "$MNEMON_DIR"/c-out.* 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "collision: a doubly-registered recall injects context once"
+assert_eq "$(grep -c '"jsonrpc"' "$C_LOG" 2>/dev/null || echo 0)" "1" \
+    "collision: a doubly-registered recall makes one round trip"
+rm -f "$MNEMON_DIR"/c-out.*
+
+# C2: two wakes on one session start speak once.
+C_KIDS=""
+for i in 1 2; do
+    printf '{"session_id":"dup2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+        | "$HOOKS_DIR/mnemon-wake.sh" > "$MNEMON_DIR/c-wout.$i" 2>/dev/null &
+    C_KIDS="$C_KIDS $!"
+done
+# shellcheck disable=SC2086
+wait $C_KIDS
+assert_eq "$(grep -l 'Mnemon palace state' "$MNEMON_DIR"/c-wout.* 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "collision: a doubly-registered wake speaks once"
+rm -f "$MNEMON_DIR"/c-wout.*
+
+# C3: the claim must expire. SessionStart fires again on resume and after
+# compaction, and a hook killed mid-run must not silence the session for good.
+find "$MNEMON_DIR/sessions" -maxdepth 1 -name 'dup2.*.claim' -exec touch -d '@1' {} + 2>/dev/null
+c3_out=$(printf '{"session_id":"dup2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$c3_out" in
+    *"Mnemon palace state"*) PASS=$((PASS+1)); printf '  ok: collision: a stale claim does not silence the session\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: collision: a stale claim silenced a later legitimate wake\n';;
+esac
+
+# C4: preventing the symptom is not the same as reporting the cause. A device
+# paying for two round trips per prompt should be told, once, how to stop.
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/x/mnemon-wake.sh"}]}]}}' \
+    > "$MNEMON_DIR/settings-dup.json"
+c4_out=$(printf '{"session_id":"dup3","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env CLAUDE_PLUGIN_ROOT="$HOOKS_DIR/.." MNEMON_CLAUDE_SETTINGS="$MNEMON_DIR/settings-dup.json" \
+      "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$c4_out" in
+    *"registered twice"*) PASS=$((PASS+1)); printf '  ok: collision: a double registration is reported\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: collision: no warning about a double registration, got: %s\n' "$c4_out";;
+esac
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/x/other.sh"}]}]}}' \
+    > "$MNEMON_DIR/settings-clean.json"
+c4b_out=$(printf '{"session_id":"dup4","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env CLAUDE_PLUGIN_ROOT="$HOOKS_DIR/.." MNEMON_CLAUDE_SETTINGS="$MNEMON_DIR/settings-clean.json" \
+      "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$c4b_out" in
+    *"registered twice"*) FAIL=$((FAIL+1)); printf '  FAIL: collision: warned about a double registration that does not exist\n';;
+    *) PASS=$((PASS+1)); printf '  ok: collision: a single registration is not reported\n';;
+esac
+rf_stop_all
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

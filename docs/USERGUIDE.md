@@ -623,6 +623,26 @@ Mnemon: the hooks are registered twice — by the plugin and in /home/you/.claud
 The fix is to delete the `mnemon-*` entries from that file and let the plugin own
 the registration.
 
+#### Keeping automation out of the palace
+
+Hooks are registered globally, so every Claude Code session on the machine feeds
+the palace — including cron-launched ones. Those produce byte-identical
+transcripts every day and have nothing worth remembering. Before this was
+addressed, 17% of everything stored on the live instance was a redundant copy;
+one prompt had been kept seven times.
+
+Two switches, for two different situations:
+
+- `@nomemo` at the start of a prompt suppresses that conversation, from inside it.
+- `MNEMON_DISABLE=1` in the environment suppresses the session entirely — wake,
+  recall and capture all no-op. Set it in whatever wrapper launches the
+  automation, when the automation does not author its own prompt.
+
+Identical content is also refused at write time: a drawer whose content already
+exists in the same room is not stored again, and the existing one is returned.
+The same content in a *different* room is kept, since rooms are separate
+contexts. This saves the embedding call as well as the row.
+
 #### Tuning
 
 `recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted

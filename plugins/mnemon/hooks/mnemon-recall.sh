@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
 
+mnemon_disabled && exit 0
+
 input=$(cat 2>/dev/null || echo '{}')
 session_id=$(printf '%s' "$input" | jq -r '.session_id // empty')
 prompt=$(printf '%s' "$input" | jq -r '.prompt // empty')

@@ -40,8 +40,24 @@ class DrawerWriteService
             ['name' => Str::title(str_replace('-', ' ', $roomSlug)), 'wing_id' => $wing->id],
         );
 
+        // Redact first, then fingerprint: two captures differing only in a
+        // secret that gets removed are the same drawer once stored.
+        $sanitized = $this->sanitizer->sanitize($content);
+
+        $existing = Drawer::where('room_id', $room->id)
+            ->where('content_hash', hash('sha256', $sanitized))
+            ->first();
+
+        if ($existing !== null) {
+            // Handed back rather than created. wasRecentlyCreated is false on a
+            // fetched model, so callers can tell the difference without a
+            // signature change — and nothing silently reports a write that did
+            // not happen.
+            return $existing;
+        }
+
         return Drawer::create([
-            'content' => $this->sanitizer->sanitize($content),
+            'content' => $sanitized,
             'room_id' => $room->id,
             'source' => $source,
             'metadata' => $metadata,

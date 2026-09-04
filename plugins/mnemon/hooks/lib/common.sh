@@ -19,6 +19,23 @@ MNEMON_CLAUDE_SETTINGS="${MNEMON_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 
 mkdir -p "$MNEMON_SESSIONS_DIR" 2>/dev/null || true
 
+# Whether this session should be left out of the palace entirely.
+#
+# The hooks are registered globally, so every Claude Code session on a machine
+# feeds the palace -- cron-launched ones included, and those produce
+# byte-identical transcripts every day. On the live instance that was 17% of all
+# stored drawers, the worst single prompt kept seven times.
+#
+# @nomemo already covers "this conversation, from inside the prompt". This covers
+# the other case: automation that does not author its own prompt but knows it has
+# nothing worth remembering. Set MNEMON_DISABLE=1 in the wrapper that launches it.
+mnemon_disabled() {
+    case "${MNEMON_DISABLE:-${CLAUDE_PLUGIN_OPTION_MNEMON_DISABLE:-}}" in
+        ''|0|false|no) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # Read endpoint + bearer token. Echoes "<endpoint>|<token>" or empty if not configured.
 mnemon_token() {
     # Environment first. A plugin can hand its hooks credentials this way, which

@@ -26,6 +26,7 @@ class Drawer extends Model
         'metadata',
         'embedding',
         'tier',
+        'content_hash',
         'access_count',
         'retention_score',
         'last_accessed_at',
@@ -38,6 +39,22 @@ class Drawer extends Model
         'retention_score' => 'float',
         'last_accessed_at' => 'datetime',
     ];
+
+    /**
+     * Keep the content fingerprint in step with the content.
+     *
+     * A data invariant rather than an observer concern: a drawer without a
+     * correct hash would be invisible to deduplication, which is the kind of
+     * silent gap this codebase keeps finding.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $drawer) {
+            if ($drawer->isDirty('content') || $drawer->content_hash === null) {
+                $drawer->content_hash = hash('sha256', (string) $drawer->content);
+            }
+        });
+    }
 
     /**
      * Compute retention score using exponential decay per tier.

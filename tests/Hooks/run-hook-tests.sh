@@ -1025,6 +1025,44 @@ case "$c4b_out" in
 esac
 rf_stop_all
 
+# --- Automation opt-out -------------------------------------------------------
+# Hooks are registered globally, so every Claude Code session on the box feeds
+# the palace -- including cron-launched ones, which produce byte-identical
+# transcripts every day. Measured on the live palace before this landed: 17% of
+# all drawers were redundant copies, the worst offender stored seven times.
+# @nomemo suppresses a session from inside the prompt; automation needs a switch
+# it can set from outside, without authoring the prompt.
+D_PORT=$(rf_free_port); D_LOG="$MNEMON_DIR/d.log"; D_STATE=$(mktemp -d)
+rf_start "$D_PORT" "$D_LOG" "$D_STATE"
+jq -n --arg e "http://127.0.0.1:$D_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"t", recall_timeout_ms:5000}' > "$MNEMON_DIR/config.json"
+
+: > "$D_LOG"
+d_wake=$(printf '{"session_id":"d1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env MNEMON_DISABLE=1 "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+assert_eq "$d_wake" "" "opt-out: wake says nothing when disabled"
+
+d_recall=$(printf '{"session_id":"d2","prompt":"a substantive prompt from an automated run"}' \
+    | env MNEMON_DISABLE=1 "$HOOKS_DIR/mnemon-recall.sh" 2>/dev/null)
+assert_eq "$d_recall" "" "opt-out: recall says nothing when disabled"
+
+d_tp="$MNEMON_DIR/d-transcript.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"the daily cron prompt"}}' > "$d_tp"
+printf '{"session_id":"d3","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$d_tp" \
+    | env MNEMON_DISABLE=1 "$HOOKS_DIR/mnemon-capture.sh" >/dev/null 2>&1 || true
+sleep 1
+assert_eq "$(wc -c < "$D_LOG" | tr -d ' ')" "0" "opt-out: a disabled session makes no server call at all"
+
+# And the guard against over-suppression: without the switch, nothing changes.
+: > "$D_LOG"
+d_on=$(printf '{"session_id":"d4","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$d_on" in
+    *"Mnemon palace state"*) PASS=$((PASS+1)); printf '  ok: opt-out: without the switch the hooks behave as before\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: opt-out: suppressed a session that was not opted out, got: %s\n' "$d_on";;
+esac
+rf_stop_all
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

@@ -104,15 +104,23 @@ class SessionDigestToolTest extends TestCase
         $work = Wing::factory()->create(['slug' => 'work']);
         Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
 
-        $this->mockDigestService([
-            ['content' => 'a real note', 'wing_slug' => 'work', 'room_slug' => 'notes',
-                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
-        ]);
-
         $base = ['session_id' => 'sess-seq', 'harness' => 'claude-code',
             'transcript' => 'we discussed a real note today'];
 
+        // Each range yields its own content, as two different slices of a
+        // transcript do. Identical content is refused at write time now, so a
+        // stub returning one fixed string for both calls would be measuring
+        // deduplication rather than range-keyed idempotency.
+        $this->mockDigestService([
+            ['content' => 'the first half of the conversation', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
         $this->mcpCall('session_digest', $base + ['turn_range' => ['start' => 0, 'end' => 4]], ['mcp:use']);
+
+        $this->mockDigestService([
+            ['content' => 'the second half of the conversation', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
         $this->mcpCall('session_digest', $base + ['turn_range' => ['start' => 4, 'end' => 9]], ['mcp:use']);
 
         $this->assertEquals(2, Drawer::count(),

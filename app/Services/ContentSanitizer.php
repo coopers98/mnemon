@@ -11,8 +11,12 @@ class ContentSanitizer
      * @var array<int, array{0: string, 1: string}>
      */
     private const PATTERNS = [
-        // OpenAI-style API keys (sk-...)
-        ['/\bsk-[a-zA-Z0-9]{20,}\b/', '[REDACTED:API_KEY]'],
+        // OpenAI-style API keys (sk-..., sk-proj-..., sk-svcacct-...).
+        // The class has to include - and _ : the old pattern stopped at the
+        // hyphen in "sk-proj-" and so never matched the shape OpenAI has issued
+        // for years. No trailing \b, because a key may end on a character that
+        // is not a word boundary.
+        ['/\bsk-[a-zA-Z0-9_-]{20,}/', '[REDACTED:API_KEY]'],
         // GitHub personal access tokens (ghp_...)
         ['/\bghp_[a-zA-Z0-9]+\b/', '[REDACTED:GITHUB_TOKEN]'],
         // GitHub OAuth tokens (gho_...)

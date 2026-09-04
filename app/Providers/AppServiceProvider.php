@@ -61,6 +61,17 @@ class AppServiceProvider extends ServiceProvider
         Passport::refreshTokensExpireIn(now()->addDays(90));
         Passport::personalAccessTokensExpireIn(now()->addDays(90));
 
+        // Non-rotating refresh tokens. Under rotation League revokes the old
+        // refresh token before the device has stored the new one, so a response
+        // lost on the wire leaves the device holding a consumed token:
+        // deterministic invalid_grant, and a headless machine needs a browser to
+        // recover. Each exchange still issues a fresh refresh token, so devices
+        // self-renew and the 90-day window still slides; only the revocation of
+        // the superseded token is skipped. The cost is that superseded tokens
+        // stay valid until their own expiry, which makes client revocation
+        // (TokenRevoker::client) the reliable per-device kill switch.
+        Passport::$revokeRefreshTokenAfterUse = false;
+
         Passport::authorizationView(fn ($p) => view('mcp.authorize', array_merge($p, [
             'wings' => Wing::orderBy('slug')->get(),
         ])));

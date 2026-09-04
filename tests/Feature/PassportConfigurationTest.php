@@ -30,4 +30,15 @@ class PassportConfigurationTest extends TestCase
         $this->assertEqualsWithDelta(3600, $tokenSeconds, 1);
         $this->assertEqualsWithDelta(90 * 24 * 3600, $refreshSeconds, 1);
     }
+
+    public function test_refresh_tokens_do_not_rotate(): void
+    {
+        // Under rotation, League revokes the old refresh token before the device
+        // has stored the new one. A token response lost on the wire therefore
+        // leaves the device holding a consumed token: deterministic invalid_grant
+        // and a browser re-auth, on a headless machine, from a dropped packet.
+        // Each exchange still issues a fresh refresh token, so devices self-renew
+        // and the 90-day window still slides.
+        $this->assertFalse(Passport::$revokeRefreshTokenAfterUse);
+    }
 }

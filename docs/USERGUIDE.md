@@ -493,7 +493,17 @@ The dashboard's **Live MCP Sessions** widget shows the 5 most recent calls acros
 3. Grant wing access appropriate for that device's trust level.
 4. Verify connection. Done.
 
-The DB now has one new row in `oauth_clients`, one in `oauth_access_tokens`, and one in `mcp_token_restrictions` (if you set wing restrictions).
+The DB now has one new row in `oauth_clients`, one in `oauth_access_tokens`, and
+one in `mcp_client_restrictions` (if you set wing restrictions).
+
+Wing restrictions are keyed on the **client**, not the access token. Keying them
+on the token meant a refreshed token had no restriction row, and a missing row
+means unrestricted — so a device limited to one wing silently became an all-wings
+device an hour after consent.
+
+This is the interactive path, for a client that runs its own OAuth flow. To
+connect a *headless* device — one running the Claude Code hooks, with no browser
+to keep re-authorizing — see [Connect the device](#2-connect-the-device) below.
 
 ---
 
@@ -503,31 +513,9 @@ Mnemon's MCP tools work for any agent that thinks to call them. For Claude Code 
 
 ### Install
 
-Two steps: a token, then the plugin.
+Two steps: install the plugin, then connect the device.
 
-#### 1. Mint a token for the device
-
-On the machine running Mnemon:
-
-```bash
-php artisan tinker --execute='echo App\Models\User::first()
-    ->createToken("claude-code@<device>", ["mcp:use"])->accessToken;'
-```
-
-**Use a personal access token, not the OAuth flow.** The hooks store the token
-once and have no refresh logic, and `AppServiceProvider` expires OAuth access
-tokens after **one hour** — so an install that mirrors Claude Code's own OAuth
-token stops working within the hour. Personal access tokens last 90 days
-(`Passport::personalAccessTokensExpireIn`).
-
-Name it per device. `agentSource()` prefers the token name, so it becomes the
-`source` on every `BrainSession` row, and one device can be revoked without
-touching the others.
-
-Tokens expire. From v0.2.0 the session-start hook warns once you are within 14
-days (`token_warn_days` in config); before that, expiry was silent.
-
-#### 2. Install the plugin
+#### 1. Install the plugin
 
 On the device — no repository, no PHP, no Composer. The hooks need only `jq`,
 `curl` and coreutils:
@@ -537,26 +525,102 @@ claude plugin marketplace add coopers98/mnemon
 claude plugin install mnemon@mnemon
 ```
 
-Then write `~/.mnemon/config.json`:
+#### 2. Connect the device
+
+From **v0.3.0** a device enrols itself through the OAuth device authorization
+grant (RFC 8628) and then renews its own credentials. There is no 90-day token
+ritual and nothing to copy by hand.
+
+Once per device, on the machine running Mnemon:
+
+```bash
+php artisan mnemon:device-client <device-name>     # e.g. thinkpad
+```
+
+That prints a client id and a secret. The secret is shown once and stored
+hashed — it is the only plaintext copy, so keep the terminal until enrolment
+finishes. The command refuses to reuse a device name, because one client per
+device is what makes revocation a per-device kill switch.
+
+Then, on the device itself:
+
+```bash
+bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-authorize.sh" \
+     https://<your-instance> <client-id>
+```
+
+It asks for the client secret (hidden — it never goes in the command line, which
+is visible in `ps`), prints a short code, and waits. Open the URL it shows, log
+in, pick the wings this device may reach, and approve. The script then verifies
+with a real tool call and prints which wings the device can actually see.
+
+If there was already a config, it is backed up first and the script prints the
+exact `cp` command to roll back before it replaces anything.
+
+From then on the device refreshes its own access token: the session-start hook
+renews it a few minutes before it expires, and any call that still gets a 401
+refreshes and retries once.
+
+#### Tuning
+
+`recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted
+one measures around 1.2s, and a budget below the round trip makes recall a
+silent no-op — set it to 3000 for a remote instance:
+
+```bash
+jq '.recall_timeout_ms = 3000' ~/.mnemon/config.json > /tmp/c && \
+  mv /tmp/c ~/.mnemon/config.json && chmod 600 ~/.mnemon/config.json
+```
+
+Enrolment preserves settings like this one across re-runs.
+
+### Revoking a device
+
+Filament → **OAuth Clients** → revoke the client for that device.
+
+Revoke the **client**, not a single token. Refresh tokens do not rotate, so
+superseded ones stay valid until their own expiry (up to 90 days) — revoking one
+access token only stops the device if it happens to hold the newest one. The
+client's revoked flag is what the OAuth server actually enforces on every grant.
+
+The device shows a banner at its next session start naming the reason, and stops
+trying. It does not fail silently.
+
+### For other agents (fallback)
+
+A personal access token is still right for an agent that will never run a
+refresh loop — a cron job, a one-off script, a container that cannot store
+credentials. The hooks support both, and credentials supplied through
+`MNEMON_ENDPOINT` / `MNEMON_TOKEN` are treated as PAT-shaped by design: they are
+static, so the hooks never try to refresh them.
+
+```bash
+php artisan tinker --execute='echo App\Models\User::first()
+    ->createToken("claude-code@<device>", ["mcp:use"])->accessToken;'
+```
 
 ```bash
 mkdir -p ~/.mnemon && chmod 700 ~/.mnemon
 cat > ~/.mnemon/config.json <<'JSON'
 {
   "endpoint": "https://<your-instance>/mcp",
-  "bearer_token": "<the token from step 1>",
+  "bearer_token": "<the token>",
   "recall_timeout_ms": 3000
 }
 JSON
 chmod 600 ~/.mnemon/config.json
 ```
 
-`recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted
-one measures around 1.2s, and a budget below the round trip makes recall a
-silent no-op — set it to 3000 for a remote instance.
+Name it per device. `agentSource()` prefers the token name, so it becomes the
+`source` on every `BrainSession` row, and one device can be revoked without
+touching the others.
 
-Credentials can come from `MNEMON_ENDPOINT` and `MNEMON_TOKEN` in the
-environment instead, which take precedence over the file.
+These tokens expire after 90 days
+(`Passport::personalAccessTokensExpireIn`). The session-start hook warns once
+you are within 14 days (`token_warn_days` in config); before v0.2.0, expiry was
+silent. Devices enrolled through the device grant do not get this countdown —
+their access token lives one hour by design, so a countdown would fire every
+session.
 
 Restart Claude Code, then confirm:
 
@@ -603,7 +667,8 @@ For new-wing proposals: `/admin` → Access Control → Pending Wings.
 - **No recall is firing.** Check `~/.mnemon/sessions/<session_id>.json` exists. If `nomemo: true` or `disabled: true`, that session is suppressed. Start a new Claude Code session.
 - **Capture isn't producing drawers.** Tail `~/.mnemon/capture-errors.log`. Common: `OPENAI_API_KEY` missing or rate-limited.
 - **`HTTP 401 ... token rejected or expired` in the capture log.** Mint a fresh
-  personal access token (see Install) and re-run the installer with `--token`.
+  personal access token (see "For other agents") or re-enrol with
+  `scripts/mnemon-authorize.sh`.
   Do not re-run it against Claude Code's OAuth token: that one expires in an hour.
 - **Recall is silent and nothing is logged.** Against a remote instance the
   default 800ms budget can be shorter than the round trip. Set
@@ -979,7 +1044,7 @@ If `schedule:run` isn't in cron, none of the scheduled tasks will fire. Add it.
 Common causes:
 
 - `oauth_*` tables not migrated → run `php artisan migrate`
-- `mcp_token_restrictions` table missing → run `php artisan migrate`
+- `mcp_client_restrictions` table missing → run `php artisan migrate`
 - Filament asset cache stale → `php artisan filament:cache-components`
 
 Check `storage/logs/laravel.log` for the actual stack trace.

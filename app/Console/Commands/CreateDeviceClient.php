@@ -45,7 +45,10 @@ class CreateDeviceClient extends Command
         $this->line('The secret is shown once and stored hashed. On the device, run the');
         $this->line("mnemon plugin's enrolment script and paste the secret when prompted:");
         $this->newLine();
-        $this->line('  bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | head -1)scripts/mnemon-authorize.sh" \\');
+        // sort -V, not head -1: the plugin cache keeps every installed version
+        // side by side, so the lexically first directory is the OLDEST one --
+        // and lexical order is wrong for versions regardless (0.10.0 < 0.9.0).
+        $this->line('  bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-authorize.sh" \\');
         $this->line('       '.rtrim((string) config('app.url'), '/').' '.$client->id);
 
         return self::SUCCESS;

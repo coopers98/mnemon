@@ -24,6 +24,7 @@ EOF
 
 PASS=0
 FAIL=0
+MNEMON_ERROR_LOG_TEST="$MNEMON_DIR/capture-errors.log"
 
 assert_ne() {
     if [ "$1" != "$2" ]; then
@@ -491,6 +492,410 @@ printf '{"session_id":"s14","cwd":"/tmp","hook_event_name":"SessionStart"}' \
   | "$HOOKS_DIR/mnemon-wake.sh" >/dev/null 2>&1 || true
 kept=$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s14.json" 2>/dev/null)
 assert_eq "$kept" "5" "wake: does not rewind last_digest_turn on SessionStart"
+
+# --- Refresh tests -----------------------------------------------------------
+# A device enrolled through the device grant holds a one-hour access token and a
+# 90-day refresh token. Nothing renews it interactively -- there is no browser on
+# the machine at 3am -- so a 401 has to be repaired in-band or the device goes
+# quiet in exactly the way every earlier defect in this file went quiet.
+#
+# Each mode needs its own server: the failure being modelled is fixed by
+# environment at start-up.
+
+RF_SERVERS=""
+rf_free_port() {
+    python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'
+}
+
+# Args: <port> <request-log> <state-dir> [VAR=value ...]
+rf_start() {
+    local port="$1" log="$2" state="$3"; shift 3
+    : > "$log"
+    env FAKE_PORT="$port" FAKE_REQUEST_LOG="$log" FAKE_STATE_DIR="$state" "$@" \
+        "$THIS_DIR/fixtures/server.sh" &
+    RF_SERVERS="$RF_SERVERS $!"
+    sleep 0.5
+}
+
+rf_stop_all() {
+    # shellcheck disable=SC2086
+    [ -n "$RF_SERVERS" ] && kill $RF_SERVERS 2>/dev/null
+    RF_SERVERS=""
+}
+
+# A refresh-capable config: the presence of refresh_token + client_id is the
+# feature switch, so a PAT config is simply one without these keys.
+rf_config() {
+    local port="$1"
+    jq -n --arg e "http://127.0.0.1:$port/mcp" --arg t "http://127.0.0.1:$port/oauth/token" \
+        '{endpoint:$e, token_endpoint:$t, bearer_token:"token-1", refresh_token:"refresh-1",
+          client_id:"cid", client_secret:"csec", recall_timeout_ms:5000}' \
+        > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+    chmod 600 "$MNEMON_DIR/config.json"
+}
+
+rf_recall() {  # Args: <session-id>
+    printf '{"session_id":"%s","prompt":"a substantive prompt to drive the refresh path"}' "$1" \
+        | "$HOOKS_DIR/mnemon-recall.sh" 2>/dev/null
+}
+
+# R1: 401 -> refresh -> retry once -> success, with the config rewritten intact.
+R1_PORT=$(rf_free_port); R1_LOG="$MNEMON_DIR/r1.log"; R1_STATE=$(mktemp -d)
+rf_start "$R1_PORT" "$R1_LOG" "$R1_STATE" FAKE_EXPIRE_FIRST=1
+rf_config "$R1_PORT"
+: > "$MNEMON_ERROR_LOG_TEST"
+out=$(rf_recall r1)
+case "$out" in
+    *"Mnemon recall:"*) PASS=$((PASS+1)); printf '  ok: refresh: 401 is refreshed and retried once\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: refresh: expected recall output after refresh, got: %s\n' "$out";;
+esac
+assert_eq "$(jq -r '.bearer_token' "$MNEMON_DIR/config.json")" "token-2" "refresh: new access token stored"
+assert_eq "$(jq -r '.refresh_token' "$MNEMON_DIR/config.json")" "refresh-2" "refresh: new refresh token stored"
+assert_eq "$(jq -r '.recall_timeout_ms' "$MNEMON_DIR/config.json")" "5000" "refresh: tunables survive the rewrite"
+assert_eq "$(stat -c '%a' "$MNEMON_DIR/config.json")" "600" "refresh: config stays 0600"
+assert_eq "$(grep -c 'refreshed access token' "$MNEMON_ERROR_LOG_TEST")" "1" "refresh: success is logged"
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R1_LOG")" "1" "refresh: exactly one token exchange"
+
+# R2: three concurrent 401s must produce exactly one refresh. Every hook fires
+# on the same events, so an expiry is discovered by several processes at once;
+# without a lock each would spend the same refresh token and all but one would
+# be rejected.
+rf_config "$R1_PORT"
+: > "$R1_LOG"
+# Wait on these PIDs specifically: a bare `wait` would also wait on the fake
+# servers, which never exit.
+RF_KIDS=""
+for s in rs1 rs2 rs3; do
+    rf_recall "$s" >/dev/null 2>&1 &
+    RF_KIDS="$RF_KIDS $!"
+done
+# shellcheck disable=SC2086
+wait $RF_KIDS
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R1_LOG")" "1" "refresh: three concurrent 401s cause exactly one refresh"
+assert_eq "$(jq -r '.bearer_token' "$MNEMON_DIR/config.json")" "token-2" "refresh: stampede converges on the new token"
+rf_stop_all
+
+# R3: invalid_grant is definitive. The refresh token is gone and no amount of
+# retrying brings it back, so the device is marked dead and stops asking.
+R3_PORT=$(rf_free_port); R3_LOG="$MNEMON_DIR/r3.log"; R3_STATE=$(mktemp -d)
+rf_start "$R3_PORT" "$R3_LOG" "$R3_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL=invalid_grant
+rf_config "$R3_PORT"
+rf_recall r3a >/dev/null
+assert_eq "$(jq -r '.auth_state' "$MNEMON_DIR/config.json")" "dead" "refresh: invalid_grant sets auth_state=dead"
+assert_eq "$(jq -r '.auth_dead_reason' "$MNEMON_DIR/config.json")" "invalid_grant" "refresh: the reason is recorded"
+rf_recall r3b >/dev/null
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R3_LOG")" "1" "refresh: a dead device does not keep retrying"
+rf_stop_all
+
+# R4: invalid_client is what a revoked client returns -- and client revocation is
+# the per-device kill switch. Treating only invalid_grant as fatal would have had
+# every killed device retry the kill switch every prompt, forever.
+R4_PORT=$(rf_free_port); R4_LOG="$MNEMON_DIR/r4.log"; R4_STATE=$(mktemp -d)
+rf_start "$R4_PORT" "$R4_LOG" "$R4_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL=invalid_client
+rf_config "$R4_PORT"
+rf_recall r4a >/dev/null
+assert_eq "$(jq -r '.auth_state' "$MNEMON_DIR/config.json")" "dead" "refresh: invalid_client sets auth_state=dead"
+assert_eq "$(jq -r '.auth_dead_reason' "$MNEMON_DIR/config.json")" "invalid_client" "refresh: a revoked client is recorded as such"
+rf_recall r4b >/dev/null
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R4_LOG")" "1" "refresh: a revoked device stops asking"
+rf_stop_all
+
+# R5: a proxy page or a 5xx is transient. Discarding a 90-day refresh token
+# because a load balancer hiccuped would turn a blip into a re-enrolment.
+for mode in garbage 500; do
+    R5_PORT=$(rf_free_port); R5_LOG="$MNEMON_DIR/r5.log"; R5_STATE=$(mktemp -d)
+    rf_start "$R5_PORT" "$R5_LOG" "$R5_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL="$mode"
+    rf_config "$R5_PORT"
+    : > "$MNEMON_ERROR_LOG_TEST"
+    rf_recall "r5$mode" >/dev/null
+    assert_ne "$(jq -r '.auth_state // "ok"' "$MNEMON_DIR/config.json")" "dead" "refresh: $mode is transient, not dead"
+    assert_eq "$(jq -r '.refresh_token' "$MNEMON_DIR/config.json")" "refresh-1" "refresh: $mode keeps the refresh token"
+    assert_ne "$(grep -c 'refresh failed' "$MNEMON_ERROR_LOG_TEST")" "0" "refresh: $mode is logged as a failure"
+    rf_stop_all
+done
+
+# R6: a PAT-shaped config must never attempt a refresh. PAT devices are the
+# installed base; this release must be inert for them.
+R6_PORT=$(rf_free_port); R6_LOG="$MNEMON_DIR/r6.log"; R6_STATE=$(mktemp -d)
+rf_start "$R6_PORT" "$R6_LOG" "$R6_STATE" FAKE_STATUS=401
+jq -n --arg e "http://127.0.0.1:$R6_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"pat-token", recall_timeout_ms:5000}' \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_ERROR_LOG_TEST"
+rf_recall r6 >/dev/null
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R6_LOG")" "0" "refresh: a PAT config never calls the token endpoint"
+assert_ne "$(grep -c 'token rejected or expired' "$MNEMON_ERROR_LOG_TEST")" "0" "refresh: a PAT 401 still logs the existing message"
+
+# R6b: the feature switch is refresh_token + client_id, and only a config that
+# still has a reachable token endpoint can prove it. A plain PAT config has no
+# token_endpoint either, so removing the switch from mnemon_refresh_available
+# would produce no request from it regardless -- the test above cannot tell the
+# guard from the missing URL.
+: > "$R6_LOG"
+jq -n --arg e "http://127.0.0.1:$R6_PORT/mcp" --arg t "http://127.0.0.1:$R6_PORT/oauth/token" \
+    '{endpoint:$e, token_endpoint:$t, bearer_token:"token-1", client_id:"cid",
+      client_secret:"csec", recall_timeout_ms:5000}' \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+rf_recall r6b >/dev/null
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R6_LOG")" "0" "refresh: no refresh_token means no refresh, even with a reachable token endpoint"
+rf_stop_all
+
+# R7: credentials from the environment are static. Refreshing would rewrite a
+# file nothing reads, so every call would 401, "succeed" at refreshing, and 401
+# again -- permanent double round trips that converge never.
+R7_PORT=$(rf_free_port); R7_LOG="$MNEMON_DIR/r7.log"; R7_STATE=$(mktemp -d)
+rf_start "$R7_PORT" "$R7_LOG" "$R7_STATE" FAKE_EXPIRE_FIRST=1
+rf_config "$R7_PORT"
+# The env token deliberately matches the config's stored token. With a different
+# one, mnemon_refresh would take its "someone else already refreshed" shortcut
+# and return without any request -- so the test would pass even with the env
+# guard removed, proving nothing.
+MNEMON_ENDPOINT="http://127.0.0.1:$R7_PORT/mcp" MNEMON_TOKEN="token-1" rf_recall r7 >/dev/null
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R7_LOG")" "0" "refresh: env credentials disable refresh entirely"
+rf_stop_all
+
+# R8: a 200 carrying no usable token must not overwrite working credentials.
+R8_PORT=$(rf_free_port); R8_LOG="$MNEMON_DIR/r8.log"; R8_STATE=$(mktemp -d)
+rf_start "$R8_PORT" "$R8_LOG" "$R8_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL=empty
+rf_config "$R8_PORT"
+: > "$MNEMON_ERROR_LOG_TEST"
+rf_recall r8 >/dev/null
+assert_eq "$(jq -r '.bearer_token' "$MNEMON_DIR/config.json")" "token-1" "refresh: an empty token response is refused"
+assert_eq "$(jq -r '.refresh_token' "$MNEMON_DIR/config.json")" "refresh-1" "refresh: an empty token response keeps the old refresh token"
+assert_ne "$(grep -c 'refresh failed' "$MNEMON_ERROR_LOG_TEST")" "0" "refresh: an empty token response is logged"
+rf_stop_all
+
+# R10: one retry, never a loop. If the retried call 401s too -- a server that
+# rejects every token, a clock skew, a scope problem -- an unguarded retry would
+# refresh and recurse forever, because each refresh writes a token that then
+# matches on the next pass. Bounded by `timeout` so a regression fails the suite
+# instead of hanging it.
+R10_PORT=$(rf_free_port); R10_LOG="$MNEMON_DIR/r10.log"; R10_STATE=$(mktemp -d)
+rf_start "$R10_PORT" "$R10_LOG" "$R10_STATE" FAKE_STATUS=401
+rf_config "$R10_PORT"
+timeout 25 bash -c "printf '{\"session_id\":\"r10\",\"prompt\":\"a substantive prompt that never succeeds\"}' | '$HOOKS_DIR/mnemon-recall.sh'" >/dev/null 2>&1
+r10_rc=$?
+assert_ne "$r10_rc" "124" "refresh: a permanently rejecting server does not hang the hook"
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$R10_LOG")" "1" "refresh: retries exactly once, never in a loop"
+rf_stop_all
+
+# R9: the config rewrite is the riskiest thing these hooks do -- a truncated
+# config.json is indistinguishable from an unconfigured machine. A zero-byte
+# session-state file already wedged a session for hours once.
+# Exact match on the exit code, not a glob: an earlier draft accepted *rc=1*,
+# which also matches the 127 bash returns when the function does not exist --
+# so the test passed before the function was written.
+bad=$(printf 'not json' | bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_config_write >/dev/null 2>&1; echo \$?" 2>/dev/null | tail -1)
+assert_eq "$bad" "1" "config write refuses invalid JSON"
+assert_eq "$(jq -e . "$MNEMON_DIR/config.json" >/dev/null 2>&1 && echo valid)" "valid" "config: old file untouched after a refused write"
+
+# --- Wake tests --------------------------------------------------------------
+
+# W1: a dead credential banners at every session start, with the exact command,
+# and makes no server call at all. Everything else in these hooks degrades
+# quietly by design; this one cannot, because no amount of waiting fixes it.
+W1_PORT=$(rf_free_port); W1_LOG="$MNEMON_DIR/w1.log"; W1_STATE=$(mktemp -d)
+rf_start "$W1_PORT" "$W1_LOG" "$W1_STATE"
+rf_config "$W1_PORT"
+jq '. + {auth_state:"dead", auth_dead_reason:"invalid_grant"}' "$MNEMON_DIR/config.json" \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+out=$(printf '{"session_id":"w1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *"authorization is dead"*) PASS=$((PASS+1)); printf '  ok: wake: a dead credential banners\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: no dead banner, got: %s\n' "$out";;
+esac
+case "$out" in
+    *"mnemon-authorize"*) PASS=$((PASS+1)); printf '  ok: wake: the dead banner names the re-enrolment command\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: dead banner does not say how to fix it\n';;
+esac
+case "$out" in
+    *"<your-instance>"*) FAIL=$((FAIL+1)); printf '  FAIL: wake: dead banner still has a placeholder URL in it\n';;
+    *) PASS=$((PASS+1)); printf '  ok: wake: the dead banner names the real instance\n';;
+esac
+assert_eq "$(wc -c < "$W1_LOG" | tr -d ' ')" "0" "wake: a dead credential makes no server call"
+rf_stop_all
+
+# W2: a refresh-capable device must never show the PAT countdown. Its access
+# token lives one hour, so days_left is always 0 and every single session would
+# open with a false "token has expired" banner. The same JWT with the refresh
+# fields removed must still warn -- that contrast is the whole test.
+W2_PORT=$(rf_free_port); W2_LOG="$MNEMON_DIR/w2.log"; W2_STATE=$(mktemp -d)
+rf_start "$W2_PORT" "$W2_LOG" "$W2_STATE"
+rf_config "$W2_PORT"
+jq --arg t "$(make_jwt 1800)" '.bearer_token=$t' "$MNEMON_DIR/config.json" \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+out=$(printf '{"session_id":"w2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *expire*) FAIL=$((FAIL+1)); printf '  FAIL: wake: refresh-capable device showed the expiry countdown\n';;
+    *) PASS=$((PASS+1)); printf '  ok: wake: a refresh-capable device shows no expiry countdown\n';;
+esac
+# Same token, no refresh fields: the countdown must still fire.
+jq --arg t "$(make_jwt 1800)" \
+    '{endpoint, bearer_token:$t, recall_timeout_ms}' "$MNEMON_DIR/config.json" \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+out=$(printf '{"session_id":"w2b","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *expire*) PASS=$((PASS+1)); printf '  ok: wake: the same token still warns a PAT device\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: PAT countdown regressed, got: %s\n' "$out";;
+esac
+rf_stop_all
+
+# W4: wake refreshes proactively inside the last 10 minutes. Session start is the
+# one place a ~1s refresh is invisible; the per-prompt recall budget is not.
+W4_PORT=$(rf_free_port); W4_LOG="$MNEMON_DIR/w4.log"; W4_STATE=$(mktemp -d)
+W4_HDR="$MNEMON_DIR/w4-headers.log"; : > "$W4_HDR"
+rf_start "$W4_PORT" "$W4_LOG" "$W4_STATE" FAKE_HEADER_LOG="$W4_HDR"
+rf_config "$W4_PORT"
+jq --arg t "$(make_jwt 300)" '.bearer_token=$t' "$MNEMON_DIR/config.json" \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+printf '{"session_id":"w4","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" >/dev/null 2>&1
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$W4_LOG")" "1" "wake: refreshes proactively near expiry"
+assert_ne "$(grep -c 'Authorization: Bearer token-2' "$W4_HDR")" "0" "wake: the wake call carries the refreshed token"
+rf_stop_all
+
+# W4b: a token with plenty of life left is not refreshed at session start.
+W4B_PORT=$(rf_free_port); W4B_LOG="$MNEMON_DIR/w4b.log"; W4B_STATE=$(mktemp -d)
+rf_start "$W4B_PORT" "$W4B_LOG" "$W4B_STATE"
+rf_config "$W4B_PORT"
+jq --arg t "$(make_jwt 3000)" '.bearer_token=$t' "$MNEMON_DIR/config.json" \
+    > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+printf '{"session_id":"w4b","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" >/dev/null 2>&1
+assert_eq "$(grep -c '^OAUTH_TOKEN' "$W4B_LOG")" "0" "wake: a healthy token is not refreshed every session"
+rf_stop_all
+
+# W5: the unconfigured message points at the device flow, which is now the way in.
+mv "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.w5.json"
+out=$(printf '{"session_id":"w5","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *"mnemon-authorize"*) PASS=$((PASS+1)); printf '  ok: wake: the unconfigured message points at the device flow\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: unconfigured message does not mention enrolment, got: %s\n' "$out";;
+esac
+mv "$MNEMON_DIR/config.w5.json" "$MNEMON_DIR/config.json"
+
+# --- Enrolment tests ---------------------------------------------------------
+# mnemon-authorize.sh is the one place in this system where stdout is guaranteed
+# to have a human behind it, so every terminal state has to say what happened and
+# exit non-zero. It is also the only script that replaces a working credential,
+# which is why the rollback path is tested as carefully as the happy one.
+AUTH_SH="$HOOKS_DIR/../scripts/mnemon-authorize.sh"
+
+# A1: the happy path, over an existing PAT config.
+A1_PORT=$(rf_free_port); A1_LOG="$MNEMON_DIR/a1.log"; A1_STATE=$(mktemp -d)
+rf_start "$A1_PORT" "$A1_LOG" "$A1_STATE" FAKE_DEVICE_MODE=success
+jq -n --arg e "http://127.0.0.1:$A1_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"old-pat-token", recall_timeout_ms:3000}' \
+    > "$MNEMON_DIR/config.json"
+chmod 600 "$MNEMON_DIR/config.json"
+# The interactive MCP entry may carry the same token; revoking it blindly would
+# break that too, so enrolment has to say so.
+printf '{"mcpServers":{"mnemon":{"url":"x","headers":{"Authorization":"Bearer old-pat-token"}}}}' \
+    > "$MNEMON_DIR/claude.json"
+rm -f "$MNEMON_DIR"/config.backup-*.json
+a1_out=$(MNEMON_CLIENT_SECRET=csec MNEMON_CLAUDE_JSON="$MNEMON_DIR/claude.json" \
+    "$AUTH_SH" "http://127.0.0.1:$A1_PORT" cid 2>&1)
+a1_rc=$?
+assert_eq "$a1_rc" "0" "authorize: a successful enrolment exits 0"
+case "$a1_out" in
+    *"BCDF-GHJK"*) PASS=$((PASS+1)); printf '  ok: authorize: the user code is shown grouped for reading aloud\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no readable user code in output\n';;
+esac
+case "$a1_out" in
+    *"Waiting for approval"*) PASS=$((PASS+1)); printf '  ok: authorize: says it is waiting\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no waiting message\n';;
+esac
+case "$a1_out" in
+    *"Verified"*) PASS=$((PASS+1)); printf '  ok: authorize: reports verification against a real tool call\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no verification line\n';;
+esac
+case "$a1_out" in
+    *"cp $MNEMON_DIR/config.backup-"*) PASS=$((PASS+1)); printf '  ok: authorize: prints a copy-pasteable rollback\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no rollback line before replacing a working config\n';;
+esac
+case "$a1_out" in
+    *"also used by your MCP server entry"*) PASS=$((PASS+1)); printf '  ok: authorize: warns the old token is shared with the MCP entry\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no warning about the shared token\n';;
+esac
+assert_eq "$(jq -r '.bearer_token' "$MNEMON_DIR/config.json")" "token-2" "authorize: stores the new access token"
+assert_eq "$(jq -r '.refresh_token' "$MNEMON_DIR/config.json")" "refresh-2" "authorize: stores the refresh token"
+assert_eq "$(jq -r '.client_id' "$MNEMON_DIR/config.json")" "cid" "authorize: stores the client id"
+assert_eq "$(jq -r '.auth_state' "$MNEMON_DIR/config.json")" "ok" "authorize: marks the device live"
+assert_ne "$(jq -r '.token_endpoint' "$MNEMON_DIR/config.json")" "null" "authorize: stores the token endpoint"
+assert_eq "$(jq -r '.recall_timeout_ms' "$MNEMON_DIR/config.json")" "3000" "authorize: preserves existing tunables"
+assert_eq "$(stat -c '%a' "$MNEMON_DIR/config.json")" "600" "authorize: the new config is 0600"
+a1_backup=$(ls "$MNEMON_DIR"/config.backup-*.json 2>/dev/null | head -1)
+assert_eq "$(jq -r '.bearer_token' "$a1_backup" 2>/dev/null)" "old-pat-token" "authorize: the backup holds the replaced token"
+assert_eq "$(stat -c '%a' "$a1_backup" 2>/dev/null)" "600" "authorize: the backup is 0600"
+rf_stop_all
+
+# A2: a denial changes nothing. The device keeps whatever credential it had.
+A2_PORT=$(rf_free_port); A2_LOG="$MNEMON_DIR/a2.log"; A2_STATE=$(mktemp -d)
+rf_start "$A2_PORT" "$A2_LOG" "$A2_STATE" FAKE_DEVICE_MODE=denied
+jq -n --arg e "http://127.0.0.1:$A2_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"keep-me", recall_timeout_ms:3000}' > "$MNEMON_DIR/config.json"
+a2_before=$(cat "$MNEMON_DIR/config.json")
+a2_out=$(MNEMON_CLIENT_SECRET=csec "$AUTH_SH" "http://127.0.0.1:$A2_PORT" cid 2>&1); a2_rc=$?
+assert_eq "$a2_rc" "1" "authorize: a denial exits non-zero"
+case "$a2_out" in
+    *"denied on the consent screen"*) PASS=$((PASS+1)); printf '  ok: authorize: a denial says so plainly\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: denial message unclear, got: %s\n' "$a2_out";;
+esac
+assert_eq "$(cat "$MNEMON_DIR/config.json")" "$a2_before" "authorize: a denial leaves the config byte-identical"
+rf_stop_all
+
+# A3: an expired code is recoverable, and the message has to say how.
+A3_PORT=$(rf_free_port); A3_LOG="$MNEMON_DIR/a3.log"; A3_STATE=$(mktemp -d)
+rf_start "$A3_PORT" "$A3_LOG" "$A3_STATE" FAKE_DEVICE_MODE=expired
+a3_before=$(cat "$MNEMON_DIR/config.json")
+a3_out=$(MNEMON_CLIENT_SECRET=csec "$AUTH_SH" "http://127.0.0.1:$A3_PORT" cid 2>&1); a3_rc=$?
+assert_eq "$a3_rc" "1" "authorize: an expired code exits non-zero"
+case "$a3_out" in
+    *expired*) PASS=$((PASS+1)); printf '  ok: authorize: an expired code says it expired\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: expiry message unclear, got: %s\n' "$a3_out";;
+esac
+case "$a3_out" in
+    *"Re-run"*|*"re-run"*) PASS=$((PASS+1)); printf '  ok: authorize: an expired code says how to recover\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no recovery instruction for an expired code\n';;
+esac
+assert_eq "$(cat "$MNEMON_DIR/config.json")" "$a3_before" "authorize: an expired code leaves the config untouched"
+rf_stop_all
+
+# A4: a fresh install has nothing to back up and should not pretend otherwise.
+A4_PORT=$(rf_free_port); A4_LOG="$MNEMON_DIR/a4.log"; A4_STATE=$(mktemp -d)
+rf_start "$A4_PORT" "$A4_LOG" "$A4_STATE" FAKE_DEVICE_MODE=success
+rm -f "$MNEMON_DIR/config.json" "$MNEMON_DIR"/config.backup-*.json
+a4_out=$(MNEMON_CLIENT_SECRET=csec "$AUTH_SH" "http://127.0.0.1:$A4_PORT" cid 2>&1); a4_rc=$?
+assert_eq "$a4_rc" "0" "authorize: a fresh install enrols cleanly"
+assert_eq "$(jq -r '.bearer_token' "$MNEMON_DIR/config.json")" "token-2" "authorize: a fresh install writes a complete config"
+assert_eq "$(ls "$MNEMON_DIR"/config.backup-*.json 2>/dev/null | wc -l | tr -d ' ')" "0" "authorize: nothing to back up means no backup file"
+case "$a4_out" in
+    *"cp $MNEMON_DIR/config.backup-"*) FAIL=$((FAIL+1)); printf '  FAIL: authorize: printed a rollback line with no backup to roll back to\n';;
+    *) PASS=$((PASS+1)); printf '  ok: authorize: no rollback line when there was nothing to replace\n';;
+esac
+case "$a4_out" in
+    *"ings this device can reach"*) PASS=$((PASS+1)); printf '  ok: authorize: reports the wings the device can reach\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no wing report\n';;
+esac
+rf_stop_all
+
+# A5: a token that is issued but cannot actually do anything must not be reported
+# as success. tools/list would pass on a deny-all token; only a real tool call
+# distinguishes a working device from a bricked one.
+A5_PORT=$(rf_free_port); A5_LOG="$MNEMON_DIR/a5.log"; A5_STATE=$(mktemp -d)
+rf_start "$A5_PORT" "$A5_LOG" "$A5_STATE" FAKE_DEVICE_MODE=success FAKE_TOOL_ERROR=1
+rm -f "$MNEMON_DIR/config.json"
+a5_out=$(MNEMON_CLIENT_SECRET=csec "$AUTH_SH" "http://127.0.0.1:$A5_PORT" cid 2>&1); a5_rc=$?
+assert_eq "$a5_rc" "1" "authorize: a token that cannot call a tool is not a success"
+case "$a5_out" in
+    *"VERIFICATION FAILED"*) PASS=$((PASS+1)); printf '  ok: authorize: a failed verification says so loudly\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: no verification failure message, got: %s\n' "$a5_out";;
+esac
+rf_stop_all
 
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"

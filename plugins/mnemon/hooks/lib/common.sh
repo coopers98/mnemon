@@ -46,6 +46,146 @@ mnemon_token() {
     return 1
 }
 
+# Atomically replace config.json with JSON read from stdin. Validates before
+# renaming and chmods the temp before the rename (the umask is not trusted), so
+# the file on disk is always either the old working state or the new working
+# state. A truncated config.json is indistinguishable from an unconfigured
+# machine, and a zero-byte state file once wedged a session for hours; this is
+# the codified cure, the same shape as mnemon_session_state_write.
+mnemon_config_write() {
+    local tmp="$MNEMON_CONFIG.tmp.$$"
+    cat > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    if ! jq -e . "$tmp" >/dev/null 2>&1; then
+        mnemon_log_error "refusing to replace config.json with invalid JSON"
+        rm -f "$tmp"
+        return 1
+    fi
+    chmod 600 "$tmp" 2>/dev/null
+    mv -f "$tmp" "$MNEMON_CONFIG"
+}
+
+# Whether a 401 is worth trying to repair. The presence of refresh_token and
+# client_id is the feature switch, so a PAT device -- the whole installed base --
+# takes none of this path.
+#
+# Credentials from the environment are excluded deliberately. They are static, so
+# refreshing would rewrite a file nothing reads: every call would 401, "succeed"
+# at refreshing, and 401 again, converging never.
+mnemon_refresh_available() {
+    [ -n "${MNEMON_TOKEN:-}${CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN:-}" ] && return 1
+    [ -f "$MNEMON_CONFIG" ] || return 1
+    jq -e '(.refresh_token // "") != "" and (.client_id // "") != ""
+           and (.client_secret // "") != "" and (.token_endpoint // "") != ""
+           and ((.auth_state // "ok") != "dead")' "$MNEMON_CONFIG" >/dev/null 2>&1
+}
+
+# Exchange the refresh token for a new access/refresh pair. Args: the token that
+# just got the 401. Echoes a usable access token on success -- its own, or a
+# newer one another process wrote while this one waited.
+#
+# The device is marked dead only on a definitive OAuth rejection: invalid_grant
+# (the refresh token is spent or revoked) or invalid_client/unauthorized_client
+# (the client was revoked -- what the per-device kill switch actually looks like
+# from here). A network error, a 5xx, or a proxy's HTML page is NOT dead: the
+# refresh token is kept and the next 401 tries again. Throwing away a 90-day
+# credential because a load balancer hiccuped would turn a blip into a
+# re-enrolment that needs a browser the device may not have.
+#
+# Subshell body, so the EXIT trap releases the lock however this returns.
+mnemon_refresh() (
+    old_token="$1"
+    lock="$MNEMON_DIR/refresh.lock.d"
+
+    # Every hook fires on the same events, so an expiry is discovered by several
+    # processes at once. Without a lock each spends the same refresh token and
+    # all but one are rejected -- which, with rotation on, would have bricked the
+    # device outright.
+    #
+    # mkdir is atomic everywhere these hooks run (jq + curl + coreutils; macOS
+    # has no flock). Deliberately not the digest worker's check-then-write PID
+    # file, which has a TOCTOU race. Stale locks are recovered by liveness check;
+    # waiters give up after ~5s and fail only this one call.
+    waited=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        pid=$(cat "$lock/pid" 2>/dev/null)
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            rm -rf "$lock"
+            continue
+        fi
+        if [ "$waited" -ge 25 ]; then
+            mnemon_log_error "refresh lock busy >5s; skipping refresh for this call"
+            exit 1
+        fi
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    echo "$$" > "$lock/pid"
+    trap 'rm -rf "$lock"' EXIT
+
+    # Another hook may have refreshed while we waited. If the stored token has
+    # already moved on, use it and spend nothing. This is the whole anti-stampede
+    # mechanism -- the lock only serialises; this is what makes the losers cheap.
+    current=$(jq -r '.bearer_token // empty' "$MNEMON_CONFIG" 2>/dev/null)
+    if [ -n "$current" ] && [ "$current" != "$old_token" ]; then
+        printf '%s' "$current"
+        exit 0
+    fi
+
+    token_endpoint=$(jq -r '.token_endpoint // empty' "$MNEMON_CONFIG")
+    body=$(mktemp "${TMPDIR:-/tmp}/mnemon-refresh.XXXXXX") || exit 1
+    # Secrets travel via --data @file, never argv: argv is visible in ps.
+    jq -r '"grant_type=refresh_token" +
+           "&refresh_token=\(.refresh_token|@uri)" +
+           "&client_id=\(.client_id|@uri)" +
+           "&client_secret=\(.client_secret|@uri)" +
+           "&scope=mcp%3Ause"' "$MNEMON_CONFIG" > "$body"
+
+    raw=$(curl -s -m 5 -w '\n%{http_code}' -X POST "$token_endpoint" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -H "Accept: application/json" \
+        --data @"$body" 2>/dev/null)
+    rc=$?
+    rm -f "$body"
+    if [ $rc -ne 0 ]; then
+        mnemon_log_error "refresh failed: curl exit $rc (network); keeping credentials, will retry on next 401"
+        exit 1
+    fi
+
+    status="${raw##*$'\n'}"
+    response="${raw%$'\n'*}"
+
+    if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+        mnemon_log_error "refresh failed: non-JSON response (HTTP $status): $(printf '%s' "$response" | head -c 80 | tr -d '\r\n'); keeping credentials"
+        exit 1
+    fi
+
+    oauth_error=$(printf '%s' "$response" | jq -r '.error // empty')
+    case "$oauth_error" in
+        invalid_grant|invalid_client|unauthorized_client)
+            jq --arg e "$oauth_error" \
+               '. + {auth_state: "dead", auth_dead_reason: $e, auth_dead_at: (now | floor)}' \
+               "$MNEMON_CONFIG" | mnemon_config_write
+            mnemon_log_error "refresh rejected ($oauth_error): device authorization is dead; wake will show the re-auth banner"
+            exit 1
+            ;;
+    esac
+
+    access=$(printf '%s' "$response" | jq -r '.access_token // empty')
+    refresh=$(printf '%s' "$response" | jq -r '.refresh_token // empty')
+    if [ "$status" != "200" ] || [ -z "$access" ] || [ -z "$refresh" ]; then
+        mnemon_log_error "refresh failed: HTTP $status with token(s) missing; keeping old credentials"
+        exit 1
+    fi
+
+    jq --arg a "$access" --arg r "$refresh" \
+       '. + {bearer_token: $a, refresh_token: $r, refreshed_at: (now | floor), auth_state: "ok"}
+        | del(.auth_dead_reason, .auth_dead_at)' \
+       "$MNEMON_CONFIG" | mnemon_config_write || exit 1
+
+    mnemon_log_error "refreshed access token; next expiry in ~60 minutes"
+    printf '%s' "$access"
+)
+
 # JSON-RPC POST to the MCP endpoint.
 # Args: <method> <params_json> <timeout_ms> [<endpoint>] [<token>]
 # Echoes the result field on success, empty on error/timeout.
@@ -103,6 +243,17 @@ mnemon_call() {
     # through every check below and the call returns empty with exit 0 --
     # indistinguishable from "nothing found", and logged nowhere.
     if [ "${status:-0}" -ge 400 ] 2>/dev/null; then
+        # 401 only. A 403 is a scope or wing denial and no new token fixes it.
+        # Exactly one retry: bash scopes an assignment preceding a function call
+        # to that call, so the guard reaches the recursive call and no further.
+        if [ "$status" = "401" ] && [ "${MNEMON_RETRIED:-0}" != "1" ] && mnemon_refresh_available; then
+            local fresh
+            if fresh=$(mnemon_refresh "$token"); then
+                MNEMON_RETRIED=1 mnemon_call "$method" "$params" "$timeout_ms" "$endpoint" "$fresh"
+                return $?
+            fi
+        fi
+
         case "$status" in
             401|403) mnemon_log_error "HTTP $status from $endpoint - token rejected or expired; re-run the Mnemon setup to refresh it" ;;
             413)     mnemon_log_error "HTTP $status from $endpoint - request too large for the server or its proxy" ;;
@@ -151,13 +302,13 @@ mnemon_config_value() {
     fi
 }
 
-# Days remaining before a token expires. Args: <token>. Echoes an integer and
-# returns 0, or returns 1 when the token carries no readable expiry.
+# Epoch expiry of a Passport JWT. Args: <token>. Echoes the exp claim, or
+# returns 1 when the token carries no readable expiry.
 #
 # Passport issues JWTs, so the expiry travels with the token and no request is
 # needed. A token that is not a JWT is not an error -- it just cannot be checked.
-mnemon_token_days_left() {
-    local token="$1" payload pad exp now
+mnemon_token_exp() {
+    local token="$1" payload pad exp
     case "$token" in
         *.*.*) ;;
         *) return 1 ;;
@@ -173,8 +324,36 @@ mnemon_token_days_left() {
         ''|*[!0-9]*) return 1 ;;
     esac
 
-    now=$(date +%s)
-    printf '%s' "$(( (exp - now) / 86400 ))"
+    printf '%s' "$exp"
+}
+
+# Seconds remaining before a token expires. Args: <token>.
+mnemon_token_seconds_left() {
+    local exp
+    exp=$(mnemon_token_exp "$1") || return 1
+    printf '%s' "$(( exp - $(date +%s) ))"
+}
+
+# Days remaining before a token expires. Args: <token>. Floors, so a token with
+# less than a day left reads 0 -- which is why refresh-capable devices must not
+# use this for a warning: their access token lives one hour.
+mnemon_token_days_left() {
+    local exp
+    exp=$(mnemon_token_exp "$1") || return 1
+    printf '%s' "$(( (exp - $(date +%s)) / 86400 ))"
+}
+
+# The instance base URL, for printing in a banner. Falls back to a placeholder
+# only when there is no config at all -- a banner telling someone to run a
+# command with "<your-instance>" still in it is only half loud.
+mnemon_instance_url() {
+    local endpoint
+    endpoint=$(mnemon_config_value 'endpoint' '')
+    if [ -z "$endpoint" ]; then
+        printf '%s' 'https://<your-instance>'
+        return 0
+    fi
+    printf '%s' "${endpoint%/mcp}"
 }
 
 # Read or initialize session state. Args: <session_id>. Echoes JSON.

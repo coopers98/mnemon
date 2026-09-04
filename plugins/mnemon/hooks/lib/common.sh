@@ -4,6 +4,11 @@
 
 set -u
 
+# The plugin root, for reading our own manifest. Derived from this file's
+# location (hooks/lib/common.sh) so it holds whichever hook sourced it, and
+# overridden by Claude Code's own variable when it is set.
+MNEMON_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)}"
+
 MNEMON_DIR="${MNEMON_DIR:-$HOME/.mnemon}"
 MNEMON_CONFIG="$MNEMON_DIR/config.json"
 MNEMON_SESSIONS_DIR="$MNEMON_DIR/sessions"
@@ -289,6 +294,18 @@ mnemon_call() {
     fi
 
     printf '%s' "$response" | jq -c '.result // empty'
+}
+
+# The plugin version this device is running, or empty when there is no manifest
+# (a hooks-only install, or credentials supplied by environment alone).
+#
+# Claude Code caches a copy of these hooks per version and refreshes it only when
+# the version string changes, so a device can sit on an old copy indefinitely
+# with nothing to say so. Since 0.3.0 that copy carries credential-refresh
+# logic — a stale one fails in exactly the ways the current one prevents.
+mnemon_plugin_version() {
+    [ -n "${MNEMON_PLUGIN_ROOT:-}" ] || return 0
+    jq -r '.version // empty' "$MNEMON_PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null
 }
 
 # Read a scalar from config.json. Args: <key> <default>. Echoes the value.

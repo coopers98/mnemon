@@ -897,6 +897,62 @@ case "$a5_out" in
 esac
 rf_stop_all
 
+# --- Version handshake -------------------------------------------------------
+# Nothing told a device it was running old hooks. This machine sat two versions
+# behind for days and only manual inspection caught it -- which matters more now
+# that the hooks carry credential-refresh logic, because a stale copy fails in
+# exactly the ways the new one was written to prevent.
+LOCAL_VERSION=$(jq -r .version "$HOOKS_DIR/../.claude-plugin/plugin.json")
+
+# V1: a server on a different version says so, once, with the fix.
+V1_PORT=$(rf_free_port); V1_LOG="$MNEMON_DIR/v1.log"; V1_STATE=$(mktemp -d)
+rf_start "$V1_PORT" "$V1_LOG" "$V1_STATE" FAKE_PLUGIN_VERSION=9.9.9
+jq -n --arg e "http://127.0.0.1:$V1_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"t", recall_timeout_ms:5000}' > "$MNEMON_DIR/config.json"
+v1_out=$(printf '{"session_id":"v1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$v1_out" in
+    *"9.9.9"*) PASS=$((PASS+1)); printf '  ok: wake: a version mismatch is reported\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: no version mismatch warning, got: %s\n' "$v1_out";;
+esac
+case "$v1_out" in
+    *"claude plugin update mnemon"*) PASS=$((PASS+1)); printf '  ok: wake: the mismatch names the fix\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: mismatch warning does not say how to fix it\n';;
+esac
+# Parsed, not grepped: mnemon_call writes pretty-printed JSON, so the key and
+# its value never share a line.
+assert_eq "$(jq -r '.params.arguments.client_version // empty' "$V1_LOG" 2>/dev/null | head -1)" \
+    "$LOCAL_VERSION" "wake: the device reports its own version to the server"
+rf_stop_all
+
+# V2: matching versions must stay silent. A warning every session start would be
+# noise, and noise is how the real warnings stop being read.
+V2_PORT=$(rf_free_port); V2_LOG="$MNEMON_DIR/v2.log"; V2_STATE=$(mktemp -d)
+rf_start "$V2_PORT" "$V2_LOG" "$V2_STATE" FAKE_PLUGIN_VERSION="$LOCAL_VERSION"
+jq -n --arg e "http://127.0.0.1:$V2_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"t", recall_timeout_ms:5000}' > "$MNEMON_DIR/config.json"
+v2_out=$(printf '{"session_id":"v2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$v2_out" in
+    *"plugin update"*) FAIL=$((FAIL+1)); printf '  FAIL: wake: warned about a version that matches\n';;
+    *) PASS=$((PASS+1)); printf '  ok: wake: matching versions stay silent\n';;
+esac
+rf_stop_all
+
+# V3: an instance too old to report a version must not produce a warning. It
+# cannot be judged, so there is nothing honest to say.
+V3_PORT=$(rf_free_port); V3_LOG="$MNEMON_DIR/v3.log"; V3_STATE=$(mktemp -d)
+rf_start "$V3_PORT" "$V3_LOG" "$V3_STATE"
+jq -n --arg e "http://127.0.0.1:$V3_PORT/mcp" \
+    '{endpoint:$e, bearer_token:"t", recall_timeout_ms:5000}' > "$MNEMON_DIR/config.json"
+v3_out=$(printf '{"session_id":"v3","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$v3_out" in
+    *"plugin update"*) FAIL=$((FAIL+1)); printf '  FAIL: wake: warned although the server reported no version\n';;
+    *) PASS=$((PASS+1)); printf '  ok: wake: a server that reports no version produces no warning\n';;
+esac
+rf_stop_all
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

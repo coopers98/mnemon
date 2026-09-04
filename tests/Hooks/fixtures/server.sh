@@ -16,6 +16,7 @@
 #      FAKE_EXPIRE_FIRST (401 every /mcp call not bearing the refreshed token),
 #      FAKE_REFRESH_FAIL (how POST /oauth/token should fail:
 #                         invalid_grant | invalid_client | garbage | 500 | empty),
+#      FAKE_PLUGIN_VERSION (plugin version to advertise in the wake reply),
 #      FAKE_DEVICE_MODE (how the device grant resolves:
 #                        success | denied | expired; default success),
 #      FAKE_STATE_DIR (directory where the server records that a refresh
@@ -190,7 +191,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if DELAY:
             time.sleep(DELAY)
 
-        self._reply(200, REPLY)
+        # The version handshake rides on the wake reply, so the fixture has to be
+        # able to claim any version -- including none, which is what an older
+        # instance returns.
+        reply = REPLY
+        pv = os.environ.get("FAKE_PLUGIN_VERSION", "")
+        if pv:
+            reply = reply[:-3] + (',"plugin_version":"%s"}}}' % pv).encode()
+
+        self._reply(200, reply)
 
     def handle_one_request(self):
         # The budget tests make curl disconnect mid-reply on purpose, which

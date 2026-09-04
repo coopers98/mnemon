@@ -561,6 +561,22 @@ From then on the device refreshes its own access token: the session-start hook
 renews it a few minutes before it expires, and any call that still gets a 401
 refreshes and retries once.
 
+#### Staying current
+
+Claude Code caches a copy of the hooks per version and refreshes it only when the
+version string changes, so a device can sit on an old copy indefinitely. From
+**v0.3.1** each session start compares the device's version against the one the
+server ships and says one line if they differ:
+
+```
+Mnemon: this device runs plugin 0.3.0, the server ships 0.3.1. Run: claude plugin update mnemon
+```
+
+Nothing is said when they match, or when the server is too old to report a
+version. The device also reports its own version on every wake, so a stale
+machine is visible in Brain Sessions without anyone noticing on the machine
+itself.
+
 #### Tuning
 
 `recall_timeout_ms` defaults to 800, which suits a localhost instance. A hosted

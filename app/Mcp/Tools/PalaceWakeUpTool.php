@@ -8,6 +8,7 @@ use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
 use App\Models\Wing;
+use App\Support\PluginVersion;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -124,15 +125,29 @@ class PalaceWakeUpTool extends Tool
             'recent_wiki_updates' => $recentWikiUpdates,
             'stale_wiki_pages' => $staleWikiPages,
             'pending_update_pages' => $pendingUpdatePages,
+            // The device compares this against its own copy and says one line if
+            // they differ. Session start is the only moment a device reliably
+            // talks to the server, so it is where the handshake belongs.
+            'plugin_version' => PluginVersion::current(),
         ];
 
-        BrainSessionLogger::log($request, 'palace_wake_up', [], count($recentDrawers));
+        // Recorded when reported, so a stale device is visible in the audit
+        // trail rather than only on the machine running it.
+        $clientVersion = $request->get('client_version');
+        $input = is_string($clientVersion) && $clientVersion !== ''
+            ? ['client_version' => $clientVersion]
+            : [];
+
+        BrainSessionLogger::log($request, 'palace_wake_up', $input, count($recentDrawers));
 
         return Response::structured($payload);
     }
 
     public function schema(JsonSchema $schema): array
     {
-        return [];
+        return [
+            'client_version' => $schema->string()
+                ->description('The Mnemon plugin version the calling device is running, if any.'),
+        ];
     }
 }

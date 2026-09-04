@@ -68,8 +68,14 @@ else
     fi
 fi
 
+# Report what this device is running. The server records it, so a stale device
+# is visible in the audit trail rather than only on the machine itself.
+client_version=$(mnemon_plugin_version)
+
 result=$(mnemon_call "tools/call" \
-    "$(jq -n '{name:"palace_wake_up",arguments:{}}')" \
+    "$(jq -n --arg v "$client_version" \
+        'if $v == "" then {name:"palace_wake_up",arguments:{}}
+         else {name:"palace_wake_up",arguments:{client_version:$v}} end')" \
     2000 \
     "${pair%|*}" "${pair#*|}") || exit 0
 
@@ -80,6 +86,15 @@ fi
 payload=$(printf '%s' "$result" | jq -c '.structuredContent // empty')
 if [ -z "$payload" ]; then
     exit 0
+fi
+
+# Say it once, at session start, and only when both sides know their version.
+# An instance too old to report one cannot be judged, and a warning on every
+# start would be the kind of noise that stops the real warnings being read.
+server_version=$(printf '%s' "$payload" | jq -r '.plugin_version // empty' 2>/dev/null)
+if [ -n "$server_version" ] && [ -n "$client_version" ] && [ "$server_version" != "$client_version" ]; then
+    printf 'Mnemon: this device runs plugin %s, the server ships %s. Run: claude plugin update mnemon\n' \
+        "$client_version" "$server_version"
 fi
 
 printf '%s' "$payload" | mnemon_format_wake

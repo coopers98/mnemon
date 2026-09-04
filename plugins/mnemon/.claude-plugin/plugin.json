@@ -1,7 +1,7 @@
 {
   "name": "mnemon",
   "description": "Automatic memory for Claude Code, backed by a self-hosted Mnemon instance: recalls relevant context per prompt and digests each session into the palace.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Cooper Sellers"
   },

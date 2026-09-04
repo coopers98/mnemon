@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\OauthAccessTokens\Tables;
 
+use App\Models\McpClientRestriction;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use App\Support\TokenRevoker;
@@ -40,10 +41,17 @@ class OauthAccessTokensTable
                     ->badge()
                     ->color('info')
                     ->getStateUsing(function (Token $record): array {
-                        $restriction = McpTokenRestriction::find($record->id);
+                        // Client row first: restrictions belong to the client, so
+                        // this is what actually governs the token at request time.
+                        $restriction = McpClientRestriction::find((string) $record->client_id)
+                            ?? McpTokenRestriction::find($record->id);
 
                         if ($restriction === null || $restriction->wing_patterns === null) {
                             return ['(unrestricted)'];
+                        }
+
+                        if ($restriction->wing_patterns === []) {
+                            return ['(no wings — denied)'];
                         }
 
                         return $restriction->wing_patterns;

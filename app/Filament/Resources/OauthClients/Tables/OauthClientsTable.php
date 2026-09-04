@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\OauthClients\Tables;
 
+use App\Models\McpClientRestriction;
 use App\Support\TokenRevoker;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -29,6 +30,23 @@ class OauthClientsTable
                     ->placeholder('(personal access)')
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('wing_restrictions')
+                    ->label('Wings')
+                    ->badge()
+                    ->color('info')
+                    ->getStateUsing(function (Client $record): array {
+                        $restriction = McpClientRestriction::find((string) $record->id);
+
+                        if ($restriction === null || $restriction->wing_patterns === null) {
+                            return ['(unrestricted)'];
+                        }
+
+                        if ($restriction->wing_patterns === []) {
+                            return ['(no wings — denied)'];
+                        }
+
+                        return $restriction->wing_patterns;
+                    }),
                 TextColumn::make('tokens_count')
                     ->label('Active Tokens')
                     ->counts('tokens')

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Mcp;
 
+use App\Models\McpClientRestriction;
 use App\Models\McpTokenRestriction;
 use App\Models\User;
 use App\Models\Wing;
@@ -107,10 +108,12 @@ class OAuthFlowTest extends TestCase
 
         $this->completeOAuthFlow($client, $user, wings: ['work']);
 
-        // Verify a restriction row was written for the issued token
-        $restriction = McpTokenRestriction::first();
-        $this->assertNotNull($restriction, 'Expected McpTokenRestriction to be created');
+        // The restriction is written against the client, not the issued token,
+        // so it survives every refresh that client performs.
+        $restriction = McpClientRestriction::find($client->id);
+        $this->assertNotNull($restriction, 'Expected a client-keyed restriction to be created');
         $this->assertEquals(['work'], $restriction->wing_patterns);
+        $this->assertSame(0, McpTokenRestriction::count(), 'token-keyed rows are no longer written');
     }
 
     public function test_all_wings_checkbox_persists_null_restriction(): void
@@ -124,8 +127,8 @@ class OAuthFlowTest extends TestCase
 
         $this->completeOAuthFlow($client, $user, allWings: true);
 
-        $restriction = McpTokenRestriction::first();
-        $this->assertNotNull($restriction, 'Expected McpTokenRestriction to be created');
+        $restriction = McpClientRestriction::find($client->id);
+        $this->assertNotNull($restriction, 'Expected a client-keyed restriction to be created');
         $this->assertNull($restriction->wing_patterns);
     }
 }

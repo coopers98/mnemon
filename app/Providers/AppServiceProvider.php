@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Listeners\PersistMcpTokenRestrictions;
 use App\Models\Drawer;
 use App\Models\WikiPage;
 use App\Models\Wing;
@@ -15,11 +14,9 @@ use App\Services\EmbeddingManager;
 use App\Services\SessionDigestService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\ClientRepository;
-use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
@@ -67,11 +64,6 @@ class AppServiceProvider extends ServiceProvider
         Passport::authorizationView(fn ($p) => view('mcp.authorize', array_merge($p, [
             'wings' => Wing::orderBy('slug')->get(),
         ])));
-
-        Event::listen(
-            AccessTokenCreated::class,
-            PersistMcpTokenRestrictions::class
-        );
 
         RateLimiter::for('mcp', function (Request $request) {
             return $request->user()

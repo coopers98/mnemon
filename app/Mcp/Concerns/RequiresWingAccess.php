@@ -3,6 +3,7 @@
 namespace App\Mcp\Concerns;
 
 use App\Mcp\Support\BrainSessionLogger;
+use App\Models\McpClientRestriction;
 use App\Models\McpTokenRestriction;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -35,18 +36,34 @@ trait RequiresWingAccess
 
     private ?string $resolvedTokenId = null;
 
-    private ?McpTokenRestriction $resolvedRestriction = null;
+    private McpClientRestriction|McpTokenRestriction|null $resolvedRestriction = null;
 
-    private function resolveRestriction(Request $request): ?McpTokenRestriction
+    /**
+     * The restriction governing this request.
+     *
+     * Client rows are preferred: a device's permitted wings belong to the
+     * device, and a refreshed token inherits them by construction. Token rows
+     * remain as a fallback for instances that consented before restrictions
+     * moved off the token. Absence still means unrestricted, which is how
+     * personal access tokens reach every wing.
+     */
+    private function resolveRestriction(Request $request): McpClientRestriction|McpTokenRestriction|null
     {
-        $tokenId = $request->user()?->currentAccessToken()?->id;
+        $token = $request->user()?->currentAccessToken();
+        $tokenId = $token?->id;
+
         if ($tokenId === null) {
             return null;
         }
 
         if ($this->resolvedTokenId !== $tokenId) {
             $this->resolvedTokenId = $tokenId;
-            $this->resolvedRestriction = McpTokenRestriction::find($tokenId);
+
+            $clientId = $token->client_id ?? null;
+
+            $this->resolvedRestriction = ($clientId !== null
+                ? McpClientRestriction::find((string) $clientId)
+                : null) ?? McpTokenRestriction::find($tokenId);
         }
 
         return $this->resolvedRestriction;

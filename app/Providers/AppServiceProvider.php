@@ -72,6 +72,14 @@ class AppServiceProvider extends ServiceProvider
         // (TokenRevoker::client) the reliable per-device kill switch.
         Passport::$revokeRefreshTokenAfterUse = false;
 
+        // Passport 13 ships no device views. Without these two bindings the
+        // container cannot resolve the response contracts and every device
+        // screen is a 500 — which is what /oauth/device did in production.
+        Passport::deviceUserCodeView('mcp.device-user-code');
+        Passport::deviceAuthorizationView(fn ($p) => view('mcp.device-authorize', array_merge($p, [
+            'wings' => Wing::orderBy('slug')->get(),
+        ])));
+
         Passport::authorizationView(fn ($p) => view('mcp.authorize', array_merge($p, [
             'wings' => Wing::orderBy('slug')->get(),
         ])));

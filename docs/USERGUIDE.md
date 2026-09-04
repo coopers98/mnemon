@@ -515,6 +515,34 @@ Mnemon's MCP tools work for any agent that thinks to call them. For Claude Code 
 
 Two steps: install the plugin, then connect the device.
 
+#### The short way
+
+The instance serves a setup script that already knows its own address and which
+marketplace to install from — the two things a fresh device cannot work out for
+itself:
+
+```bash
+curl -fsSL https://<your-instance>/install | bash
+```
+
+It checks dependencies, installs the plugin, and prints the one command left to
+run. It deliberately stops short of enrolling the device: that needs a client id
+and secret only you can mint, and it replaces whatever credential the device
+already has.
+
+Piping a remote script into a shell is worth reading first, and it is short:
+
+```bash
+curl -fsSL https://<your-instance>/install -o mnemon-install.sh
+less mnemon-install.sh && bash mnemon-install.sh
+```
+
+The endpoint is public, because a device that has never connected has no
+credentials to present. It contains nothing that is not already public. A fork
+points installs at its own marketplace with `MNEMON_PLUGIN_MARKETPLACE`.
+
+The steps below are the same thing done by hand.
+
 #### 1. Install the plugin
 
 On the device — no repository, no PHP, no Composer. The hooks need only `jq`,

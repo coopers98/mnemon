@@ -15,6 +15,13 @@ return [
     // must opt in to where its own visitors' messages get mailed.
     'contact_to' => env('MNEMON_CONTACT_TO'),
 
+    // Which Claude Code marketplace the device setup script installs from. A
+    // fork points its own installs at its own repository without editing the
+    // script.
+    'plugin' => [
+        'marketplace' => env('MNEMON_PLUGIN_MARKETPLACE', 'coopers98/mnemon'),
+    ],
+
     'embedding' => [
         'driver' => env('MNEMON_EMBEDDING_DRIVER', 'openai'),
         'drivers' => [

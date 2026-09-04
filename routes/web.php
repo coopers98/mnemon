@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\InstallScriptController;
 use App\Http\Controllers\LandingController;
 use App\Http\Controllers\PalaceController;
 use App\Http\Controllers\WikiController;
@@ -10,6 +11,10 @@ use Illuminate\Support\Facades\Route;
 // Public routes
 Route::get('/', [LandingController::class, 'index'])->name('landing');
 Route::post('/contact', [ContactController::class, 'store'])->name('contact.store');
+
+// Device setup script. Public by necessity: a device that has never connected
+// has no credentials to present.
+Route::get('/install', InstallScriptController::class)->name('install');
 
 // Auth routes
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Mnemon device setup.
+#
+# Served by the instance itself, so it already knows its own address and which
+# marketplace to install from. It installs the Claude Code plugin and then tells
+# you the one command left to run.
+#
+# It deliberately stops short of enrolling this device: that needs a client id
+# and secret only the instance owner can mint, and it replaces whatever
+# credential the device already has. Piping a remote script into a shell that
+# swaps your credentials is not a thing this should do quietly.
+#
+# Prefer to read before running:
+#   curl -fsSL {{INSTANCE_URL}}/install -o mnemon-install.sh
+#   less mnemon-install.sh && bash mnemon-install.sh
+
+set -euo pipefail
+
+INSTANCE='{{INSTANCE_URL}}'
+MARKETPLACE='{{MARKETPLACE}}'
+
+say() { printf '%s\n' "$*"; }
+
+say "Mnemon setup for ${INSTANCE}"
+say
+
+# --- dependencies ------------------------------------------------------------
+missing=()
+for cmd in jq curl; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+    say "Missing required commands: ${missing[*]}"
+    say "  Debian/Ubuntu:  sudo apt-get install -y ${missing[*]}"
+    say "  macOS:          brew install ${missing[*]}"
+    exit 1
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+    say "Claude Code is not installed, or 'claude' is not on PATH."
+    say "Install it first: https://claude.com/claude-code"
+    exit 1
+fi
+
+# --- plugin ------------------------------------------------------------------
+say "Adding the marketplace..."
+claude plugin marketplace add "$MARKETPLACE" 2>/dev/null \
+    || claude plugin marketplace update mnemon >/dev/null 2>&1 \
+    || true
+
+say "Installing the plugin..."
+claude plugin install mnemon@mnemon
+
+say
+say "Plugin installed."
+say
+
+# --- what is left ------------------------------------------------------------
+if [ -f "$HOME/.mnemon/config.json" ] \
+   && jq -e '(.refresh_token // "") != ""' "$HOME/.mnemon/config.json" >/dev/null 2>&1; then
+    say "This device is already enrolled. Nothing else to do."
+    say "To re-enrol it against a different client, run the command below; the"
+    say "current config is backed up first."
+    say
+fi
+
+say "One step left. On the machine running Mnemon:"
+say
+say "    php artisan mnemon:device-client <a-name-for-this-device>"
+say
+say "That prints a client id and a secret. Then, back here:"
+say
+say "    bash \"\$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-authorize.sh\" \\"
+say "         ${INSTANCE} <client-id>"
+say
+say "Paste the secret when it asks, approve in the browser, choose which wings"
+say "this device may reach. It renews its own credentials after that."

@@ -709,8 +709,13 @@ touching the others.
 
 These tokens expire after 90 days
 (`Passport::personalAccessTokensExpireIn`). The session-start hook warns once
-you are within 14 days (`token_warn_days` in config); before v0.2.0, expiry was
-silent. Devices enrolled through the device grant do not get this countdown —
+you are within 14 days (`token_warn_days` in config).
+
+That warning was added in v0.2.0 but **did not actually work until v0.3.4**:
+Passport issues a fractional `exp` claim (`1796078075.216503`) and the reader
+rejected anything non-numeric, so no real token's expiry could be read. The tests
+passed because the fixture emitted a clean integer. If you are on an earlier
+version, the countdown will not fire — update before relying on it. Devices enrolled through the device grant do not get this countdown —
 their access token lives one hour by design, so a countdown would fire every
 session.
 

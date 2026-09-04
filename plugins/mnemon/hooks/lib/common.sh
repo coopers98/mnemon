@@ -357,6 +357,15 @@ mnemon_token_exp() {
     while [ "$pad" -gt 0 ]; do payload="${payload}="; pad=$((pad - 1)); done
 
     exp=$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r '.exp // empty' 2>/dev/null)
+
+    # Passport issues a fractional expiry -- a real token carries
+    # exp: 1796078075.216503 -- so truncate rather than reject. Rejecting it is
+    # what the previous version did, which meant no real token's expiry could be
+    # read at all: the 14-day countdown never fired once in production, and
+    # proactive refresh could never trigger on an enrolled device. The tests
+    # passed throughout because the fixture emitted a clean integer.
+    exp="${exp%%.*}"
+
     case "$exp" in
         ''|*[!0-9]*) return 1 ;;
     esac

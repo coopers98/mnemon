@@ -122,7 +122,11 @@ fi
 # memory simply stops -- which is how this feature has failed every other time.
 make_jwt() {  # $1 = seconds from now until exp
     local exp payload
-    exp=$(( $(date +%s) + $1 ))
+    # Fractional, because that is what Passport actually issues: a real token
+    # carries exp like 1796078075.216503. This helper emitted a clean integer,
+    # so every expiry test passed while the feature could not read a single real
+    # token -- the countdown had never once fired in production.
+    exp="$(( $(date +%s) + $1 )).216503"
     payload=$(printf '{"aud":"1","jti":"x","iat":0,"nbf":0,"exp":%s,"sub":"1","scopes":["mcp:use"]}' "$exp" \
         | base64 -w0 | tr '+/' '-_' | tr -d '=')
     printf 'eyJhbGciOiJSUzI1NiJ9.%s.sig' "$payload"
@@ -133,6 +137,12 @@ make_jwt() {  # $1 = seconds from now until exp
 # reads as N-1 the moment a second elapses. That passed locally and failed in CI.
 days_left=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 302400)\"" 2>/dev/null)
 assert_eq "$days_left" "3" "token: reads days remaining from the JWT exp"
+
+# An integer exp must keep working: the fix truncates, it does not require a dot.
+int_exp=$(printf '{"aud":"1","jti":"x","iat":0,"nbf":0,"exp":%s,"sub":"1"}' "$(( $(date +%s) + 302400 ))" \
+    | base64 -w0 | tr '+/' '-_' | tr -d '=')
+int_days=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"h.${int_exp}.s\"" 2>/dev/null)
+assert_eq "$int_days" "3" "token: an integer exp still parses"
 
 far=$(bash -c ". \"$HOOKS_DIR/lib/common.sh\"; mnemon_token_days_left \"$(make_jwt 5227200)\"" 2>/dev/null)
 assert_eq "$far" "60" "token: reads a distant expiry correctly"

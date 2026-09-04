@@ -2,37 +2,64 @@
 
 namespace App\Http\Middleware;
 
-use App\Listeners\PersistMcpTokenRestrictions;
+use App\Models\McpClientRestriction;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Captures wing restriction data from the OAuth consent approval form
- * and stores it in cache so PersistMcpTokenRestrictions can later
- * apply it when the access token is issued.
+ * Persists the wings chosen on the consent screen, keyed on the client.
  *
- * This middleware runs BEFORE the approve controller so that when
- * AccessTokenCreated fires (during token exchange, not during consent),
- * the cached restriction data is available.
+ * This used to stash the selection in the cache for an `AccessTokenCreated`
+ * listener to pick up at token exchange. That handoff was the bug: a refresh
+ * mints a new token with no cached consent, the listener skipped, no row was
+ * written, and a missing row means unrestricted. Restrictions now belong to the
+ * client and are written here, synchronously, in the request that captured the
+ * consent — so a failure surfaces to the person who just clicked approve.
  */
 class CaptureConsentWings
 {
     public function handle(Request $request, Closure $next): Response
     {
-        // Only act on the OAuth consent approval POST at oauth/authorize.
-        if ($request->isMethod('POST') &&
-            $request->is('oauth/authorize') &&
-            $request->user()
-        ) {
-            $userId = (string) $request->user()->getKey();
-            $clientId = (string) ($request->input('client_id') ?? '');
+        if ($request->isMethod('POST') && $request->user() && $this->isConsentApproval($request)) {
+            $clientId = $this->clientIdFor($request);
 
             if ($clientId !== '') {
-                PersistMcpTokenRestrictions::storeConsentData($request, $userId, $clientId);
+                McpClientRestriction::updateOrCreate(
+                    ['client_id' => $clientId],
+                    ['wing_patterns' => static::consentPatterns($request), 'created_at' => now()],
+                );
             }
         }
 
         return $next($request);
+    }
+
+    /**
+     * The wings consented to.
+     *
+     * `null` means all wings, `[]` means none. An empty selection used to
+     * collapse to `null` and therefore granted everything — the strictest input
+     * the screen offers producing its loosest outcome.
+     *
+     * @return array<int, string>|null
+     */
+    public static function consentPatterns(Request $request): ?array
+    {
+        if ($request->boolean('all_wings')) {
+            return null;
+        }
+
+        return array_values(array_filter((array) $request->input('wings', []), 'is_string'));
+    }
+
+    private function isConsentApproval(Request $request): bool
+    {
+        return $request->is('oauth/authorize') || $request->is('oauth/device/authorize');
+    }
+
+    private function clientIdFor(Request $request): string
+    {
+        return (string) ($request->input('client_id') ?? '');
     }
 }

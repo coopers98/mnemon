@@ -107,4 +107,56 @@ class EndToEndOAuthTest extends TestCase
         $this->assertNotContains('personal-secret', $contents,
             'personal-secret should be filtered out by wing restriction');
     }
+
+    public function test_wing_restriction_survives_a_token_refresh(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        $personal = Wing::factory()->create(['slug' => 'personal']);
+        $workRoom = Room::factory()->create(['wing_id' => $work->id]);
+        $personalRoom = Room::factory()->create(['wing_id' => $personal->id]);
+        Drawer::factory()->create(['room_id' => $workRoom->id, 'content' => 'work-secret']);
+        Drawer::factory()->create(['room_id' => $personalRoom->id, 'content' => 'personal-secret']);
+
+        $user = User::factory()->create();
+        $client = Client::factory()->create(['redirect_uris' => ['http://localhost/cb']]);
+        $this->actingAs($user);
+
+        $this->get('/oauth/authorize?'.http_build_query([
+            'client_id' => $client->id, 'redirect_uri' => 'http://localhost/cb',
+            'response_type' => 'code', 'scope' => 'mcp:use', 'state' => 'st',
+        ]))->assertStatus(200);
+        $authToken = app('session.store')->get('authToken');
+
+        $approve = $this->post('/oauth/authorize', [
+            'auth_token' => $authToken, 'client_id' => $client->id,
+            'scopes' => ['mcp:use'], 'wings' => ['work'],
+        ]);
+        parse_str(parse_url($approve->headers->get('Location'), PHP_URL_QUERY), $q);
+
+        $tokens = $this->post('/oauth/token', [
+            'grant_type' => 'authorization_code', 'client_id' => $client->id,
+            'client_secret' => $client->plainSecret,
+            'redirect_uri' => 'http://localhost/cb', 'code' => $q['code'],
+        ])->json();
+
+        // The defect: a refreshed token has a new id, no restriction row exists
+        // for it, and a missing row means unrestricted. One hour after consent,
+        // a work-only device silently becomes an all-wings device.
+        $refreshed = $this->post('/oauth/token', [
+            'grant_type' => 'refresh_token', 'refresh_token' => $tokens['refresh_token'],
+            'client_id' => $client->id, 'client_secret' => $client->plainSecret,
+            'scope' => 'mcp:use',
+        ]);
+        $refreshed->assertStatus(200);
+
+        $r = $this->postJson('/mcp', [
+            'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+            'params' => ['name' => 'drawer_search', 'arguments' => ['query' => 'secret']],
+        ], ['Authorization' => 'Bearer '.$refreshed->json('access_token')]);
+
+        $contents = collect($r->json('result.structuredContent.results'))->pluck('content')->all();
+        $this->assertContains('work-secret', $contents);
+        $this->assertNotContains('personal-secret', $contents,
+            'a refreshed token must keep the wing restriction consented to — the restriction belongs to the device, not to the hour-long token');
+    }
 }

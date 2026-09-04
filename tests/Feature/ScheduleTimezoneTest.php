@@ -56,4 +56,29 @@ class ScheduleTimezoneTest extends TestCase
             "apply-retention cron [{$retention->expression}] does not run at the documented 4am local hour"
         );
     }
+
+    public function test_the_schedule_only_runs_work_that_changes_something(): void
+    {
+        // mnemon:auto-lint and mnemon:auto-compile-stale do not lint or compile
+        // anything — each builds a JSON report and prints it. Scheduled, that
+        // report went to storage/logs/scheduled.log, which nothing in this
+        // codebase reads. Four hours of "automation" that produced a file nobody
+        // opens is worse than none, because it reads like the wiki is being kept
+        // current when nothing is keeping it current.
+        //
+        // The information itself is not lost: palace_wake_up already returns
+        // pending_update_pages to every agent at session start, and wiki_lint is
+        // an MCP tool an agent can call on demand. Both commands remain for
+        // manual use.
+        $commands = collect(app(Schedule::class)->events())
+            ->map(fn ($event) => $event->command)
+            ->implode(' ');
+
+        $this->assertStringNotContainsString('mnemon:auto-lint', $commands);
+        $this->assertStringNotContainsString('mnemon:auto-compile-stale', $commands);
+
+        // The two that genuinely mutate stay scheduled.
+        $this->assertStringContainsString('mnemon:decay-confidence', $commands);
+        $this->assertStringContainsString('mnemon:apply-retention', $commands);
+    }
 }

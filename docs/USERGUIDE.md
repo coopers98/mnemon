@@ -400,7 +400,7 @@ Claude calls `context_get` (wiki page lookup by name) first; if the wiki has a p
 
 Claude calls `context_list` and filters by `last_compiled_at`. The `FindStaleWikiPagesPrompt` automates this.
 
-`mnemon:auto-compile-stale` is on a 4-hour schedule, but it only *reports* which pages have pending drawers — recompiling is still a call you or an agent makes (see [Scheduled maintenance](#scheduled-maintenance)).
+`mnemon:auto-compile-stale` only *reports* which pages have pending drawers — recompiling is a call you or an agent makes. It is no longer scheduled: `palace_wake_up` already returns `pending_update_pages` to every agent at session start, which is where that information can actually be acted on.
 
 ### Use the knowledge graph
 
@@ -848,23 +848,29 @@ Mnemon ships several scheduled commands. Wire them up in your crontab or via For
 * * * * * cd /path/to/mnemon && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-The schedule (defined in `routes/console.php` or `app/Console/Kernel.php`) covers:
+The schedule (defined in `routes/console.php`) covers:
 
 | Schedule | Command | Purpose |
 |---|---|---|
 | Daily, 03:00 | `mnemon:decay-confidence` | Apply time-based confidence decay |
-| Every 6h | `mnemon:auto-lint` | Health check. Reports stale/orphan/empty/low-confidence pages as JSON; repairs nothing |
-| Every 4h | `mnemon:auto-compile-stale` | Reports pages with pending drawers as JSON; recompiles nothing |
 | Weekly, Sunday 04:00 | `mnemon:apply-retention --force` | Enforce retention policies (archive past half-lives) |
 
 Times are in `APP_TIMEZONE` (default `UTC`). `mnemon:sync-openclaw` exists as an
 artisan command but is **not** scheduled — run it manually when you want it.
 
-You can also run any of these manually:
+Two reporting commands are deliberately **not** scheduled:
 
 ```bash
-php artisan mnemon:auto-lint             # report findings as JSON (the command takes no options)
+php artisan mnemon:auto-lint             # stale/orphan/empty/low-confidence pages, as JSON
+php artisan mnemon:auto-compile-stale    # pages with pending drawers, as JSON
 ```
+
+Neither lints nor compiles anything — each builds a JSON report and prints it.
+Scheduled, that print went to `storage/logs/scheduled.log`, which nothing reads,
+and a job writing to an unread file reads like the wiki is being kept current
+when nothing is keeping it current. Agents get the same information where they
+can act on it: `palace_wake_up` returns `pending_update_pages` at session start,
+and `wiki_lint` is an MCP tool. Run these by hand when you want the report.
 
 ### Monitoring health
 

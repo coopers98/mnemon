@@ -85,6 +85,33 @@ text=$(printf '%s' "$cleaned" | sed -E \
     -e 's/Bearer [A-Za-z0-9_.-]{20,}/Bearer [REDACTED]/g' \
     -e 's/sk-[A-Za-z0-9]{20,}/[REDACTED-OPENAI-KEY]/g')
 
+# The raw cap above bounds the work; this one bounds what the server is asked
+# to accept. `session_digest` validates the payload it receives
+# (`transcript` => `required|string|max:200000`), and the cap above is measured
+# on the slice *before* sanitization, which only strips about a fifth: a
+# 262144-byte raw slice measured 207,613 characters on the wire. The whole
+# digest was then rejected, so last_digest_turn never advanced and the next
+# Stop re-sent the same oversized tail -- failing identically, forever.
+max_chars=$(mnemon_config_value 'max_digest_chars' 190000)
+if [ "$(printf '%s' "$text" | wc -c)" -gt "$max_chars" ]; then
+    # Drop whole leading records first, so what is sent stays parseable and the
+    # turns that survive are the most recent ones.
+    trimmed=$(printf '%s' "$text" | jq -c --argjson max "$max_chars" '
+        if type == "array"
+        then until((tojson | length) <= $max or length <= 1; .[1:])
+        else . end
+    ' 2>/dev/null)
+    [ -n "$trimmed" ] && text="$trimmed"
+
+    # One record can still exceed the budget alone. The tool takes `transcript`
+    # as a string and sanitizes it as text rather than parsing it as JSON, so a
+    # character truncation is safe here and strictly better than the whole
+    # digest being refused.
+    if [ "$(printf '%s' "$text" | wc -c)" -gt "$max_chars" ]; then
+        text=$(printf '%s' "$text" | head -c "$max_chars")
+    fi
+fi
+
 # The digest worker ships alongside this script. It used to be written here from
 # a heredoc on first run, guarded by [ ! -x ], which meant a copy from an older
 # release shadowed its own source forever -- and under a plugin the hooks

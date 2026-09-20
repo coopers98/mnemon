@@ -13,6 +13,9 @@
 #      FAKE_HEADER_LOG (file to append request headers to),
 #      FAKE_STATUS (answer every /mcp call with this status),
 #      FAKE_TOOL_ERROR (answer /mcp with a tool-level error),
+#      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
+#                           this many characters, the way the real tool's
+#                           `max:200000` validation does),
 #      FAKE_EXPIRE_FIRST (401 every /mcp call not bearing the refreshed token),
 #      FAKE_REFRESH_FAIL (how POST /oauth/token should fail:
 #                         invalid_grant | invalid_client | garbage | 500 | empty),
@@ -26,6 +29,7 @@
 set -u
 exec python3 - <<'PY'
 import http.server
+import json
 import os
 import sys
 import time
@@ -179,6 +183,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(hdr_log, "a") as fh:
                 for k, v in self.headers.items():
                     fh.write(f"{k}: {v}\n")
+
+        # The real session_digest tool validates `transcript` as
+        # `required|string|max:200000`. A fixture that accepts any size lets a
+        # client-side cap larger than the server's limit pass the suite while
+        # every real digest is rejected -- which is exactly what happened.
+        maxt = int(os.environ.get("FAKE_MAX_TRANSCRIPT", "0"))
+        if maxt:
+            try:
+                args = json.loads(body).get("params", {}).get("arguments", {})
+            except (ValueError, AttributeError):
+                args = {}
+            t = args.get("transcript")
+            if isinstance(t, str) and len(t) > maxt:
+                self._reply(200, (
+                    '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
+                    '"text":"The transcript field must not be greater than '
+                    '%d characters."}],"isError":true}}' % maxt
+                ).encode())
+                return
 
         # FAKE_TOOL_ERROR serves what a wing denial actually looks like: HTTP 200
         # with isError on the *result*, not a JSON-RPC .error. That shape used to

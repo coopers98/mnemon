@@ -654,6 +654,16 @@ jq '.recall_timeout_ms = 3000' ~/.mnemon/config.json > /tmp/c && \
   mv /tmp/c ~/.mnemon/config.json && chmod 600 ~/.mnemon/config.json
 ```
 
+
+`max_digest_chars` defaults to 190000 and caps the payload each Stop sends to
+`session_digest`, whose `transcript` field the server validates at 200000
+characters. The cap is applied *after* sanitization, because that is what the
+server measures — capping the raw slice instead lets a payload that looks small
+enough arrive over the limit, and the tool then rejects the digest whole. When a
+slice is over budget the oldest turns are dropped first, so the most recent ones
+survive. Lower it if a proxy in front of your instance imposes a smaller body
+limit than the app does.
+
 Enrolment preserves settings like this one across re-runs.
 
 ### Revoking a device

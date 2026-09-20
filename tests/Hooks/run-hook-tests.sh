@@ -1073,6 +1073,44 @@ case "$d_on" in
 esac
 rf_stop_all
 
+# Test: the client's slice cap must keep the *sanitized* payload under the
+# server's limit on the transcript field. The cap was applied to the raw slice
+# before sanitization while the tool validates what actually arrives
+# (`transcript` => `required|string|max:200000`), and sanitization only strips
+# about a fifth: a 262144-byte raw slice measured 207,613 characters on the
+# wire. Every digest was rejected in full, so last_digest_turn never advanced
+# and the next Stop re-sent the same oversized tail forever.
+CAP_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+CAP_LOG="$MNEMON_DIR/requests-cap.log"
+: > "$CAP_LOG"
+FAKE_PORT="$CAP_PORT" FAKE_REQUEST_LOG="$CAP_LOG" FAKE_MAX_TRANSCRIPT=200000 \
+  "$THIS_DIR/fixtures/server.sh" &
+CAP_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.cap-orig.json"
+jq --arg e "http://127.0.0.1:$CAP_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+
+tp4="$MNEMON_DIR/transcript-cap.jsonl"
+: > "$tp4"
+cap_chunk=$(head -c 60000 /dev/zero | tr '\0' 'y')
+for _ in $(seq 1 12); do
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}\n' \
+      "$cap_chunk" >> "$tp4"
+done
+printf '{"session_id":"s15","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp4" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+cap_ldt=0
+for _ in $(seq 1 60); do
+    cap_ldt=$(jq -r '.last_digest_turn // 0' "$MNEMON_DIR/sessions/s15.json" 2>/dev/null || echo 0)
+    [ "$cap_ldt" != "0" ] && break
+    sleep 0.25
+done
+assert_ne "$cap_ldt" "0" "capture: an oversized transcript is trimmed under the server's limit"
+
+kill $CAP_PID 2>/dev/null
+mv "$MNEMON_DIR/config.cap-orig.json" "$MNEMON_DIR/config.json"
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

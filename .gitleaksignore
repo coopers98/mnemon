@@ -1,0 +1,33 @@
+# gitleaks allowlist.
+#
+# Every entry below is a synthetic credential in a test fixture. They exist
+# because ContentSanitizer's whole job is to redact secrets out of captured
+# transcripts, and testing a redactor requires strings shaped like the thing it
+# redacts. None has ever been a live credential.
+#
+# They are listed here so a public clone does not greet a reader with ten
+# security findings that all resolve to "this is the test for the redactor".
+#
+# Fingerprints are commit:file:rule:line and are tied to specific commit SHAs.
+# A history rewrite invalidates them -- regenerate with:
+#   gitleaks detect --source . --log-opts="--all --full-history" \
+#     --report-format json --report-path /tmp/gl.json --redact=0
+#   jq -r '.[] | "\(.Commit):\(.File):\(.RuleID):\(.StartLine)"' /tmp/gl.json
+
+# ContentSanitizerTest -- the OpenAI key shapes the sanitizer must catch
+# (sk-proj-, sk-svcacct-, and the legacy sk- form). See
+# tests/Unit/Services/ContentSanitizerTest.php: each key is asserted to be
+# ABSENT from the sanitized output.
+e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
+e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
+e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
+11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
+11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
+11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
+
+# Tier2ProductionHardeningTest -- GitHub token shapes. The literal values
+# contain the string "fake" and sequential filler (abc123def456...).
+1f774de242c65d048ed1ee8b6136af9af034fd3b:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
+1f774de242c65d048ed1ee8b6136af9af034fd3b:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501
+90b13d5a5f53b2a36f24909e8d03c037e7c8a9b3:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
+90b13d5a5f53b2a36f24909e8d03c037e7c8a9b3:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501

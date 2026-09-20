@@ -36,3 +36,7 @@ Thumbs.db
 /benchmark/state/
 __pycache__/
 *.pyc
+
+# Working audit document — contains the live hostname, server IP and PII.
+# Deliberately never committed; the repo is going public.
+PUBLISH-PLAN.md

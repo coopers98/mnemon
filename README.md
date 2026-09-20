@@ -6,6 +6,35 @@ Built on Laravel 13, PostgreSQL + pgvector, and Filament v5.
 
 ---
 
+## Measured, not asserted
+
+Most memory systems claim semantic retrieval helps. This one measures it. A full
+[LongMemEval-S](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned) run —
+**500 questions, both legs, no subset** — comparing keyword-only retrieval against the same
+pipeline with embeddings enabled:
+
+| Metric | keyless | embedded | Δ |
+|---|---|---|---|
+| hit_rate@1 | 0.742 | **0.886** | +0.144 |
+| recall@5 | 0.832 | **0.952** | +0.120 |
+| MRR | 0.817 | **0.924** | +0.107 |
+| QA accuracy (gpt-4o, K=5) | 0.557 | **0.627** | +0.070 |
+
+Embeddings improve **every metric at every depth** — including recall@10, which an earlier
+25-question subset had shown as saturated and legs-identical. The subset was misleading, not
+merely imprecise; the full run is what corrected it. That correction is documented rather
+than quietly overwritten, along with two earlier ones.
+
+Total spend was **$36.76** against a **~$37** estimate extrapolated from a two-question smoke
+test — within 1% at 250× the sample size.
+
+**Scope, stated plainly:** this measures the palace (retrieval) layer only, not the wiki, and
+the QA leg is self-judged by the same model family that answers. Full methodology, the three
+caveats the accuracy number depends on, and the conditional-split breakdown are in
+[`benchmark/README.md`](benchmark/README.md). The harness is in this repo and re-runnable.
+
+---
+
 ## Quickstart
 
 ```bash

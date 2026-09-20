@@ -18,16 +18,16 @@
 # (sk-proj-, sk-svcacct-, and the legacy sk- form). See
 # tests/Unit/Services/ContentSanitizerTest.php: each key is asserted to be
 # ABSENT from the sanitized output.
-e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
-e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
-e4b4ceb76b1b96dd5a27a95d86c175205df3010b:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
-11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
-11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
-11ef072924ec379608dcc232ac13d5ba4effe768:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
+1f3e253ea86dfb9b464bd4b0125ee9be13b7fddb:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
+1f3e253ea86dfb9b464bd4b0125ee9be13b7fddb:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
+1f3e253ea86dfb9b464bd4b0125ee9be13b7fddb:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
+1ef9f7eb5693fd2150dfd282327325971cbcb3e7:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:29
+1ef9f7eb5693fd2150dfd282327325971cbcb3e7:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:39
+1ef9f7eb5693fd2150dfd282327325971cbcb3e7:tests/Unit/Services/ContentSanitizerTest.php:generic-api-key:46
 
 # Tier2ProductionHardeningTest -- GitHub token shapes. The literal values
 # contain the string "fake" and sequential filler (abc123def456...).
-1f774de242c65d048ed1ee8b6136af9af034fd3b:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
-1f774de242c65d048ed1ee8b6136af9af034fd3b:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501
-90b13d5a5f53b2a36f24909e8d03c037e7c8a9b3:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
-90b13d5a5f53b2a36f24909e8d03c037e7c8a9b3:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501
+6073ac6297fadd8697b8cca35bf6565f7572bc89:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
+6073ac6297fadd8697b8cca35bf6565f7572bc89:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501
+4ba10eb85dc79fde7d40625ddb47872f8e0f0c7a:tests/Feature/Tier2ProductionHardeningTest.php:generic-api-key:491
+4ba10eb85dc79fde7d40625ddb47872f8e0f0c7a:tests/Feature/Tier2ProductionHardeningTest.php:github-oauth:501

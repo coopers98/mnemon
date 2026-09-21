@@ -19,6 +19,25 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - The LongMemEval results now open the README, with the scope caveat (palace
   layer only, self-judged QA) and the subset correction stated inline.
 
+### Fixed
+- **D10 — the `ollama` embedding driver could not store anything.** `embedding`
+  was `vector(1536)`, sized for `text-embedding-3-small`, so
+  `nomic-embed-text`'s 768-dimension vectors failed on every write with
+  "expected 1536 dimensions, not 768". The documented local-embeddings option
+  was configurable, selectable, and inert.
+
+  The column is now an unconstrained `vector`. pgvector only requires a
+  declared width for HNSW/IVFFlat indexes, and there is no index on
+  `embedding` — the only indexes on these tables are GIN full-text — so the
+  width could simply go. Semantic queries filter on
+  `vector_dims(embedding)`, taken from the probe vector rather than config, so
+  rows written by a previous driver are invisible to semantic search instead of
+  raising "different vector dimensions" and taking down the whole query.
+  `mnemon:reembed` migrates them.
+
+  Verified end to end against a real Ollama server: `nomic-embed-text` returns
+  768 dimensions, they store, and semantic search ranks correctly.
+
 ### Security
 - Replaced the fixture person name used across the search, recall and hook
   tests, the fixture server and the user guide. It was a real individual, named

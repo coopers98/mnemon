@@ -83,9 +83,9 @@ DB_PASSWORD=...
 # Required for the default embedding driver
 OPENAI_API_KEY=sk-...
 
-# Optional — defaults are sensible. "ollama" is implemented but currently
-# unusable (see "Re-embedding" below) — use "openai" or "none".
-MNEMON_EMBEDDING_DRIVER=openai      # or "none"
+# Optional — defaults are sensible. "ollama" runs fully local against an
+# Ollama server; see "Re-embedding" below.
+MNEMON_EMBEDDING_DRIVER=openai      # or "ollama", or "none"
 PASSPORT_PRIVATE_KEY=               # leave blank; passport:install generates files
 PASSPORT_PUBLIC_KEY=
 ```
@@ -839,10 +839,13 @@ This re-embeds every drawer and wiki page using the currently configured driver.
 
 Performance: the command embeds one record per API round trip, and a timed run measured **~2 drawers/sec** (1,201 drawers in 10m18s). Budget accordingly — thousands of drawers means hours, so run it overnight.
 
-> **Note on `ollama`:** a third driver, `ollama` (`nomic-embed-text`), is implemented in
-> `config/mnemon.php` but currently can't store anything — the `embedding` column is a
-> fixed `vector(1536)`, and `nomic-embed-text` produces 768-dimension vectors, so a write
-> under this driver fails. Tracked as defect D10, not fixed in this release.
+> **Note on `ollama`:** the third driver runs fully local — no account, no spend, and no
+> content leaving the host. It needs an Ollama server reachable at `MNEMON_OLLAMA_HOST`
+> (default `http://localhost:11434`) with `nomic-embed-text` pulled. Its vectors are 768
+> dimensions against OpenAI's 1536; both are storable because `embedding` is an
+> unconstrained `vector` column, and semantic queries filter on `vector_dims(embedding)`.
+> The practical consequence: after switching drivers, previously embedded rows stay
+> invisible to semantic search until `mnemon:reembed` rewrites them.
 
 To switch drivers:
 
@@ -1093,10 +1096,10 @@ The consent form's CSRF token expired (sessions are short). Restart the OAuth fl
 Symptom: `drawer_add` errors with timeout / 401 / 429.
 
 - OpenAI driver: verify `OPENAI_API_KEY` is set and not rate-limited. Check API quota.
-- `ollama` driver: this isn't a transient failure to troubleshoot — selecting `ollama`
-  fails on every write today. The `embedding` column is a fixed `vector(1536)`, and
-  `nomic-embed-text` produces 768-dimension vectors. Use `openai` or `none` instead
-  (see [Re-embedding](#re-embedding)).
+- `ollama` driver: check the server is reachable (`curl $MNEMON_OLLAMA_HOST/api/tags`) and
+  that `nomic-embed-text` is pulled (`ollama pull nomic-embed-text`). If semantic search
+  returns nothing after switching to it, the rows are still embedded at the previous
+  driver's width — run `mnemon:reembed` (see [Re-embedding](#re-embedding)).
 
 Workaround during an OpenAI outage: temporarily set `MNEMON_EMBEDDING_DRIVER=none`. New drawers won't get embeddings; semantic search degrades to full-text. Re-enable and `mnemon:reembed` once the driver recovers.
 

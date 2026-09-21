@@ -259,13 +259,13 @@ Configure via `MNEMON_EMBEDDING_DRIVER`:
 | `openai` | `text-embedding-3-small` | 1536 | The application default (`config/mnemon.php`). Needs `OPENAI_API_KEY`. The Docker Quickstart overrides this to `none` in `.env.docker.example`, so trying Mnemon needs no account and spends nothing. |
 | `none` | — | — | Disables embeddings; search falls back to full-text + temporal only. |
 
-A third driver, `ollama` (`nomic-embed-text`, 768 dimensions), is implemented
-but currently unusable: the `drawers` and `wiki_pages` tables define
-`embedding` as a fixed `vector(1536)` column, so a 768-dimension vector fails
-to write. Selecting `ollama` will error the first time anything tries to
-store an embedding. This is tracked as defect D10 and is not fixed in this
-release — if you need fully local embeddings, `none` (no semantic ranking,
-full-text + temporal only) is the working option today.
+| `ollama` | `nomic-embed-text` | 768 | Fully local — no account, no spend, no data leaving the host. Needs an Ollama server (`MNEMON_OLLAMA_HOST`, default `http://localhost:11434`) with the model pulled. |
+
+`embedding` is an unconstrained pgvector `vector` column, so drivers of any
+width are storable. Semantic queries filter on `vector_dims(embedding)`, which
+means rows written by a *previous* driver are simply invisible to semantic
+search rather than an error — run `php artisan mnemon:reembed` after switching
+to bring them across.
 
 Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings under the new model.
 
@@ -338,7 +338,6 @@ This is a working personal tool, not a finished product. Honest constraints toda
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
-- **The `ollama` embedding driver can't store an embedding.** The `embedding` column is a fixed `vector(1536)`, and `nomic-embed-text` produces 768-dimension vectors — writes fail. Tracked as D10, not fixed in this release. See [As an embedding backend](#as-an-embedding-backend).
 - **Word count is ASCII-only.** `getWordCountAttribute()` uses PHP's `str_word_count`. Multi-byte content under-counts. Documented; will be revisited if it ever matters.
 - **Source filter dropdowns are cached for 60s.** Newly added drawer sources or new MCP tool names take up to a minute to appear in the BrainSession/Drawer filter dropdowns.
 - **`brain_sessions.source` is non-nullable.** The audit log requires every invocation to identify itself with a key name; anonymous calls are rejected upstream by the auth middleware.

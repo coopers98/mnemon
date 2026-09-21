@@ -79,8 +79,20 @@ class PalaceSearchService
 
         $vectorLiteral = '['.implode(',', $vector).']';
 
+        // The column is an unconstrained `vector`, so it can hold rows written
+        // by a driver of a different width (D10's fix). `<=>` raises
+        // "different vector dimensions" the moment one such row is compared,
+        // which would take down the whole query rather than simply not
+        // matching. Filter to the probe's own width -- taken from the vector
+        // in hand, not from config, so a driver/config mismatch cannot
+        // reintroduce the error. Rows at another width stay invisible to
+        // semantic search until `mnemon:reembed` rewrites them.
+        $dimensions = count($vector);
+
         $base = $this->baseQuery($wing, $room, $tier);
         $rows = $base
+            ->whereNotNull('drawers.embedding')
+            ->whereRaw('vector_dims(drawers.embedding) = ?', [$dimensions])
             ->selectRaw('
                 drawers.id,
                 drawers.content,

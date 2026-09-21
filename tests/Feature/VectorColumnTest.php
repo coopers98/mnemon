@@ -80,15 +80,77 @@ class VectorColumnTest extends TestCase
         // This assertion needs no database either — it compares two constants
         // — so it runs on the SQLite leg too, where contributors will see it.
         //
-        // The column width is fixed by migration. A driver whose vectors are a
-        // different size cannot store anything — this is defect D10, and this
-        // assertion is what would have caught it without reading two files.
-        // `ollama` is excluded on purpose rather than asserted: it declares
-        // 768 dimensions and therefore *cannot* satisfy this, which is D10
-        // itself. Fixing the schema is out of scope for this piece; the
-        // Ollama option is being withdrawn instead, so asserting it here
-        // would only encode a known-broken pairing as a red test.
+        // This began life as the guard for D10, when `embedding` was a fixed
+        // `vector(1536)` and any driver of another width could store nothing.
+        // The column is now unconstrained, so a width mismatch is no longer
+        // fatal and `ollama` (768) is a supported option rather than an
+        // excluded one — see the two tests below.
+        //
+        // The assertion is kept because the number is still load-bearing: it
+        // is what `mnemon:reembed` writes and what semantic queries filter on
+        // for the default driver. It needs no database, so it runs on the
+        // SQLite leg too, where contributors will see it.
         $this->assertSame(1536, config('mnemon.embedding.drivers.openai.dimensions'),
-            'the shipped default driver must declare 1536 dimensions — drawers.embedding is vector(1536)');
+            'the shipped default driver must declare 1536 dimensions');
+    }
+
+    /**
+     * D10: the column was `vector(1536)`, so a driver producing any other width
+     * could not store anything at all. `nomic-embed-text` emits 768, which made
+     * the documented `ollama` option inert — every write failed.
+     *
+     * pgvector allows an unconstrained `vector` column; the fixed width is only
+     * required by HNSW/IVFFlat indexes, and this schema has none on `embedding`
+     * (the only indexes are GIN full-text). So the width can simply go.
+     */
+    public function test_the_embedding_column_accepts_a_768_dimension_vector(): void
+    {
+        $this->requirePostgres();
+        config(['mnemon.embedding.driver' => 'none']);
+
+        $wing = Wing::create(['name' => 'work', 'slug' => 'work']);
+        $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
+        $drawer = Drawer::create(['content' => 'a note', 'room_id' => $room->id]);
+
+        $vector = '['.implode(',', array_fill(0, 768, 0.01)).']';
+        DB::statement('UPDATE drawers SET embedding = ?::vector WHERE id = ?', [$vector, $drawer->id]);
+
+        $dims = DB::selectOne('SELECT vector_dims(embedding) AS d FROM drawers WHERE id = ?', [$drawer->id]);
+
+        $this->assertSame(768, (int) $dims->d);
+    }
+
+    /**
+     * Storing mixed widths is only half the problem. `<=>` throws
+     * "different vector dimensions" when the operands disagree, so a single row
+     * left over from another driver would take down the whole semantic query
+     * rather than simply not matching. Rows at a foreign width must be filtered
+     * out, not stumbled over — `mnemon:reembed` is what migrates them.
+     */
+    public function test_semantic_search_survives_rows_embedded_at_another_dimension(): void
+    {
+        $this->requirePostgres();
+        config(['mnemon.embedding.driver' => 'none']);
+
+        $wing = Wing::create(['name' => 'work', 'slug' => 'work']);
+        $room = Room::create(['wing_id' => $wing->id, 'name' => 'Notes', 'slug' => 'notes']);
+        $stale = Drawer::create(['content' => 'embedded by the previous driver', 'room_id' => $room->id]);
+        $current = Drawer::create(['content' => 'embedded by the current driver', 'room_id' => $room->id]);
+
+        DB::statement('UPDATE drawers SET embedding = ?::vector WHERE id = ?',
+            ['['.implode(',', array_fill(0, 768, 0.01)).']', $stale->id]);
+        DB::statement('UPDATE drawers SET embedding = ?::vector WHERE id = ?',
+            ['['.implode(',', array_fill(0, 1536, 0.01)).']', $current->id]);
+
+        $probe = '['.implode(',', array_fill(0, 1536, 0.01)).']';
+
+        $rows = DB::select(
+            'SELECT id FROM drawers WHERE embedding IS NOT NULL AND vector_dims(embedding) = ?
+             ORDER BY embedding <=> ?::vector',
+            [1536, $probe]
+        );
+
+        $this->assertCount(1, $rows, 'only the row at the querying driver\'s width may participate');
+        $this->assertSame($current->id, (int) $rows[0]->id);
     }
 }

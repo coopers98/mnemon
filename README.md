@@ -58,6 +58,21 @@ docker compose exec app cat storage/admin-password.txt
 
 There is no password reset flow — save it somewhere safe.
 
+**Semantic search is off by default.** `MNEMON_EMBEDDING_DRIVER=none` ships as
+the default so a first run needs no account and spends nothing; retrieval falls
+back to full-text plus a recency boost, which works but is not what the
+benchmark above measures. For the embedded behaviour, set
+`MNEMON_EMBEDDING_DRIVER=openai` and `OPENAI_API_KEY` in `.env`, then
+`docker compose exec app php artisan mnemon:reembed` to backfill anything
+already stored.
+
+**If `docker compose up` fails to start,** check for a port collision first:
+the stack binds `127.0.0.1:8080` and `127.0.0.1:8443`, and Docker reports this
+as `bind: address already in use` against the `app` container rather than as
+anything about Mnemon. Either stop whatever holds the port
+(`ss -lntp | grep -E ':8080|:8443'`) or change `HTTP_BIND` / `HTTPS_BIND` in
+`.env` to free ports before starting.
+
 By default the stack binds to loopback only (`127.0.0.1:8080` / `127.0.0.1:8443`),
 so a local trial is never exposed to the network. To serve on a real hostname with
 automatic HTTPS from Let's Encrypt instead:
@@ -336,6 +351,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Documentation
 
 - [`docs/USERGUIDE.md`](docs/USERGUIDE.md) — **day-to-day playbook**: setup, connecting agents, OAuth, multi-device, troubleshooting, FAQ
+- [`CHANGELOG.md`](CHANGELOG.md) — what landed when, grouped by the date it reached `main`
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — running the test suite (SQLite and Postgres), formatting, the Docker smoke test
 - [`CLAUDE.md`](CLAUDE.md) — agent / contributor conventions (canonical for AI work)
 - [`AGENTS.md`](AGENTS.md) — pointer for non-Claude agents

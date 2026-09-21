@@ -1,5 +1,10 @@
 # Mnemon
 
+[![CI](https://github.com/coopers98/mnemon/actions/workflows/ci.yml/badge.svg)](https://github.com/coopers98/mnemon/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![PHP 8.4+](https://img.shields.io/badge/PHP-8.4%2B-777BB4)
+![Laravel 13](https://img.shields.io/badge/Laravel-13-FF2D20)
+
 A self-hosted second brain for AI-augmented work. Mnemon stores everything you and your agents care about — verbatim — and exposes it back to any AI tool that speaks the [Model Context Protocol](https://modelcontextprotocol.io/). It is one shared memory across Claude, Cursor, ChatGPT, your own scripts, and whatever else you connect.
 
 Built on Laravel 13, PostgreSQL + pgvector, and Filament v5.

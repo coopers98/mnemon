@@ -2,6 +2,7 @@
 
 namespace App\Services\Digest;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -24,16 +25,34 @@ class OpenAiDigestDriver
             'Existing rooms per wing (wing_id keys): '.json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
             'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []);
 
-        $response = Http::withToken($apiKey)
-            ->timeout(20)
-            ->post('https://api.openai.com/v1/chat/completions', [
-                'model' => $model,
-                'response_format' => ['type' => 'json_object'],
-                'messages' => [
-                    ['role' => 'system', 'content' => $system],
-                    ['role' => 'user', 'content' => "Transcript:\n\n".$transcript],
-                ],
+        // A timeout does not come back as an unsuccessful response -- the HTTP
+        // client throws, so it would sail past the `successful()` check below,
+        // escape the tool, and reach the caller as a JSON-RPC 500 reading
+        // "Something went wrong while processing the request". Two live digests
+        // were lost that way to `cURL error 28` against api.openai.com.
+        //
+        // An upstream timeout is not a server fault. Degrade exactly as an
+        // error status does: no proposals, a log line, and a digest the next
+        // Stop retries. 20s was the old budget and proved too tight for a large
+        // transcript; it is configurable now so it can be tuned without a patch.
+        try {
+            $response = Http::withToken($apiKey)
+                ->timeout((int) config('mnemon.digest.timeout', 60))
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model' => $model,
+                    'response_format' => ['type' => 'json_object'],
+                    'messages' => [
+                        ['role' => 'system', 'content' => $system],
+                        ['role' => 'user', 'content' => "Transcript:\n\n".$transcript],
+                    ],
+                ]);
+        } catch (ConnectionException $e) {
+            Log::warning('mnemon: openai digest call could not complete', [
+                'reason' => $e->getMessage(),
             ]);
+
+            return [];
+        }
 
         if (! $response->successful()) {
             Log::warning('mnemon: openai digest call failed', ['status' => $response->status()]);

@@ -83,5 +83,11 @@ return [
         'driver' => env('MNEMON_DIGEST_DRIVER', 'openai'),
         'confidence_floor' => env('MNEMON_DIGEST_FLOOR', 0.5),
         'openai_model' => env('MNEMON_DIGEST_OPENAI_MODEL', 'gpt-4o-mini'),
+
+        // Seconds to wait on the digest completion. The old hard-coded 20 was
+        // too tight for a large transcript and produced `cURL error 28`, which
+        // reached the client as an opaque 500 rather than as a retryable
+        // timeout. Raise it if digests of long sessions still time out.
+        'timeout' => env('MNEMON_DIGEST_TIMEOUT', 60),
     ],
 ];

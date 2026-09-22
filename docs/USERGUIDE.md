@@ -664,6 +664,13 @@ slice is over budget the oldest turns are dropped first, so the most recent ones
 survive. Lower it if a proxy in front of your instance imposes a smaller body
 limit than the app does.
 
+`max_recall_prompt_chars` defaults to 3800 and caps the prompt each
+`UserPromptSubmit` sends to `recall`, whose `prompt` field the server validates
+at 4000 characters. Same reasoning as `max_digest_chars` above: an uncapped
+client means a long prompt is rejected whole and the session silently gets no
+memory at all. The slice keeps the leading text, since that is where a query's
+intent usually sits.
+
 Enrolment preserves settings like this one across re-runs.
 
 ### Revoking a device

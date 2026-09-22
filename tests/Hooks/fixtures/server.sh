@@ -16,6 +16,8 @@
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
 #                           this many characters, the way the real tool's
 #                           `max:200000` validation does),
+#      FAKE_MAX_PROMPT (reject a recall whose prompt exceeds this many
+#                       characters, the way RecallTool's `max:4000` does),
 #      FAKE_EXPIRE_FIRST (401 every /mcp call not bearing the refreshed token),
 #      FAKE_REFRESH_FAIL (how POST /oauth/token should fail:
 #                         invalid_grant | invalid_client | garbage | 500 | empty),
@@ -200,6 +202,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
                     '"text":"The transcript field must not be greater than '
                     '%d characters."}],"isError":true}}' % maxt
+                ).encode())
+                return
+
+        # RecallTool validates `prompt` as `required|string|max:4000`. Same
+        # class of cap as the transcript one above, and the same reason for
+        # enforcing it here: a fixture that accepts any length lets an
+        # uncapped client pass the suite while every long prompt is rejected
+        # in production.
+        maxp = int(os.environ.get("FAKE_MAX_PROMPT", "0"))
+        if maxp:
+            try:
+                args = json.loads(body).get("params", {}).get("arguments", {})
+            except (ValueError, AttributeError):
+                args = {}
+            pr = args.get("prompt")
+            if isinstance(pr, str) and len(pr) > maxp:
+                self._reply(200, (
+                    '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
+                    '"text":"The prompt field must not be greater than '
+                    '%d characters."}],"isError":true}}' % maxp
                 ).encode())
                 return
 

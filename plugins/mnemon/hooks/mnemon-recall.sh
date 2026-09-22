@@ -62,7 +62,21 @@ mnemon_session_state_write "$session_id" "$state"
 mnemon_claim_once "$session_id" recall 5 || exit 0
 
 # Call recall.
-params=$(jq -n --arg p "$prompt" '{name:"recall",arguments:{prompt:$p,token_budget:1500}}')
+#
+# `RecallTool` validates `prompt` => `required|string|max:4000`. This hook used
+# to send it uncapped, so a long prompt was rejected whole and the session
+# silently got no memory -- the same shape as the transcript cap in
+# mnemon-capture.sh: client sends unbounded, server validates a ceiling, and
+# nothing surfaces because the tool error is logged where nobody reads it.
+#
+# The slice happens inside jq rather than with `cut`/`head -c` because jq
+# slices by codepoint: a byte-wise cut can split a multi-byte character and
+# produce invalid UTF-8, which jq would then refuse to encode. Recall is a
+# search query, so the leading text carries the intent and the tail is what
+# costs least to drop.
+max_prompt=$(mnemon_config_value 'max_recall_prompt_chars' 3800)
+params=$(jq -n --arg p "$prompt" --argjson n "$max_prompt" \
+    '{name:"recall",arguments:{prompt:($p[0:$n]),token_budget:1500}}')
 # Budget for the recall round trip. 800ms suits a localhost instance; a remote
 # one needs more (a hosted instance measures ~1.2s), and a budget that is too
 # tight makes recall a silent no-op. Override with recall_timeout_ms in config.

@@ -1111,6 +1111,63 @@ assert_ne "$cap_ldt" "0" "capture: an oversized transcript is trimmed under the 
 kill $CAP_PID 2>/dev/null
 mv "$MNEMON_DIR/config.cap-orig.json" "$MNEMON_DIR/config.json"
 
+# Test: a long prompt must still recall. `RecallTool` validates
+# `prompt` => `required|string|max:4000` and the hook sent it uncapped, so a
+# prompt over the limit was rejected whole and the session silently got no
+# memory at all. Exactly the shape of the transcript cap above -- client sends
+# unbounded, server validates a ceiling, nothing surfaces.
+LP_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+LP_LOG="$MNEMON_DIR/requests-longprompt.log"
+: > "$LP_LOG"
+FAKE_PORT="$LP_PORT" FAKE_REQUEST_LOG="$LP_LOG" FAKE_MAX_PROMPT=4000 \
+  "$THIS_DIR/fixtures/server.sh" &
+LP_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.lp-orig.json"
+jq --arg e "http://127.0.0.1:$LP_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+
+long_prompt="what do we know about the atlas rollout $(head -c 6000 /dev/zero | tr '\0' 'z')"
+lp_out=$(printf '{"session_id":"s16","prompt":"%s"}' "$long_prompt" | "$HOOKS_DIR/mnemon-recall.sh" 2>/dev/null || true)
+case "$lp_out" in
+    *"Mnemon recall"*|*"wiki"*|*"Anthony"*|*"Dorothy"*)
+        PASS=$((PASS+1)); printf '  ok: recall: a prompt over the server limit is trimmed, not dropped\n';;
+    *)
+        FAIL=$((FAIL+1)); printf '  FAIL: recall: a long prompt produced no context\n    got: %s\n' "$(printf '%s' "$lp_out" | head -c 120)";;
+esac
+
+# And the payload that actually left the machine must be under the limit.
+lp_sent=$(python3 - "$LP_LOG" <<'PYEOF'
+import json, sys
+# Bodies are pretty-printed across many lines, so decode objects from the
+# stream rather than assuming one JSON document per line.
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+dec, i, best = json.JSONDecoder(), 0, 0
+while i < len(raw):
+    j = raw.find("{", i)
+    if j < 0:
+        break
+    try:
+        obj, end = dec.raw_decode(raw, j)
+        i = end
+    except ValueError:
+        i = j + 1
+        continue
+    args = (obj.get("params") or {}).get("arguments") or {}
+    if isinstance(args.get("prompt"), str):
+        best = max(best, len(args["prompt"]))
+print(best)
+PYEOF
+)
+if [ "${lp_sent:-0}" -gt 0 ] && [ "${lp_sent:-0}" -le 4000 ]; then
+    PASS=$((PASS+1)); printf '  ok: recall: the prompt on the wire is within the server limit (%s chars)\n' "$lp_sent"
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: recall: prompt on the wire measured %s chars\n' "${lp_sent:-0}"
+fi
+
+kill $LP_PID 2>/dev/null
+mv "$MNEMON_DIR/config.lp-orig.json" "$MNEMON_DIR/config.json"
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

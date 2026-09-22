@@ -20,6 +20,20 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   layer only, self-judged QA) and the subset correction stated inline.
 
 ### Fixed
+- **A long prompt silently disabled recall for the whole session.**
+  `RecallTool` validates `prompt` => `max:4000` and `mnemon-recall.sh` sent it
+  uncapped, so any prompt over the limit was rejected whole and the session got
+  no memory at all. Structurally the same defect as the transcript cap below,
+  in the sibling hook. The prompt is now sliced to `max_recall_prompt_chars`
+  (3800) inside the jq call that builds the params, so the slice is by codepoint
+  and cannot produce invalid UTF-8.
+- **An OpenAI timeout reached the client as an opaque 500.** The digest driver
+  guarded `! $response->successful()`, which covers an error status but not a
+  timeout — the HTTP client throws, so the failure escaped the tool and arrived
+  as "Something went wrong while processing the request". Diagnosed from the
+  live instance: `cURL error 28` against api.openai.com. It now degrades like an
+  error status, and the 20s budget is `config('mnemon.digest.timeout')`,
+  default 60.
 - **D10 — the `ollama` embedding driver could not store anything.** `embedding`
   was `vector(1536)`, sized for `text-embedding-3-small`, so
   `nomic-embed-text`'s 768-dimension vectors failed on every write with

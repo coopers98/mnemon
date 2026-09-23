@@ -82,10 +82,15 @@ class PalaceWakeUpTool extends Tool
             'latest_drawer_at' => $w->latest_drawer_at,
         ])->values()->all();
 
-        // Recent wiki updates (wiki pages are not wing-scoped — no filtering)
-        $recentWikiUpdates = WikiPage::where('updated_at', '>=', now()->subDays(7))
-            ->orderByDesc('updated_at')
-            ->get()
+        // Wiki pages carry a wing derived from their name. Wake-up runs on every
+        // session start, so an unfiltered list here named forbidden pages to
+        // every agent without anyone asking for them.
+        $recentWikiUpdates = WikiPage::readableSubset(
+            WikiPage::where('updated_at', '>=', now()->subDays(7))
+                ->orderByDesc('updated_at')
+                ->get(),
+            $patterns
+        )
             ->map(fn ($p) => [
                 'name' => $p->name,
                 'type' => $p->type,
@@ -97,11 +102,13 @@ class PalaceWakeUpTool extends Tool
         $staleDays = (int) config('mnemon.wiki.stale_days', 30);
         $staleThreshold = now()->subDays($staleDays);
 
-        $staleWikiPages = WikiPage::where(function ($query) use ($staleThreshold) {
-            $query->whereNull('last_compiled_at')
-                ->orWhere('last_compiled_at', '<', $staleThreshold);
-        })->orderBy('last_compiled_at')
-            ->get()
+        $staleWikiPages = WikiPage::readableSubset(
+            WikiPage::where(function ($query) use ($staleThreshold) {
+                $query->whereNull('last_compiled_at')
+                    ->orWhere('last_compiled_at', '<', $staleThreshold);
+            })->orderBy('last_compiled_at')->get(),
+            $patterns
+        )
             ->map(fn ($p) => [
                 'name' => $p->name,
                 'type' => $p->type,

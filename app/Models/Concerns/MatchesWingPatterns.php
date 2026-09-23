@@ -2,6 +2,8 @@
 
 namespace App\Models\Concerns;
 
+use App\Support\WingPatterns;
+
 /**
  * Wing-pattern matching, shared by the client- and token-keyed restrictions.
  *
@@ -19,19 +21,6 @@ trait MatchesWingPatterns
             return true;
         }
 
-        foreach ($patterns as $pattern) {
-            if ($pattern === $wingSlug) {
-                return true;
-            }
-
-            if (str_contains($pattern, '*')) {
-                $regex = '/^'.str_replace('\*', '.*', preg_quote($pattern, '/')).'$/';
-                if (preg_match($regex, $wingSlug)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return WingPatterns::matches($wingSlug, $patterns);
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\WikiPage;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -17,7 +18,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsReadOnly]
 class ContextListTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'context_list';
 
@@ -37,8 +38,13 @@ class ContextListTool extends Tool
             $query->where('type', $params['type']);
         }
 
-        $pages = $query->limit($params['limit'] ?? 100)
-            ->get(['id', 'name', 'title', 'type', 'description', 'confidence', 'pending_drawers_since_compile', 'last_compiled_at', 'content'])
+        // Filter before the limit, not after: limiting first would let
+        // forbidden pages consume slots and silently shorten the visible list.
+        $pages = WikiPage::readableSubset(
+            $query->get(['id', 'name', 'title', 'type', 'description', 'confidence', 'pending_drawers_since_compile', 'last_compiled_at', 'content']),
+            $this->wingPatternsFor($request)
+        )
+            ->take($params['limit'] ?? 100)
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'name' => $p->name,

@@ -3,11 +3,13 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
+use App\Support\WingPatterns;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Mcp\Request;
@@ -21,7 +23,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsReadOnly]
 class BrainStatusTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'brain_status';
 
@@ -34,16 +36,24 @@ class BrainStatusTool extends Tool
         $staleDays = (int) config('mnemon.wiki.stale_days', 30);
         $staleThreshold = now()->subDays($staleDays);
 
-        $staleWikiPages = WikiPage::where(function ($query) use ($staleThreshold) {
-            $query->whereNull('last_compiled_at')
-                ->orWhere('last_compiled_at', '<', $staleThreshold);
-        })->orderBy('last_compiled_at')->get()->map(fn ($p) => [
+        // Page names alone are disclosure -- `person:jane-doe` says who exists.
+        $patterns = $this->wingPatternsFor($request);
+
+        $staleWikiPages = WikiPage::readableSubset(
+            WikiPage::where(function ($query) use ($staleThreshold) {
+                $query->whereNull('last_compiled_at')
+                    ->orWhere('last_compiled_at', '<', $staleThreshold);
+            })->orderBy('last_compiled_at')->get(),
+            $patterns
+        )->map(fn ($p) => [
             'name' => $p->name,
             'last_compiled_at' => $p->last_compiled_at?->toIso8601String(),
         ])->values()->all();
 
-        $pendingUpdatePages = WikiPage::pendingUpdates()
-            ->get()
+        $pendingUpdatePages = WikiPage::readableSubset(
+            WikiPage::pendingUpdates()->get(),
+            $patterns
+        )
             ->map(fn ($p) => [
                 'name' => $p->name,
                 'pending_drawers_since_compile' => $p->pending_drawers_since_compile,
@@ -58,10 +68,21 @@ class BrainStatusTool extends Tool
 
         $lastWrite = Drawer::orderByDesc('created_at')->value('created_at');
 
-        $wingsWithCounts = Wing::withCount(['rooms as drawer_count' => function ($query) {
+        // Not the documented wiki hole, but the same boundary: this listed every
+        // wing by name to any token, so a `work`-restricted agent learned that
+        // `personal` exists and how much is in it.
+        $wingsQuery = Wing::withCount(['rooms as drawer_count' => function ($query) {
             $query->join('drawers', 'drawers.room_id', '=', 'rooms.id')
                 ->whereNull('drawers.deleted_at');
-        }])->get()->map(fn ($w) => [
+        }])->get();
+
+        if ($patterns !== null) {
+            $wingsQuery = $wingsQuery->filter(
+                fn (Wing $w) => WingPatterns::matches($w->slug, $patterns)
+            )->values();
+        }
+
+        $wingsWithCounts = $wingsQuery->map(fn ($w) => [
             'name' => $w->name,
             'slug' => $w->slug,
             'drawer_count' => (int) $w->drawer_count,

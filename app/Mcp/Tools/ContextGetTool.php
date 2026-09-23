@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
@@ -18,7 +19,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsReadOnly]
 class ContextGetTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'context_get';
 
@@ -31,6 +32,15 @@ class ContextGetTool extends Tool
         $params = $request->validate(['name' => 'required|string|max:255']);
 
         $page = WikiPage::where('name', $params['name'])->first();
+
+        // A page outside the token's wings must be indistinguishable from one
+        // that does not exist, or the error message becomes an existence
+        // oracle across wings -- the same reasoning ContextSetTool applies to
+        // source drawers.
+        if ($page !== null && ! $page->readableWith($this->wingPatternsFor($request))) {
+            $page = null;
+        }
+
         if (! $page) {
             BrainSessionLogger::log($request, 'context_get', $params, 0);
 

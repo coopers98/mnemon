@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\WingPatterns;
+
 class DrawerSearchService
 {
     public function __construct(
@@ -59,18 +61,6 @@ class DrawerSearchService
      */
     protected function wingMatchesPatterns(string $wingSlug, array $patterns): bool
     {
-        foreach ($patterns as $pattern) {
-            if ($pattern === $wingSlug) {
-                return true;
-            }
-            if (str_contains($pattern, '*')) {
-                $regex = '/^'.str_replace('\*', '.*', preg_quote($pattern, '/')).'$/';
-                if (preg_match($regex, $wingSlug)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return WingPatterns::matches($wingSlug, $patterns);
     }
 }

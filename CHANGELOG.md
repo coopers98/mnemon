@@ -19,6 +19,26 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - The LongMemEval results now open the README, with the scope caveat (palace
   layer only, self-judged QA) and the subset correction stated inline.
 
+### Security
+- **Wing restrictions now cover the wiki.** `wiki_pages` had no wing dimension,
+  so any token carrying `mcp:use` could read any wiki page whatever its
+  restrictions — through `context_get`, `context_list`, `palace_wake_up`,
+  `brain_status`, and `recall`, which runs automatically on every prompt. Wiki
+  pages are compiled palace content, so a token restricted to `work` could read
+  a synthesis of `personal` drawers.
+
+  A page's wing is derived from its name using the mapping `wiki_compile`
+  already enforces (`project:atlas` → `project-atlas`), so the fix needs no
+  column and no backfill. Pages that map to no permitted wing — including the
+  `wiki/index` and `wiki/log` pages that enumerate other pages — are treated as
+  non-existent for a restricted token rather than public. `context_get` returns
+  the same "not found" for a forbidden page as for a missing one, so the error
+  is not an existence oracle across wings.
+- **`brain_status` listed every wing by name** to any token, regardless of
+  restrictions. Not the documented wiki hole, but the same boundary: a
+  `work`-restricted agent learned that `personal` existed and how much was in
+  it. Now filtered.
+
 ### Fixed
 - **A long prompt silently disabled recall for the whole session.**
   `RecallTool` validates `prompt` => `max:4000` and `mnemon-recall.sh` sent it

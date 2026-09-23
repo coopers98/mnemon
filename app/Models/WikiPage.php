@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\WingPatterns;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,60 @@ class WikiPage extends Model
     public const CONFIDENCE_LEVELS = ['high', 'medium', 'low'];
 
     public const DRAWER_TIERS = ['raw', 'reviewed', 'consolidated'];
+
+    /**
+     * The wing this page belongs to, derived from its name.
+     *
+     * `wiki_compile` already defines this mapping — it slugifies the page name
+     * and refuses to compile a page whose wing the token cannot reach. Reusing
+     * it here means the read path and the compile path agree, and it needs no
+     * column or backfill: on the live instance 28 of 32 pages map to an
+     * existing wing by name.
+     */
+    public function wingSlug(): string
+    {
+        return Wing::slugify($this->name);
+    }
+
+    /**
+     * Whether a token holding these patterns may read this page.
+     *
+     * `null` patterns mean unrestricted. A page whose derived wing matches
+     * nothing — `wiki/index`, `wiki/log`, anything off-convention — is
+     * unreadable by a restricted token rather than readable by everyone.
+     * Failing closed is the point: the alternative is the hole this replaces,
+     * and those index pages enumerate other pages by name.
+     */
+    public function readableWith(?array $patterns): bool
+    {
+        return static::nameReadableWith($this->name, $patterns);
+    }
+
+    /**
+     * The same check against a bare page name.
+     *
+     * WikiSearchService returns raw stdClass rows rather than models, so the
+     * predicate cannot assume an instance -- it only needs the name, which both
+     * shapes carry.
+     */
+    public static function nameReadableWith(string $name, ?array $patterns): bool
+    {
+        return $patterns === null || WingPatterns::matches(Wing::slugify($name), $patterns);
+    }
+
+    /**
+     * Filter pages -- models or raw rows -- to those a token may read.
+     */
+    public static function readableSubset($pages, ?array $patterns)
+    {
+        if ($patterns === null) {
+            return $pages;
+        }
+
+        return $pages->filter(
+            fn ($p) => static::nameReadableWith($p->name, $patterns)
+        )->values();
+    }
 
     protected $fillable = [
         'name',

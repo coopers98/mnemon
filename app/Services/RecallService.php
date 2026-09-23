@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\WikiPage;
+
 class RecallService
 {
     public function __construct(
@@ -20,7 +22,16 @@ class RecallService
     ): array {
         $floor = (float) config('mnemon.recall.confidence_floor', 0.45);
 
-        $wikiHits = $this->wikiSearch->search($prompt, limit: 3);
+        // Wiki pages carry a wing derived from their name, and this leg runs on
+        // every prompt via the UserPromptSubmit hook -- so an unfiltered search
+        // here handed forbidden syntheses to an agent that never asked for
+        // them. Fetch a wider window before filtering: narrowing after the
+        // limit would let forbidden pages consume the three slots and silently
+        // return less than the budget allows.
+        $wikiHits = WikiPage::readableSubset(
+            collect($this->wikiSearch->search($prompt, limit: $allowedWingPatterns === null ? 3 : 24)),
+            $allowedWingPatterns
+        )->take(3);
         $drawerHits = $this->drawerSearch->run(
             query: $prompt,
             limit: 10,

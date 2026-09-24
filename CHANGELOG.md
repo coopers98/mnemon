@@ -15,6 +15,27 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   own tests, so a public clone does not report ten findings that all resolve to
   "this is the test for the redactor".
 
+### Added
+- **Connected Devices** (`/admin/connected-devices`) — what has actually
+  reached this instance and when, with per-device call counts and tool variety.
+  Devices provisioned with `mnemon:device-client` that have never successfully
+  connected are listed as **never seen** rather than being silently absent,
+  which is the failure worth catching when wiring up a new machine.
+- `brain_sessions.device` stores the bare credential name alongside the display
+  `source`. `source` embeds the token id and device tokens refresh hourly, so
+  grouping the audit trail by it counted one machine once per hour — the live
+  instance showed a single laptop as sixteen devices. Existing rows are
+  backfilled by the migration.
+
+### Fixed
+- **`wiki/index` and `wiki/log` were a permanent 404 on the web UI.** The wiki
+  show route constrains the page name to `[a-z0-9:_-]+`, which has no `/`, so
+  the two pages the application maintains for itself could never be opened.
+  They are renamed to `wiki:index` and `wiki:log`, matching the `type:slug`
+  convention every other page already uses. Widening the route was rejected:
+  with `/` allowed, the greedy `wiki.show` pattern swallows the `/history`
+  suffix of the route registered after it.
+
 ### Changed
 - The LongMemEval results now open the README, with the scope caveat (palace
   layer only, self-judged QA) and the subset correction stated inline.

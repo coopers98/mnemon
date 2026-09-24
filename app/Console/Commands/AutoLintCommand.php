@@ -69,7 +69,7 @@ class AutoLintCommand extends Command
 
     private function detectOrphanPages(array &$findings, $allPages): void
     {
-        $excludedNames = ['wiki/index', 'wiki/log'];
+        $excludedNames = ['wiki:index', 'wiki:log'];
         $filteredPages = $allPages->whereNotIn('name', $excludedNames);
 
         $referencedNames = collect();

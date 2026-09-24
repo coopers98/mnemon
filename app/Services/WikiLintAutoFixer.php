@@ -97,7 +97,7 @@ class WikiLintAutoFixer
      */
     private function archiveEmptyPage(WikiPage $page): ?array
     {
-        if (in_array($page->name, ['wiki/index', 'wiki/log'], true)) {
+        if (in_array($page->name, ['wiki:index', 'wiki:log'], true)) {
             return null;
         }
 

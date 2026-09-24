@@ -147,7 +147,7 @@ class WikiLintTool extends Tool
      */
     private function detectOrphanPages(array &$findings, Collection $allPages): void
     {
-        $excludedNames = ['wiki/index', 'wiki/log'];
+        $excludedNames = ['wiki:index', 'wiki:log'];
 
         $filteredPages = $allPages->whereNotIn('name', $excludedNames);
 

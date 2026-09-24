@@ -265,7 +265,7 @@ class ContextSetTool extends Tool
 
         $lines = ["# Wiki Index\n\nLast updated: ".now()->toIso8601String()."\n"];
         foreach ($pages as $p) {
-            if ($p->name === 'wiki/index' || $p->name === 'wiki/log') {
+            if ($p->name === 'wiki:index' || $p->name === 'wiki:log') {
                 continue;
             }
             $title = $p->title ?? $p->name;
@@ -276,7 +276,7 @@ class ContextSetTool extends Tool
         $indexContent = implode("\n", $lines);
 
         WikiPage::updateOrCreate(
-            ['name' => 'wiki/index'],
+            ['name' => 'wiki:index'],
             [
                 'title' => 'Wiki Index',
                 'content' => $indexContent,
@@ -288,13 +288,13 @@ class ContextSetTool extends Tool
 
     private function appendToWikiLog(string $name, string $type, string $action, string $agent): void
     {
-        $logPage = WikiPage::where('name', 'wiki/log')->first();
+        $logPage = WikiPage::where('name', 'wiki:log')->first();
         $timestamp = now()->toIso8601String();
         $entry = "- {$timestamp} | {$action} | `{$name}` ({$type}) by {$agent}";
 
         if ($logPage === null) {
             WikiPage::create([
-                'name' => 'wiki/log',
+                'name' => 'wiki:log',
                 'title' => 'Wiki Log',
                 'type' => 'synthesis',
                 'content' => "# Wiki Log\n\n{$entry}",

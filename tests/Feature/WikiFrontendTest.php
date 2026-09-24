@@ -246,4 +246,43 @@ class WikiFrontendTest extends TestCase
 
         $response->assertSessionHasErrors(['name', 'email', 'message']);
     }
+
+    /**
+     * The auto-maintained index pages were named `wiki/index` and `wiki/log`.
+     * The show route constrains the name to `[a-z0-9:_-]+`, which has no `/`,
+     * so those two pages could never be reached from the web UI -- a permanent
+     * 404 on pages the system generates for itself.
+     *
+     * Every other page uses the `type:slug` convention (`project:helios`),
+     * which the route already serves. Renaming these to match fixes the 404
+     * without widening the route, which would otherwise let `wiki.show`
+     * greedily swallow the `/history` suffix of the route registered after it.
+     */
+    public function test_the_auto_maintained_index_pages_are_reachable(): void
+    {
+        // The names the application actually maintains must be routable. Asserting
+        // a hand-made colon page is reachable would only test the route; the
+        // defect is that the app writes a name the route cannot serve.
+        foreach (['wiki:index' => 'Wiki Index', 'wiki:log' => 'Wiki Log'] as $name => $title) {
+            $this->assertMatchesRegularExpression(
+                '/^[a-z0-9:_-]+$/',
+                $name,
+                'the auto-maintained page names must satisfy the wiki.show route constraint'
+            );
+        }
+
+        foreach (['wiki:index' => 'Wiki Index', 'wiki:log' => 'Wiki Log'] as $name => $title) {
+            WikiPage::create([
+                'name' => $name,
+                'type' => 'synthesis',
+                'title' => $title,
+                'content' => "# {$title}",
+            ]);
+
+            $this->actingAs($this->user)
+                ->get('/wiki/'.$name)
+                ->assertStatus(200)
+                ->assertSee($title);
+        }
+    }
 }

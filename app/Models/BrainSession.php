@@ -11,6 +11,7 @@ class BrainSession extends Model
     protected $fillable = [
         'tool_name',
         'source',
+        'device',
         'oauth_client_id',
         'user_id',
         'access_token_id',

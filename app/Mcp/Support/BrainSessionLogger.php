@@ -22,6 +22,7 @@ class BrainSessionLogger
             'user_id' => $user?->id,
             'access_token_id' => $token?->id,
             'source' => self::renderSource($client, $user, $token),
+            'device' => self::renderDevice($client, $user, $token),
             'input' => $input,
             'result_count' => $resultCount,
         ]);
@@ -47,11 +48,25 @@ class BrainSessionLogger
             'user_id' => $user?->id,
             'access_token_id' => $token?->id,
             'source' => self::renderSource($client, $user, $token),
+            'device' => self::renderDevice($client, $user, $token),
             'input' => $input,
             'result_count' => 0,
             'outcome' => 'denied',
             'error' => $reason,
         ]);
+    }
+
+    /**
+     * The bare device name, for grouping.
+     *
+     * renderSource() builds a display string that embeds the token id, and
+     * device tokens refresh hourly — so grouping the audit trail by `source`
+     * counted one machine once per hour. This is the same first component,
+     * stored on its own.
+     */
+    private static function renderDevice(?Client $client, ?User $user, mixed $token): string
+    {
+        return $token?->name ?? $client?->name ?? 'unknown-client';
     }
 
     private static function renderSource(?Client $client, ?User $user, mixed $token): string

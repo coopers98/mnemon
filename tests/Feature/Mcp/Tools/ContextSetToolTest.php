@@ -120,8 +120,8 @@ class ContextSetToolTest extends TestCase
     {
         $this->mcpCall('context_set', ['name' => 'project:gamma', 'content' => 'Gamma project'], ['mcp:use']);
 
-        $this->assertDatabaseHas('wiki_pages', ['name' => 'wiki/index']);
-        $indexPage = WikiPage::where('name', 'wiki/index')->first();
+        $this->assertDatabaseHas('wiki_pages', ['name' => 'wiki:index']);
+        $indexPage = WikiPage::where('name', 'wiki:index')->first();
         $this->assertStringContainsString('project:gamma', $indexPage->content);
     }
 
@@ -130,7 +130,7 @@ class ContextSetToolTest extends TestCase
         $this->mcpCall('context_set', ['name' => 'concept:x', 'content' => 'X'], ['mcp:use']);
         $this->mcpCall('context_set', ['name' => 'concept:y', 'content' => 'Y'], ['mcp:use']);
 
-        $logPage = WikiPage::where('name', 'wiki/log')->first();
+        $logPage = WikiPage::where('name', 'wiki:log')->first();
         $this->assertNotNull($logPage);
         $this->assertStringContainsString('concept:x', $logPage->content);
         $this->assertStringContainsString('concept:y', $logPage->content);

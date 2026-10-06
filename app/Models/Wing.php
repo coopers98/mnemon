@@ -16,7 +16,31 @@ class Wing extends Model
         'name',
         'slug',
         'description',
+        'aliases',
     ];
+
+    protected $casts = [
+        'aliases' => 'array',
+    ];
+
+    /**
+     * The project wing for a project name, matched by slug ("mnemon" →
+     * project-mnemon) or by alias ("recital-lineup" → project-cora).
+     */
+    public static function forProject(string $project): ?self
+    {
+        $name = static::slugify($project);
+
+        if ($name === '') {
+            return null;
+        }
+
+        return static::where('slug', "project-{$name}")->first()
+            ?? static::where('slug', 'like', 'project-%')
+                ->whereNotNull('aliases')
+                ->get()
+                ->first(fn (Wing $wing) => in_array($name, array_map(static::slugify(...), $wing->aliases), true));
+    }
 
     /**
      * The single canonical wing-slug function.

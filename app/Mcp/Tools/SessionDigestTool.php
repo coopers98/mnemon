@@ -42,6 +42,7 @@ class SessionDigestTool extends Tool
             'recent_drawer_ids' => 'array',
             'recent_drawer_ids.*' => 'integer',
             'auto_persist' => 'boolean',
+            'project' => 'nullable|string|max:100',
         ]);
 
         $cleaned = $this->sanitizer->sanitize($params['transcript']);
@@ -53,12 +54,14 @@ class SessionDigestTool extends Tool
             transcript: $cleaned,
             recentDrawerIds: $params['recent_drawer_ids'] ?? [],
             allowedWingPatterns: $this->wingPatternsFor($request),
+            project: $params['project'] ?? null,
         );
 
         BrainSessionLogger::log($request, 'session_digest', [
             'session_id' => $params['session_id'],
             'harness' => $params['harness'],
             'turn_range' => $params['turn_range'],
+            'project' => $params['project'] ?? null,
         ], count($result['persisted']));
 
         return Response::structured($result);
@@ -73,6 +76,7 @@ class SessionDigestTool extends Tool
             'transcript' => $s->string()->required()->description('Sanitized transcript slice (turns since last digest).'),
             'recent_drawer_ids' => $s->array()->description('Drawer IDs already captured this session, for dedup.'),
             'auto_persist' => $s->boolean()->description('When false, returns proposals without writing. Default true.'),
+            'project' => $s->string()->description('The project the session ran in (e.g. its repository name). Project-specific drawers are filed in that project\'s wing, matched by slug or alias; an unrestricted token creates the wing if it does not exist.'),
         ];
     }
 }

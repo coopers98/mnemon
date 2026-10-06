@@ -45,6 +45,38 @@ class OpenAiDigestDriverTest extends TestCase
         $this->assertEquals('Meeting with Atlas team', $result[0]['content']);
     }
 
+    public function test_uses_the_shared_llm_model_by_default(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+        config(['mnemon.llm.model' => 'gpt-shared', 'mnemon.digest.openai_model' => null]);
+
+        (new OpenAiDigestDriver)->digest('t', []);
+
+        Http::assertSent(fn ($request) => $request['model'] === 'gpt-shared');
+    }
+
+    public function test_a_digest_specific_model_overrides_the_shared_one(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+        config(['mnemon.llm.model' => 'gpt-shared', 'mnemon.digest.openai_model' => 'gpt-digest']);
+
+        (new OpenAiDigestDriver)->digest('t', []);
+
+        Http::assertSent(fn ($request) => $request['model'] === 'gpt-digest');
+    }
+
+    public function test_tells_the_model_which_wing_the_session_belongs_to(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        (new OpenAiDigestDriver)->digest('t', ['session_wing' => 'project-mnemon']);
+
+        Http::assertSent(fn ($request) => str_contains($request['messages'][0]['content'], 'project-mnemon'));
+    }
+
     public function test_returns_empty_array_on_malformed_response(): void
     {
         Http::fake([

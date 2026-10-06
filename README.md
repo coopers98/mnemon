@@ -204,7 +204,7 @@ All tools require scope `mcp:use`. Wing restrictions on the token provide per-ag
 | `wiki_graph` | Query the knowledge graph — entities, typed relationships, graph traversal |
 | `wiki_history` | Supersession and revision history for wiki pages; track how knowledge evolved |
 | `recall` | Hybrid recall of wiki excerpts and drawer snippets for a prompt, packed into a token budget; powers the Claude Code `mnemon-recall.sh` hook |
-| `session_digest` | Digest a sanitized transcript slice into drawer proposals; persists high-confidence ones, queues new-wing proposals for review; powers the Claude Code `mnemon-capture.sh` hook |
+| `session_digest` | Digest a sanitized transcript slice into drawer proposals; persists high-confidence ones, filing project-specific drawers under the session's project wing; powers the Claude Code `mnemon-capture.sh` hook |
 
 Wing restrictions on a token short-circuit before the tool even runs — a token restricted to `project:atlas` can never see a drawer in `personal`.
 
@@ -234,7 +234,7 @@ Three hooks:
 
 - `mnemon-wake.sh` (SessionStart) — injects recent palace state at session start.
 - `mnemon-recall.sh` (UserPromptSubmit) — injects relevant wiki + drawer context per prompt, gated to skip chitchat.
-- `mnemon-capture.sh` (Stop) — digests the session transcript to drawer proposals; high-confidence ones auto-persist; new wings queue for admin review.
+- `mnemon-capture.sh` (Stop) — digests the session transcript to drawer proposals; high-confidence ones auto-persist, filed under the wing of the repository the session ran in.
 
 See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#automatic-memory-in-claude-code) for the full walkthrough.
 

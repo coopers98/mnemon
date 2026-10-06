@@ -9,6 +9,23 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ## Unreleased
 
+### Fixed
+- **Captured sessions were filed under the wrong project.** `session_digest`
+  received only the transcript, so the digest model guessed the wing — and a
+  wiki compile on 2026-10-06 found most new drawers in the busiest wings
+  belonged elsewhere (all 755 in `project-ananke`, ~85–90% in `project-mnemon`).
+  Proposing a new wing only queued it for a review nobody did, so unknown
+  projects were squeezed into whatever wing looked closest. The capture hook
+  (plugin 0.3.6) now sends the session's `project` — its repository name — and
+  the server files project-specific drawers under that project's wing, matched
+  by slug or by the wing's new **aliases**, creating the wing if the token is
+  unrestricted. Person and other cross-project filings are unchanged.
+
+### Changed
+- **Digests use `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`
+  setting names the chat model Mnemon's LLM work runs on, so the wiki compiler
+  will share it; `MNEMON_DIGEST_OPENAI_MODEL` still overrides it for digests.
+
 ### Added
 - CI, license and stack badges at the top of the README.
 - `.gitleaksignore` covering the synthetic credentials in `ContentSanitizer`'s

@@ -99,6 +99,18 @@ class WingResourceTest extends TestCase
         ]);
     }
 
+    public function test_edit_form_saves_aliases(): void
+    {
+        $wing = Wing::create(['name' => 'project:cora']);
+
+        Livewire::test(EditWing::class, ['record' => $wing->getRouteKey()])
+            ->fillForm(['aliases' => ['recital-lineup']])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame(['recital-lineup'], $wing->fresh()->aliases);
+    }
+
     public function test_edit_form_does_not_overwrite_slug(): void
     {
         $wing = Wing::create(['name' => 'Original']);

@@ -160,6 +160,29 @@ class SessionDigestToolTest extends TestCase
         $this->assertTrue(isset($body['result']['isError']) && $body['result']['isError'] === true);
     }
 
+    public function test_project_argument_decides_the_wing(): void
+    {
+        Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        $other = Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $other->id]);
+
+        $this->mockDigestService([
+            ['content' => 'a mnemon note', 'wing_slug' => 'project-ananke', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $response = $this->mcpCall('session_digest', [
+            'session_id' => 'sess-p',
+            'harness' => 'claude-code',
+            'turn_range' => ['start' => 0, 'end' => 4],
+            'transcript' => 'worked on mnemon',
+            'project' => 'mnemon',
+        ], ['mcp:use']);
+
+        $response->assertStatus(200);
+        $this->assertSame('project-mnemon', $response->json('result.structuredContent.persisted.0.wing'));
+    }
+
     private function mockDigestService(array $proposals): void
     {
         $this->app->bind(SessionDigestService::class, function ($app) use ($proposals) {

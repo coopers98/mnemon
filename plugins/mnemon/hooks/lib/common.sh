@@ -476,6 +476,28 @@ mnemon_session_state_write() {
     printf '%s' "$json" > "$tmp" && mv -f "$tmp" "$f"
 }
 
+# The project a working directory belongs to, named for its repository: the
+# origin remote's name, else the checkout's directory name. Echoes nothing
+# outside a git repository. Args: <dir>.
+#
+# The server files a session's project-specific drawers under this project's
+# wing. Without it the digest model guessed the wing from the transcript, and
+# most drawers in the busiest wings belonged to other projects.
+mnemon_project_name() {
+    local dir="$1" top url
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
+    [ -n "$top" ] || return 0
+    url=$(git -C "$top" remote get-url origin 2>/dev/null)
+    if [ -n "$url" ]; then
+        url="${url%/}"
+        url="${url%.git}"
+        printf '%s' "${url##*[/:]}"
+    else
+        printf '%s' "${top##*/}"
+    fi
+}
+
 # Append an error message to the capture-errors log.
 mnemon_log_error() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$MNEMON_ERROR_LOG"

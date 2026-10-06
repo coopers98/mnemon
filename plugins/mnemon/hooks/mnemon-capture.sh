@@ -12,6 +12,7 @@ input=$(cat 2>/dev/null || echo '{}')
 session_id=$(printf '%s' "$input" | jq -r '.session_id // empty')
 transcript=$(printf '%s' "$input" | jq -c '.transcript // empty')
 transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 
 [ -z "$session_id" ] && exit 0
 
@@ -126,8 +127,10 @@ fi
 text_tmp="$MNEMON_SESSIONS_DIR/${session_id}.digest-input.$$.txt"
 printf '%s' "$text" > "$text_tmp"
 
+project=$(mnemon_project_name "$cwd")
+
 # Detach.
-nohup "$worker" "$session_id" "$last_turn" "$turn_index" "$text_tmp" \
+nohup "$worker" "$session_id" "$last_turn" "$turn_index" "$text_tmp" "$project" \
     >>"$MNEMON_ERROR_LOG" 2>&1 < /dev/null &
 disown 2>/dev/null || true
 

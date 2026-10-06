@@ -24,6 +24,9 @@ class SessionDigestService
      * @param  array{start:int,end:int}  $turnRange
      * @param  array<int>  $recentDrawerIds
      * @param  array<string>|null  $allowedWingPatterns
+     * @param  string|null  $project  The project the session ran in, as the harness names it
+     *                                (its repository). When given, it decides the session's
+     *                                project wing; the model no longer guesses it.
      */
     public function run(
         string $sessionId,
@@ -32,6 +35,7 @@ class SessionDigestService
         string $transcript,
         array $recentDrawerIds,
         ?array $allowedWingPatterns,
+        ?string $project = null,
     ): array {
         // A slice already digested is returned as-is rather than digested again.
         // The capture hook can dispatch the same range twice -- two workers
@@ -48,6 +52,9 @@ class SessionDigestService
             ->whereIn('wing_id', collect($existingWings)->pluck('id'))
             ->get(['slug', 'wing_id']);
         $recentDrawers = Drawer::whereIn('id', $recentDrawerIds)->get(['id', 'content']);
+        $sessionWingSlug = $project !== null
+            ? $this->sessionWingSlug($project, $existingWings, $allowedWingPatterns)
+            : null;
 
         $proposals = $this->llm->digest($transcript, [
             'turn_range' => $turnRange,
@@ -58,6 +65,7 @@ class SessionDigestService
                 'id' => $d->id,
                 'snippet' => mb_substr($d->content, 0, 200),
             ])->all(),
+            'session_wing' => $sessionWingSlug,
         ]);
 
         $persisted = [];
@@ -66,6 +74,10 @@ class SessionDigestService
         foreach ($proposals as $p) {
             if (($p['confidence'] ?? 0) < $floor) {
                 continue;
+            }
+
+            if ($sessionWingSlug !== null && $this->isProjectFiling($p)) {
+                $p = $this->refileToSessionWing($p, $sessionWingSlug);
             }
 
             if (! empty($p['propose_new_wing'])) {
@@ -146,6 +158,74 @@ class SessionDigestService
             'queued_for_review' => [],
             'pending_wings' => $pendingWings,
         ];
+    }
+
+    /**
+     * The wing a session's project-specific drawers belong in, or null to leave
+     * the choice to the model.
+     *
+     * Before this, the model picked the wing from the transcript alone and was
+     * wrong most of the time: in the busiest wings most digested drawers came
+     * from other projects. A project with no wing yet gets one -- proposing a
+     * new wing only queued it for a review nobody did, so the model squeezed
+     * unknown projects into whatever wing looked closest. A wing-restricted
+     * token never creates wings and never reaches outside its wings.
+     *
+     * @param  array<int, Wing>  $tokenWings
+     * @param  array<string>|null  $patterns
+     */
+    private function sessionWingSlug(string $project, array $tokenWings, ?array $patterns): ?string
+    {
+        $wing = Wing::forProject($project);
+
+        if ($wing !== null) {
+            $visible = collect($tokenWings)->contains(fn (Wing $w) => $w->id === $wing->id);
+
+            return $visible ? $wing->slug : null;
+        }
+
+        $name = Wing::slugify($project);
+
+        return ($patterns === null && $name !== '') ? "project-{$name}" : null;
+    }
+
+    /**
+     * A proposal filed under a project wing, or under a wing the model made up,
+     * belongs to the session's project. Person, decision and other standing
+     * wings are cross-project, so the model's choice there stands.
+     *
+     * @param  array<string, mixed>  $p
+     */
+    private function isProjectFiling(array $p): bool
+    {
+        $slug = Wing::slugify((string) ($p['wing_slug'] ?? ''));
+
+        return str_starts_with($slug, 'project-')
+            || ! empty($p['propose_new_wing'])
+            || ! Wing::where('slug', $slug)->exists();
+    }
+
+    /**
+     * @param  array<string, mixed>  $p
+     * @return array<string, mixed>
+     */
+    private function refileToSessionWing(array $p, string $wingSlug): array
+    {
+        $wing = Wing::firstOrCreate(
+            ['slug' => $wingSlug],
+            ['name' => 'project:'.Str::after($wingSlug, 'project-')],
+        );
+
+        $room = Wing::slugify((string) ($p['room_slug'] ?? ''));
+        $roomExists = $room !== '' && Room::where('wing_id', $wing->id)->where('slug', $room)->exists();
+
+        return array_merge($p, [
+            'wing_slug' => $wing->slug,
+            'room_slug' => $roomExists ? $room : 'notes',
+            'propose_new_wing' => false,
+            // `notes` is the default room; the drawer writer creates it on demand.
+            'propose_new_room' => ! $roomExists,
+        ]);
     }
 
     /**

@@ -79,10 +79,21 @@ return [
         'default_token_budget' => 1500,
     ],
 
+    // The chat model Mnemon's own LLM work runs on: session digests now, wiki
+    // compilation next. One setting so the model is changed in one place. Pin
+    // a specific model rather than a "latest" alias, so behaviour changes only
+    // when the config does.
+    'llm' => [
+        'model' => env('MNEMON_LLM_MODEL', 'gpt-5.4-mini'),
+    ],
+
     'digest' => [
         'driver' => env('MNEMON_DIGEST_DRIVER', 'openai'),
         'confidence_floor' => env('MNEMON_DIGEST_FLOOR', 0.5),
-        'openai_model' => env('MNEMON_DIGEST_OPENAI_MODEL', 'gpt-4o-mini'),
+
+        // Overrides mnemon.llm.model for digests only. Unset, digests use the
+        // shared model.
+        'openai_model' => env('MNEMON_DIGEST_OPENAI_MODEL'),
 
         // Seconds to wait on the digest completion. The old hard-coded 20 was
         // too tight for a large transcript and produced `cURL error 28`, which

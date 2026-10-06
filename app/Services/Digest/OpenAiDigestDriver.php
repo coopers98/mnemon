@@ -17,13 +17,21 @@ class OpenAiDigestDriver
             return [];
         }
 
-        $model = config('mnemon.digest.openai_model', 'gpt-4o-mini');
+        $model = config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.4-mini');
+
+        // The session's project is known from where it ran; say so, so the
+        // model writes for that project. The service enforces the filing.
+        $sessionWing = isset($context['session_wing'])
+            ? "\nThis session ran in the project whose wing is '{$context['session_wing']}'. File project-specific drawers there; ".
+              "use another wing only for content that is not about this project (a person, a cross-project decision).\n"
+            : '';
 
         $system = "You are Mnemon's session digester. Read a Claude Code transcript and extract drawers worth storing. ".
             "Respond with strict JSON: {\"proposals\":[{\"content\":\"…\",\"wing_slug\":\"…\",\"room_slug\":\"…\",\"confidence\":0.0-1.0,\"propose_new_wing\":bool,\"propose_new_room\":bool,\"rationale\":\"…\"}]}.\n".
             'Existing wings: '.json_encode($context['existing_wings'] ?? [])."\n".
             'Existing rooms per wing (wing_id keys): '.json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
-            'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []);
+            'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []).
+            $sessionWing;
 
         // A timeout does not come back as an unsuccessful response -- the HTTP
         // client throws, so it would sail past the `successful()` check below,

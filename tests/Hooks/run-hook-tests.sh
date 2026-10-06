@@ -349,6 +349,43 @@ else
     PASS=$((PASS+1)); printf '  ok: capture: sends only turns added since the last digest\n'
 fi
 
+# Test 10a-project: capture names the project the session ran in. Without it the
+# server's digest model guessed the wing from the transcript alone, and most
+# drawers in the busiest wings turned out to belong to other projects.
+proj_repo="$MNEMON_DIR/checkouts/some-dir-name"
+mkdir -p "$proj_repo/sub"
+git -C "$proj_repo" init -q 2>/dev/null
+git -C "$proj_repo" remote add origin "https://github.com/acme/widget-repo.git"
+tp_proj="$MNEMON_DIR/transcript-project.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"PROJECT-TURN"}]}}' > "$tp_proj"
+
+: > "$BIG_LOG"
+rm -f "$MNEMON_DIR/sessions/s12.json"
+printf '{"session_id":"s12","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$proj_repo/sub" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+# Request bodies are logged pretty-printed, one JSON document after another.
+sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.project // "none"' "$BIG_LOG" 2>/dev/null)
+assert_eq "$sent_project" "widget-repo" "capture: sends the repository name as the project"
+
+# Outside a repository there is no project to name, so none is sent and the
+# server falls back to the model's choice.
+plain_dir="$MNEMON_DIR/not-a-repo"
+mkdir -p "$plain_dir"
+: > "$BIG_LOG"
+rm -f "$MNEMON_DIR/sessions/s13.json"
+printf '{"session_id":"s13","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$plain_dir" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments | if has("project") then "present" else "absent" end' "$BIG_LOG" 2>/dev/null)
+assert_eq "$sent_project" "absent" "capture: outside a repository, no project is sent"
+
 # Test 10b: the request body stays under a reverse proxy's default 1MiB limit
 # even for a huge first digest. A 413 comes back as an HTML page, which the
 # caller feeds to jq -- surfacing as "Invalid numeric literal", not as a size

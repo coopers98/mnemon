@@ -166,6 +166,167 @@ class SessionDigestServiceTest extends TestCase
         $this->assertEquals(200, mb_strlen($ctx['recent_drawers'][0]['snippet']));
     }
 
+    public function test_session_project_overrides_the_models_project_wing(): void
+    {
+        // The model sees only the transcript, so it guessed a neighbouring
+        // project. The session's own project is known; it decides the wing.
+        Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Fixed the capture payload cap', 'wing_slug' => 'project-ananke',
+                'room_slug' => 'decisions', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'mnemon');
+
+        $this->assertCount(1, $result['persisted']);
+        $this->assertSame('project-mnemon', $result['persisted'][0]['wing']);
+        $this->assertSame('notes', $result['persisted'][0]['room']);
+    }
+
+    public function test_session_project_keeps_a_room_the_wing_already_has(): void
+    {
+        $wing = Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Room::factory()->create(['slug' => 'decisions', 'wing_id' => $wing->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Chose server-side compilation', 'wing_slug' => 'project-mnemon',
+                'room_slug' => 'decisions', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'mnemon');
+
+        $this->assertSame('decisions', $result['persisted'][0]['room']);
+    }
+
+    public function test_session_project_leaves_person_filings_alone(): void
+    {
+        Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        $person = Wing::factory()->create(['name' => 'person:cooper', 'slug' => 'person-cooper']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $person->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Cooper prefers direct commits to main', 'wing_slug' => 'person-cooper',
+                'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'mnemon');
+
+        $this->assertSame('person-cooper', $result['persisted'][0]['wing']);
+    }
+
+    public function test_session_project_matches_a_wing_alias(): void
+    {
+        // Cora's repository is recital-lineup; the wing is named for the product.
+        Wing::factory()->create(['name' => 'project:cora', 'slug' => 'project-cora', 'aliases' => ['recital-lineup']]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Lineup optimiser now avoids quick changes', 'wing_slug' => 'project-synergy',
+                'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'recital-lineup');
+
+        $this->assertSame('project-cora', $result['persisted'][0]['wing']);
+    }
+
+    public function test_unknown_session_project_gets_its_own_wing(): void
+    {
+        // Proposing a new wing only queued it for a review nobody did, so the
+        // model learned to squeeze unknown projects into existing wings.
+        Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Dispatch board POC scaffolded', 'wing_slug' => 'project-birddog',
+                'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => true, 'propose_new_room' => true],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'birddog');
+
+        $this->assertSame('project-birddog', $result['persisted'][0]['wing']);
+        $this->assertEmpty($result['pending_wings']);
+        $this->assertSame('project:birddog', Wing::where('slug', 'project-birddog')->value('name'));
+        $this->assertSame(0, WikiPendingWing::count());
+    }
+
+    public function test_restricted_token_does_not_create_a_wing_for_an_unknown_project(): void
+    {
+        $mnemon = Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $mnemon->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Something from birddog', 'wing_slug' => 'project-mnemon',
+                'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], ['project-mnemon'], project: 'birddog');
+
+        $this->assertFalse(Wing::where('slug', 'project-birddog')->exists());
+        $this->assertSame('project-mnemon', $result['persisted'][0]['wing']);
+    }
+
+    public function test_session_project_outside_the_tokens_wings_is_ignored(): void
+    {
+        Wing::factory()->create(['name' => 'project:secret', 'slug' => 'project-secret']);
+        $mnemon = Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $mnemon->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-mnemon', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], ['project-mnemon'], project: 'secret');
+
+        $this->assertSame('project-mnemon', $result['persisted'][0]['wing']);
+    }
+
+    public function test_session_wing_is_given_to_the_model(): void
+    {
+        Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+
+        $captured = new \stdClass;
+        $captured->context = null;
+        $driver = new class($captured)
+        {
+            public function __construct(public \stdClass $captured) {}
+
+            public function digest(string $transcript, array $context): array
+            {
+                $this->captured->context = $context;
+
+                return [];
+            }
+        };
+
+        (new SessionDigestService($driver, app(DrawerWriteService::class)))
+            ->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, project: 'mnemon');
+
+        $this->assertSame('project-mnemon', $captured->context['session_wing']);
+    }
+
+    public function test_without_a_project_the_models_choice_stands(): void
+    {
+        $ananke = Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $ananke->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-ananke', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
+
+        $this->assertSame('project-ananke', $result['persisted'][0]['wing']);
+    }
+
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService
     {
         $driver = new class($proposals)

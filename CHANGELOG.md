@@ -19,7 +19,8 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   (plugin 0.3.6) now sends the session's `project` — its repository name — and
   the server files project-specific drawers under that project's wing, matched
   by slug or by the wing's new **aliases**, creating the wing if the token is
-  unrestricted. Person and other cross-project filings are unchanged.
+  unrestricted. Person and other cross-project filings are unchanged. A repository that spans
+  many projects can be excluded with `project_ignore` in `~/.mnemon/config.json`.
 
 ### Changed
 - **Digests use `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`

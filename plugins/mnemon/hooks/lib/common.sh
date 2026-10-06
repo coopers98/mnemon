@@ -478,13 +478,16 @@ mnemon_session_state_write() {
 
 # The project a working directory belongs to, named for its repository: the
 # origin remote's name, else the checkout's directory name. Echoes nothing
-# outside a git repository. Args: <dir>.
+# outside a git repository, or for a name listed in config.json's
+# `project_ignore`. Args: <dir>.
 #
 # The server files a session's project-specific drawers under this project's
 # wing. Without it the digest model guessed the wing from the transcript, and
-# most drawers in the busiest wings belonged to other projects.
+# most drawers in the busiest wings belonged to other projects. A repository
+# whose sessions span many projects -- an assistant's workspace -- is not one
+# project; list it in `project_ignore` and the model's choice stands for it.
 mnemon_project_name() {
-    local dir="$1" top url
+    local dir="$1" top url name
     [ -n "$dir" ] && [ -d "$dir" ] || return 0
     top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
     [ -n "$top" ] || return 0
@@ -492,10 +495,14 @@ mnemon_project_name() {
     if [ -n "$url" ]; then
         url="${url%/}"
         url="${url%.git}"
-        printf '%s' "${url##*[/:]}"
+        name="${url##*[/:]}"
     else
-        printf '%s' "${top##*/}"
+        name="${top##*/}"
     fi
+    if jq -e --arg n "$name" '(.project_ignore // []) | index($n)' "$MNEMON_CONFIG" >/dev/null 2>&1; then
+        return 0
+    fi
+    printf '%s' "$name"
 }
 
 # Append an error message to the capture-errors log.

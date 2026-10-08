@@ -13,9 +13,9 @@
                 <a href="{{ route('wiki.index') }}" class="{{ $active === 'wiki' ? 'is-active' : '' }}">Wiki</a>
                 <a href="{{ route('palace.index') }}" class="{{ $active === 'palace' ? 'is-active' : '' }}">Palace</a>
             @else
-                <a href="{{ route('landing') }}#architecture">Architecture</a>
                 <a href="{{ route('landing') }}#palace">Palace</a>
             @endauth
+            <a href="{{ route('explain.how-it-works') }}" class="{{ $active === 'how-it-works' ? 'is-active' : '' }}">How it works</a>
             <a href="{{ route('landing') }}#specs">Spec sheet</a>
             <a href="{{ route('landing') }}#install">Self-host</a>
         </nav>

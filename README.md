@@ -103,7 +103,7 @@ test suite.
 Mnemon has two layers:
 
 - **The palace** — verbatim, append-only storage organised as **wings → rooms → drawers**. Nothing is summarised at ingest and nothing is overwritten. Content is stored as written, with one deliberate exception: `ContentSanitizer` redacts API keys, tokens and credentials embedded in URLs before the drawer is saved. Retrieval is hybrid: pgvector cosine distance + Postgres full-text search + a temporal recency boost, weighted and merged.
-- **The wiki** — synthesised, structured pages that distill what's in the palace into knowledge you can read directly. Wiki pages are typed (`person:`, `project:`, `concept:`, `decision:`, `synthesis:`), markdown-rendered, and tracked for staleness. They compound over time.
+- **The wiki** — synthesised, structured pages that distill what's in the palace into knowledge you can read directly. Wiki pages are typed (`person:`, `project:`, `concept:`, `decision:`, `synthesis:`), markdown-rendered, and tracked for staleness. Compiling is agent-triggered — Mnemon counts how many new drawers have landed since a page was last compiled, but nothing rewrites pages on a schedule.
 
 Agents read and write both layers via 14 MCP tools. Humans manage everything through a Filament admin panel at `/admin`, browse the wiki at `/wiki`, and explore the palace at `/palace`.
 
@@ -335,6 +335,7 @@ convenience wrapper, not a scheduled task — run it yourself when you want it.
 This is a working personal tool, not a finished product. Honest constraints today:
 
 - **A wiki page's wing is derived from its name, not from its sources.** Wing restrictions now cover the wiki: `context_get`, `context_list`, `palace_wake_up`, `brain_status` and `recall` all filter pages a token may not read, and a page whose name maps to no permitted wing is treated as non-existent rather than public. The association uses the same mapping `wiki_compile` enforces (`project:atlas` → wing `project-atlas`), so it needs no column and no backfill — on a real instance 28 of 32 pages mapped by name. The residual gap is that the wing follows the **name**: a page named generically but compiled from drawers in a restricted wing would be scoped by its name rather than by its content. Name your pages after the wing they synthesise, and the isolation holds. Index pages (`wiki/index`, `wiki/log`) map to no wing and are therefore invisible to restricted tokens by design — they enumerate other pages.
+- **The wiki does not maintain itself.** Wiki pages are compiled when an agent is asked to compile them. `mnemon:auto-compile-stale` reports which pages have pending drawers; it does not rewrite them, and nothing is scheduled to. Each recompile is a model call, so the trigger is deliberately yours.
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.

@@ -75,6 +75,31 @@ class ExplainPageTest extends TestCase
             ->assertSee('What this does not prove', escape: false);
     }
 
+    /**
+     * The page originally said wiki pages are "rewritten whenever enough new
+     * material accumulates", which implies a trigger that does not exist:
+     * `mnemon:auto-compile-stale` reports stale pages and does not compile
+     * them, and nothing is scheduled. Compilation happens when an agent is
+     * asked. A reader deciding whether to run this needs to know the compiled
+     * layer will not maintain itself.
+     */
+    public function test_it_does_not_imply_compilation_is_automatic(): void
+    {
+        $body = $this->get('/how-it-works')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString(
+            'rewritten whenever enough new',
+            $body,
+            'the page must not imply an automatic recompile trigger'
+        );
+
+        $this->assertStringContainsString(
+            'does not recompile on its own',
+            $body,
+            'the page must state that compilation is agent-triggered'
+        );
+    }
+
     public function test_the_nav_links_to_it_for_signed_out_visitors(): void
     {
         $this->get('/')

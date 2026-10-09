@@ -175,9 +175,15 @@
                     can always answer “what was actually said”.</p>
                 <p>The <strong>wiki</strong> is the opposite: pages compiled <em>from</em> drawers, typed as
                     <code>person:</code>, <code>project:</code>, <code>concept:</code>,
-                    <code>decision:</code> or <code>synthesis:</code>, and rewritten whenever enough new
-                    material accumulates. A wiki page is an interpretation, and it tracks how stale it is and
-                    which drawers it came from.</p>
+                    <code>decision:</code> or <code>synthesis:</code>. A wiki page is an interpretation, and
+                    it records which drawers it came from, when it was last compiled, and how many new
+                    drawers have landed since.</p>
+                <p>Be clear about what that last number means:
+                    <strong>a page does not recompile on its own.</strong>
+                    Compiling is something an agent does when asked — there is no scheduled job
+                    that rewrites pages as material accumulates. Mnemon counts the backlog and will tell you
+                    which pages have drifted, but closing that gap is a decision you make, because each
+                    recompile is a model call against your own account.</p>
                 <p>Keeping them separate is the whole design. A system that only summarises loses the
                     evidence; one that only stores raw text makes the reader do all the work every time. The
                     split means a compiled claim can always be traced back to the verbatim record that
@@ -465,13 +471,14 @@
             </div>
             <ol class="ex-limits">
                 <li><span class="n">01</span><span class="t"><b>Wiki wing scope follows the page name</b>, not the sources it was compiled from — as described above.</span></li>
-                <li><span class="n">02</span><span class="t"><b>Single-tenant.</b> Any registered user of the admin panel is an administrator. Agent isolation is per-credential; human isolation does not exist.</span></li>
-                <li><span class="n">03</span><span class="t"><b>Semantic search requires PostgreSQL with pgvector.</b> SQLite works and falls back to full-text plus recency, with no semantic ranking.</span></li>
-                <li><span class="n">04</span><span class="t"><b>No server-push streaming.</b> The MCP transport is request/response; a GET on the endpoint returns 405, which the specification permits.</span></li>
-                <li><span class="n">05</span><span class="t"><b>No reverse-proxy TLS support.</b> <code>X-Forwarded-*</code> headers are not processed, so run the bundled HTTPS path rather than terminating TLS upstream.</span></li>
-                <li><span class="n">06</span><span class="t"><b>Drawers cannot be hard-deleted through the API.</b> Removal is an admin-panel action; the agent-facing layer is read-and-append.</span></li>
-                <li><span class="n">07</span><span class="t"><b>Access tokens last one hour</b>, refresh tokens ninety days. Enrolled devices renew themselves; a static token does not.</span></li>
-                <li><span class="n">08</span><span class="t"><b>Word counts are ASCII-only</b>, so multi-byte content under-counts. Cosmetic, and documented.</span></li>
+                <li><span class="n">02</span><span class="t"><b>The wiki does not maintain itself.</b> Pages are compiled when an agent is asked to compile them. <code>mnemon:auto-compile-stale</code> reports which pages have drifted; it does not rewrite them, and nothing is scheduled to.</span></li>
+                <li><span class="n">03</span><span class="t"><b>Single-tenant.</b> Any registered user of the admin panel is an administrator. Agent isolation is per-credential; human isolation does not exist.</span></li>
+                <li><span class="n">04</span><span class="t"><b>Semantic search requires PostgreSQL with pgvector.</b> SQLite works and falls back to full-text plus recency, with no semantic ranking.</span></li>
+                <li><span class="n">05</span><span class="t"><b>No server-push streaming.</b> The MCP transport is request/response; a GET on the endpoint returns 405, which the specification permits.</span></li>
+                <li><span class="n">06</span><span class="t"><b>No reverse-proxy TLS support.</b> <code>X-Forwarded-*</code> headers are not processed, so run the bundled HTTPS path rather than terminating TLS upstream.</span></li>
+                <li><span class="n">07</span><span class="t"><b>Drawers cannot be hard-deleted through the API.</b> Removal is an admin-panel action; the agent-facing layer is read-and-append.</span></li>
+                <li><span class="n">08</span><span class="t"><b>Access tokens last one hour</b>, refresh tokens ninety days. Enrolled devices renew themselves; a static token does not.</span></li>
+                <li><span class="n">09</span><span class="t"><b>Word counts are ASCII-only</b>, so multi-byte content under-counts. Cosmetic, and documented.</span></li>
             </ol>
         </div>
     </section>

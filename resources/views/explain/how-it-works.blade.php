@@ -405,13 +405,29 @@
                 <p>An earlier 25-question subset had suggested embeddings only re-ranked results rather than
                     finding more evidence. The full run overturned that. The subset was not merely imprecise,
                     it was misleading, and the correction is documented rather than quietly replaced.</p>
+                <h3>Where it degrades</h3>
+                <p>Averages hide the useful part. LongMemEval tags each question by type, and splitting the
+                    same run by type shows the architecture's tradeoff directly. Questions whose answer sits
+                    in <strong>one place</strong> answer about as well as they retrieve — the
+                    single-session categories reach 0.946 and 0.900. Questions that need facts
+                    <strong>combined across sessions</strong> behave differently:
+                    <code>multi-session</code> retrieves the right material 93% of the time and still
+                    answers correctly only 54% of the time, and <code>temporal-reasoning</code> retrieves at
+                    83% and answers at 47%.</p>
+                <p>That is this design's central bet, measured. Deferring relational reasoning to the reader
+                    works when the answer is in one drawer and weakens sharply when it has to be assembled
+                    from several. A typed relationship graph is the structure that would help, and as
+                    §&hairsp;04 says, Mnemon's holds one generic edge type. If you are evaluating this for
+                    work that spans many sessions, that gap is the number to weigh — the full per-type table
+                    is in the repository.</p>
+
                 <div class="ex-note">
                     <span class="tag">What this does not prove</span>
-                    <p>The benchmark measures <em>whether the right evidence is retrieved</em> from the palace
-                        layer. It is not a test of relational reasoning, of the wiki layer, or of long-horizon
-                        agent behaviour, and it should not be cited as one. The answer-accuracy figure is also
-                        judged by the same model family that produced the answers. Full methodology and three
-                        further caveats ship in the repository.</p>
+                    <p>The benchmark measures retrieval and answering over the <em>palace</em> layer only. It
+                        is not a test of the wiki layer or of long-horizon agent behaviour, and it should not
+                        be cited as one. The answer-accuracy figure is judged by the same model family that
+                        produced the answers. Full methodology and the remaining caveats ship in the
+                        repository.</p>
                 </div>
             </div>
         </div>

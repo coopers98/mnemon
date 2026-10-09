@@ -525,6 +525,72 @@ incorrect. Treat embedded's miss-group figure as thin: n=11, so it's exactly
 2 correct answers, not a stable rate — a Wilson 95% interval on 2/11 is wide
 enough that this cell shouldn't be read to two decimal places.
 
+## Where it degrades: accuracy by question type
+
+The headline pair says embeddings help. It does not say *what kind of question*
+Mnemon answers well, which is the more useful question for anyone deciding
+whether this architecture suits their data. LongMemEval tags every question
+with a type, `evaluate.py` has always aggregated by it, and the figures below
+come from the same full 500-question run — no re-run, no new spend.
+
+Retrieval is `hit_rate@1`. QA accuracy is the pooled two-vote judge figure
+(§7), so both columns are directly comparable to the headline table above.
+
+| Question type | n | retr. keyless | retr. embedded | QA keyless | QA embedded | retr→QA gap |
+|---|---|---|---|---|---|---|
+| single-session-assistant | 56 | 0.804 | **1.000** | 0.875 | **0.946** | −0.054 |
+| single-session-user | 70 | 0.714 | 0.843 | 0.814 | **0.900** | +0.057 |
+| knowledge-update | 78 | 0.897 | 0.962 | 0.705 | 0.744 | −0.218 |
+| **multi-session** | 133 | 0.835 | 0.932 | 0.447 | **0.541** | **−0.391** |
+| **temporal-reasoning** | 133 | 0.662 | 0.827 | 0.406 | **0.466** | **−0.361** |
+| single-session-preference | 30 | 0.233 | **0.633** | 0.133 | 0.183 | −0.450 |
+| **Overall** | **500** | 0.742 | 0.886 | 0.557 | 0.627 | −0.259 |
+
+Three things fall out of this, and the second is the one that matters.
+
+**Embeddings help every category on both axes.** Nothing regresses. The
+aggregate improvement is not an average concealing a category that got worse.
+
+**The system finds evidence it cannot reason over.** Look at the gap column.
+Single-session questions answer about as well as they retrieve —
+`single-session-assistant` retrieves perfectly and answers at 0.946, and
+`single-session-user` answers *better* than `hit_rate@1` because evidence
+further down the ranking still helps. The two categories that require
+combining facts across sessions behave completely differently:
+`multi-session` retrieves at 0.932 and answers at 0.541, and
+`temporal-reasoning` retrieves at 0.827 and answers at 0.466. Retrieval is
+finding the right sessions roughly nine times in ten and the answer is still
+wrong about half the time.
+
+That is the empirical shape of the architecture's central tradeoff. Mnemon
+stores prose and defers relational reasoning to the reader at query time
+(see the `/how-it-works` explainer, §4). This measurement says that bet holds
+when the answer sits in one place and weakens sharply when it has to be
+assembled from several. A typed relationship graph is exactly the structure
+that would help here, and Mnemon's is populated with a single generic edge
+type — so this is the number to watch if that ever changes.
+
+**`single-session-preference` is a separate problem.** It shows the largest
+retrieval gain anywhere (0.233 → 0.633, +0.400) because preference questions
+are phrased semantically and keyword search cannot touch them. QA accuracy
+still only reaches 0.183. Retrieval is no longer the binding constraint for
+this category and something else is. n=30, so treat it as a lead rather than
+a finding.
+
+**Caveats carried forward.** Same three as §7 — the judge is the same model
+family as the reader, this measures the palace layer only, and `retrieval_hit`
+is credited at K=5 while the retrieval column here is `hit_rate@1`, which is
+why QA can exceed retrieval for one category rather than being bounded by it.
+
+To regenerate:
+
+```bash
+python evaluate.py --tag full-keyless   # writes by_type into metrics-full-keyless.json
+python evaluate.py --tag full-embedded
+```
+
+---
+
 ## 8. Cleanup
 
 ```bash

@@ -30,6 +30,12 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   model's choice: the capture hook (plugin 0.3.7) now says so by sending
   `project_filing: "model"`. A wing-restricted token that cannot see `unfiled`
   keeps the model's choice among its own wings. Person filings are unchanged.
+- **A session running in its scratchpad named no project.** A scratchpad
+  (`/tmp/claude-<uid>/<cwd-slug>/<session>/scratchpad`) is not a repository, so
+  final-commit's scratchpad sessions sent nothing. The capture hook (plugin
+  0.3.8) now treats a scratchpad as the directory it belongs to, rebuilding that
+  path from the slug by walking the filesystem, since the slug alone cannot
+  tell `final-commit` from `final/commit`.
 
 ### Changed
 - **Digests use `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`

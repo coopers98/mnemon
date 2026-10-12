@@ -476,11 +476,45 @@ mnemon_session_state_write() {
     printf '%s' "$json" > "$tmp" && mv -f "$tmp" "$f"
 }
 
+# The directory a Claude Code scratchpad belongs to, or nothing for any other
+# directory. Args: <dir>.
+#
+# A session can run in its scratchpad, <tmp>/claude-<uid>/<cwd-slug>/<session>/
+# scratchpad, which is no repository, so it named no project and its drawers
+# went to the wrong wing. The slug is the owning cwd with every character
+# outside [A-Za-z0-9] turned into "-", which cannot be reversed by string
+# alone: final-commit and final/commit slug the same. So the path is rebuilt by
+# walking the filesystem from /, matching each entry's slug.
+mnemon_scratchpad_owner() {
+    [[ "$1" =~ /claude-[0-9]+/(-[A-Za-z0-9-]+)/[0-9a-f-]{36}/scratchpad(/|$) ]] || return 0
+    _mnemon_unslug "" "${BASH_REMATCH[1]#-}" || true
+}
+
+# Args: <path so far> <slug left to match>. Backtracks on a dead end.
+_mnemon_unslug() {
+    local path="$1" rest="$2" entry name
+    [ -n "$rest" ] || { printf '%s' "$path"; return 0; }
+    while IFS= read -r entry; do
+        [ -d "$path/$entry" ] || continue
+        name="${entry//[^A-Za-z0-9]/-}"
+        if [ "$rest" = "$name" ]; then
+            printf '%s' "$path/$entry"
+            return 0
+        fi
+        if [ "${rest#"$name"-}" != "$rest" ]; then
+            _mnemon_unslug "$path/$entry" "${rest#"$name"-}" && return 0
+        fi
+    done < <(ls -A "${path:-/}" 2>/dev/null)
+    return 1
+}
+
 # The repository a working directory belongs to: the origin remote's name, else
-# the checkout's directory name. Echoes nothing outside a git repository.
-# Args: <dir>.
+# the checkout's directory name. A scratchpad counts as the directory it belongs
+# to. Echoes nothing outside a git repository. Args: <dir>.
 mnemon_repo_name() {
-    local dir="$1" top url
+    local dir="$1" top url owner
+    owner=$(mnemon_scratchpad_owner "$dir")
+    [ -n "$owner" ] && dir="$owner"
     [ -n "$dir" ] && [ -d "$dir" ] || return 0
     top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
     [ -n "$top" ] || return 0

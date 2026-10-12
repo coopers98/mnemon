@@ -371,6 +371,33 @@ done
 sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.project // "none"' "$BIG_LOG" 2>/dev/null)
 assert_eq "$sent_project" "widget-repo" "capture: sends the repository name as the project"
 
+# A session can run in its own scratchpad, /tmp/claude-<uid>/<cwd-slug>/<id>/
+# scratchpad, which is not a repository. The slug is the cwd the scratchpad
+# belongs to, with every character outside [A-Za-z0-9] turned into "-" -- here
+# both the dashes of some-dir-name and the dot of mktemp's tmp.XXXX.
+proj_slug=$(printf '%s' "$proj_repo" | sed 's/[^A-Za-z0-9]/-/g')
+scratch="$MNEMON_DIR/tmp/claude-1000/$proj_slug/0b98d350-dd77-46ce-8b07-ccb157830ba5/scratchpad/spike"
+mkdir -p "$scratch"
+: > "$BIG_LOG"
+rm -f "$MNEMON_DIR/sessions/s15.json"
+printf '{"session_id":"s15","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$scratch" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 60); do
+    grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.project // "none"' "$BIG_LOG" 2>/dev/null)
+assert_eq "$sent_project" "widget-repo" "capture: a scratchpad session sends the project its scratchpad belongs to"
+
+# Slugs are ambiguous: final/commit and final-commit both slug to final-commit.
+# A directory that matches first but leads nowhere must not end the search.
+amb="$MNEMON_DIR/amb"
+mkdir -p "$amb/final" "$amb/final-commit"
+amb_slug=$(printf '%s' "$amb/final-commit" | sed 's/[^A-Za-z0-9]/-/g')
+owner=$(bash -c '. "$1/lib/common.sh"; mnemon_scratchpad_owner "$2"' _ "$HOOKS_DIR" \
+    "/tmp/claude-1000/$amb_slug/0b98d350-dd77-46ce-8b07-ccb157830ba5/scratchpad")
+assert_eq "$owner" "$amb/final-commit" "scratchpad owner: backtracks past a directory that matches a prefix"
+
 # Outside a repository there is no project to name, so none is sent, and no
 # project_filing either: the server files project-specific drawers as unfiled.
 plain_dir="$MNEMON_DIR/not-a-repo"

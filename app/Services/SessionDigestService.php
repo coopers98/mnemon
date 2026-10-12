@@ -13,6 +13,11 @@ use Illuminate\Support\Str;
 class SessionDigestService
 {
     /**
+     * Where project-specific drawers go when the session's project is unknown.
+     */
+    public const UNFILED_WING = 'unfiled';
+
+    /**
      * @param  object  $llm  Anything with a `digest(string $transcript, array $context): array` method.
      */
     public function __construct(
@@ -27,6 +32,10 @@ class SessionDigestService
      * @param  string|null  $project  The project the session ran in, as the harness names it
      *                                (its repository). When given, it decides the session's
      *                                project wing; the model no longer guesses it.
+     * @param  string|null  $projectFiling  'model' when the harness leaves the project out on
+     *                                      purpose (a repository spanning many projects), so the
+     *                                      model's wing stands. Otherwise, without a project,
+     *                                      project-specific drawers are filed as unfiled.
      */
     public function run(
         string $sessionId,
@@ -36,6 +45,7 @@ class SessionDigestService
         array $recentDrawerIds,
         ?array $allowedWingPatterns,
         ?string $project = null,
+        ?string $projectFiling = null,
     ): array {
         // A slice already digested is returned as-is rather than digested again.
         // The capture hook can dispatch the same range twice -- two workers
@@ -54,6 +64,9 @@ class SessionDigestService
         $recentDrawers = Drawer::whereIn('id', $recentDrawerIds)->get(['id', 'content']);
         $sessionWingSlug = $project !== null
             ? $this->sessionWingSlug($project, $existingWings, $allowedWingPatterns)
+            : null;
+        $unfiledWingSlug = $project === null && $projectFiling !== 'model'
+            ? $this->unfiledWingSlug($existingWings, $allowedWingPatterns)
             : null;
 
         $proposals = $this->llm->digest($transcript, [
@@ -76,8 +89,13 @@ class SessionDigestService
                 continue;
             }
 
+            $suggestedWing = null;
+
             if ($sessionWingSlug !== null && $this->isProjectFiling($p)) {
-                $p = $this->refileToSessionWing($p, $sessionWingSlug);
+                $p = $this->refileTo($p, $sessionWingSlug, 'project:'.Str::after($sessionWingSlug, 'project-'));
+            } elseif ($unfiledWingSlug !== null && $this->isProjectFiling($p)) {
+                $suggestedWing = $p['wing_slug'] ?? null;
+                $p = $this->refileTo($p, $unfiledWingSlug, self::UNFILED_WING);
             }
 
             if (! empty($p['propose_new_wing'])) {
@@ -135,12 +153,14 @@ class SessionDigestService
                 roomSlug: $roomSlug,
                 content: $p['content'],
                 source: "{$harness}:session_digest",
-                metadata: [
+                metadata: array_filter([
                     'captured_via' => 'session_digest',
                     'harness' => $harness,
                     'session_id' => $sessionId,
                     'confidence' => $p['confidence'],
-                ],
+                    // The model's guess, kept so an unfiled drawer can be moved by hand.
+                    'suggested_wing' => $suggestedWing,
+                ], fn ($v) => $v !== null),
             );
 
             $persisted[] = [
@@ -190,6 +210,32 @@ class SessionDigestService
     }
 
     /**
+     * The wing for project-specific drawers from a session whose project is
+     * unknown, or null to leave the choice to the model.
+     *
+     * A client older than plugin 0.3.6 sends no project, and neither does a
+     * session outside a repository. The model's guess from the transcript put
+     * one device's 3,096 drawers across 24 wings, most of them wrong. A wrong
+     * project wing pollutes that project's recall; an unfiled drawer harms
+     * nothing and keeps the guess as `suggested_wing`. A wing-restricted token
+     * that cannot see the unfiled wing never creates it, and keeps the model's
+     * choice among its own wings.
+     *
+     * @param  array<int, Wing>  $tokenWings
+     * @param  array<string>|null  $patterns
+     */
+    private function unfiledWingSlug(array $tokenWings, ?array $patterns): ?string
+    {
+        if ($patterns === null) {
+            return self::UNFILED_WING;
+        }
+
+        $visible = collect($tokenWings)->contains(fn (Wing $w) => $w->slug === self::UNFILED_WING);
+
+        return $visible ? self::UNFILED_WING : null;
+    }
+
+    /**
      * A proposal filed under a project wing, or under a wing the model made up,
      * belongs to the session's project. Person, decision and other standing
      * wings are cross-project, so the model's choice there stands.
@@ -209,12 +255,9 @@ class SessionDigestService
      * @param  array<string, mixed>  $p
      * @return array<string, mixed>
      */
-    private function refileToSessionWing(array $p, string $wingSlug): array
+    private function refileTo(array $p, string $wingSlug, string $wingName): array
     {
-        $wing = Wing::firstOrCreate(
-            ['slug' => $wingSlug],
-            ['name' => 'project:'.Str::after($wingSlug, 'project-')],
-        );
+        $wing = Wing::firstOrCreate(['slug' => $wingSlug], ['name' => $wingName]);
 
         $room = Wing::slugify((string) ($p['room_slug'] ?? ''));
         $roomExists = $room !== '' && Room::where('wing_id', $wing->id)->where('slug', $room)->exists();

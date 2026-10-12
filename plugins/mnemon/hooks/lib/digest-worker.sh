@@ -8,6 +8,7 @@ turn_start="$2"
 turn_end="$3"
 text_file="$4"
 project="${5:-}"
+filing="${6:-}"
 
 LOCK="$MNEMON_SESSIONS_DIR/${session_id}.digest.lock"
 PENDING="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
@@ -42,8 +43,10 @@ run_once() {
         --rawfile t "$tfile" \
         --argjson r "$recent_ids" \
         --arg p "$project" \
+        --arg f "$filing" \
         '{name:"session_digest",arguments:({session_id:$sid,harness:"claude-code",turn_range:{start:$ts,end:$te},transcript:$t,recent_drawer_ids:$r}
-            + (if $p == "" then {} else {project:$p} end))}')
+            + (if $p == "" then {} else {project:$p} end)
+            + (if $f == "" then {} else {project_filing:$f} end))}')
 
     rm -f "$tfile"
 

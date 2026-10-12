@@ -183,6 +183,24 @@ class SessionDigestToolTest extends TestCase
         $this->assertSame('project-mnemon', $response->json('result.structuredContent.persisted.0.wing'));
     }
 
+    public function test_without_a_project_the_drawer_is_unfiled_unless_filing_is_left_to_the_model(): void
+    {
+        $other = Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $other->id]);
+        $proposal = ['content' => 'a note', 'wing_slug' => 'project-ananke', 'room_slug' => 'notes',
+            'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false];
+        $args = fn (string $sid) => ['session_id' => $sid, 'harness' => 'claude-code',
+            'turn_range' => ['start' => 0, 'end' => 4], 'transcript' => 'worked on something'];
+
+        $this->mockDigestService([$proposal]);
+        $response = $this->mcpCall('session_digest', $args('sess-u'), ['mcp:use']);
+        $this->assertSame('unfiled', $response->json('result.structuredContent.persisted.0.wing'));
+
+        $this->mockDigestService([$proposal]);
+        $response = $this->mcpCall('session_digest', $args('sess-m') + ['project_filing' => 'model'], ['mcp:use']);
+        $this->assertSame('project-ananke', $response->json('result.structuredContent.persisted.0.wing'));
+    }
+
     private function mockDigestService(array $proposals): void
     {
         $this->app->bind(SessionDigestService::class, function ($app) use ($proposals) {

@@ -371,8 +371,8 @@ done
 sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.project // "none"' "$BIG_LOG" 2>/dev/null)
 assert_eq "$sent_project" "widget-repo" "capture: sends the repository name as the project"
 
-# Outside a repository there is no project to name, so none is sent and the
-# server falls back to the model's choice.
+# Outside a repository there is no project to name, so none is sent, and no
+# project_filing either: the server files project-specific drawers as unfiled.
 plain_dir="$MNEMON_DIR/not-a-repo"
 mkdir -p "$plain_dir"
 : > "$BIG_LOG"
@@ -385,6 +385,8 @@ for _ in $(seq 1 60); do
 done
 sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments | if has("project") then "present" else "absent" end' "$BIG_LOG" 2>/dev/null)
 assert_eq "$sent_project" "absent" "capture: outside a repository, no project is sent"
+sent_filing=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments | if has("project_filing") then "present" else "absent" end' "$BIG_LOG" 2>/dev/null)
+assert_eq "$sent_filing" "absent" "capture: outside a repository, no project_filing is sent"
 
 # A repository whose sessions span many projects -- an assistant's workspace --
 # is not one project. Filing all of it under one wing would be worse than the
@@ -402,6 +404,10 @@ for _ in $(seq 1 60); do
 done
 sent_project=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments | if has("project") then "present" else "absent" end' "$BIG_LOG" 2>/dev/null)
 assert_eq "$sent_project" "absent" "capture: a repository in project_ignore sends no project"
+# ...and says the omission is deliberate, so the server keeps the model's wing
+# instead of filing the drawers as unfiled.
+sent_filing=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.project_filing // "none"' "$BIG_LOG" 2>/dev/null)
+assert_eq "$sent_filing" "model" "capture: a repository in project_ignore sends project_filing=model"
 mv "$MNEMON_DIR/config.proj-orig.json" "$MNEMON_DIR/config.json"
 
 # Test 10b: the request body stays under a reverse proxy's default 1MiB limit

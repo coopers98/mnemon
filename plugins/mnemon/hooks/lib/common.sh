@@ -476,18 +476,11 @@ mnemon_session_state_write() {
     printf '%s' "$json" > "$tmp" && mv -f "$tmp" "$f"
 }
 
-# The project a working directory belongs to, named for its repository: the
-# origin remote's name, else the checkout's directory name. Echoes nothing
-# outside a git repository, or for a name listed in config.json's
-# `project_ignore`. Args: <dir>.
-#
-# The server files a session's project-specific drawers under this project's
-# wing. Without it the digest model guessed the wing from the transcript, and
-# most drawers in the busiest wings belonged to other projects. A repository
-# whose sessions span many projects -- an assistant's workspace -- is not one
-# project; list it in `project_ignore` and the model's choice stands for it.
-mnemon_project_name() {
-    local dir="$1" top url name
+# The repository a working directory belongs to: the origin remote's name, else
+# the checkout's directory name. Echoes nothing outside a git repository.
+# Args: <dir>.
+mnemon_repo_name() {
+    local dir="$1" top url
     [ -n "$dir" ] && [ -d "$dir" ] || return 0
     top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
     [ -n "$top" ] || return 0
@@ -495,13 +488,32 @@ mnemon_project_name() {
     if [ -n "$url" ]; then
         url="${url%/}"
         url="${url%.git}"
-        name="${url##*[/:]}"
+        printf '%s' "${url##*[/:]}"
     else
-        name="${top##*/}"
+        printf '%s' "${top##*/}"
     fi
-    if jq -e --arg n "$name" '(.project_ignore // []) | index($n)' "$MNEMON_CONFIG" >/dev/null 2>&1; then
-        return 0
-    fi
+}
+
+# Whether a repository name is listed in config.json's `project_ignore`.
+# Args: <name>.
+mnemon_project_ignored() {
+    [ -n "$1" ] || return 1
+    jq -e --arg n "$1" '(.project_ignore // []) | index($n)' "$MNEMON_CONFIG" >/dev/null 2>&1
+}
+
+# The project a working directory belongs to, named for its repository.
+# Echoes nothing outside a git repository, or for a name listed in
+# config.json's `project_ignore`. Args: <dir>.
+#
+# The server files a session's project-specific drawers under this project's
+# wing. Without it the digest model guessed the wing from the transcript, and
+# most drawers in the busiest wings belonged to other projects. A repository
+# whose sessions span many projects -- an assistant's workspace -- is not one
+# project; list it in `project_ignore` and the model's choice stands for it.
+mnemon_project_name() {
+    local name
+    name=$(mnemon_repo_name "$1")
+    mnemon_project_ignored "$name" && return 0
     printf '%s' "$name"
 }
 

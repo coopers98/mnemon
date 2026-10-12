@@ -65,6 +65,7 @@ class SessionDigestServiceTest extends TestCase
 
     public function test_propose_new_wing_queues_for_review(): void
     {
+        // Only where the model's wing choice stands; otherwise the drawer is unfiled.
         $service = $this->makeServiceWithMockLlm([
             [
                 'content' => 'Atlas project planning notes',
@@ -77,7 +78,7 @@ class SessionDigestServiceTest extends TestCase
             ],
         ]);
 
-        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, projectFiling: 'model');
 
         $this->assertEmpty($result['persisted']);
         $this->assertCount(1, $result['pending_wings']);
@@ -312,8 +313,11 @@ class SessionDigestServiceTest extends TestCase
         $this->assertSame('project-mnemon', $captured->context['session_wing']);
     }
 
-    public function test_without_a_project_the_models_choice_stands(): void
+    public function test_without_a_project_project_drawers_are_unfiled(): void
     {
+        // A client older than 0.3.6 sends no project. The model's guess put one
+        // device's sessions across two dozen wings, so the guess is kept as a
+        // suggestion and the drawer is not filed under someone else's project.
         $ananke = Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
         Room::factory()->create(['slug' => 'notes', 'wing_id' => $ananke->id]);
 
@@ -324,7 +328,88 @@ class SessionDigestServiceTest extends TestCase
 
         $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
 
+        $this->assertSame('unfiled', $result['persisted'][0]['wing']);
+        $this->assertSame('notes', $result['persisted'][0]['room']);
+        $this->assertSame('project-ananke', Drawer::find($result['persisted'][0]['id'])->metadata['suggested_wing']);
+    }
+
+    public function test_without_a_project_a_new_wing_proposal_is_unfiled_not_queued(): void
+    {
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-birddog', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => true, 'propose_new_room' => true],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
+
+        $this->assertSame('unfiled', $result['persisted'][0]['wing']);
+        $this->assertSame(0, WikiPendingWing::count());
+    }
+
+    public function test_without_a_project_person_filings_stand(): void
+    {
+        $person = Wing::factory()->create(['name' => 'person:cooper', 'slug' => 'person-cooper']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $person->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Cooper prefers direct commits to main', 'wing_slug' => 'person-cooper',
+                'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null);
+
+        $this->assertSame('person-cooper', $result['persisted'][0]['wing']);
+        $this->assertFalse(Wing::where('slug', 'unfiled')->exists());
+    }
+
+    public function test_project_filing_model_keeps_the_models_choice(): void
+    {
+        // A repository in project_ignore spans many projects; there the guess is wanted.
+        $ananke = Wing::factory()->create(['name' => 'project:ananke', 'slug' => 'project-ananke']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $ananke->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-ananke', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, projectFiling: 'model');
+
         $this->assertSame('project-ananke', $result['persisted'][0]['wing']);
+        $this->assertArrayNotHasKey('suggested_wing', Drawer::find($result['persisted'][0]['id'])->metadata);
+    }
+
+    public function test_restricted_token_without_the_unfiled_wing_keeps_the_models_choice(): void
+    {
+        $mnemon = Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $mnemon->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-mnemon', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], ['project-*']);
+
+        $this->assertSame('project-mnemon', $result['persisted'][0]['wing']);
+        $this->assertFalse(Wing::where('slug', 'unfiled')->exists());
+    }
+
+    public function test_restricted_token_that_can_see_unfiled_uses_it(): void
+    {
+        Wing::factory()->create(['name' => 'unfiled', 'slug' => 'unfiled']);
+        $mnemon = Wing::factory()->create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $mnemon->id]);
+
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'note', 'wing_slug' => 'project-mnemon', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], ['project-*', 'unfiled']);
+
+        $this->assertSame('unfiled', $result['persisted'][0]['wing']);
     }
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService

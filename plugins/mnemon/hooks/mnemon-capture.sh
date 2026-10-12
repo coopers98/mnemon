@@ -129,8 +129,17 @@ printf '%s' "$text" > "$text_tmp"
 
 project=$(mnemon_project_name "$cwd")
 
+# With no project, the server files project-specific drawers as unfiled rather
+# than trust the model's guess -- unless the repository is in project_ignore,
+# where the guess is wanted. Say which, so the server can tell the two apart
+# from a client too old to send a project at all.
+filing=""
+if [ -z "$project" ] && mnemon_project_ignored "$(mnemon_repo_name "$cwd")"; then
+    filing="model"
+fi
+
 # Detach.
-nohup "$worker" "$session_id" "$last_turn" "$turn_index" "$text_tmp" "$project" \
+nohup "$worker" "$session_id" "$last_turn" "$turn_index" "$text_tmp" "$project" "$filing" \
     >>"$MNEMON_ERROR_LOG" 2>&1 < /dev/null &
 disown 2>/dev/null || true
 

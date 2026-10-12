@@ -43,6 +43,7 @@ class SessionDigestTool extends Tool
             'recent_drawer_ids.*' => 'integer',
             'auto_persist' => 'boolean',
             'project' => 'nullable|string|max:100',
+            'project_filing' => 'nullable|string|in:model',
         ]);
 
         $cleaned = $this->sanitizer->sanitize($params['transcript']);
@@ -55,6 +56,7 @@ class SessionDigestTool extends Tool
             recentDrawerIds: $params['recent_drawer_ids'] ?? [],
             allowedWingPatterns: $this->wingPatternsFor($request),
             project: $params['project'] ?? null,
+            projectFiling: $params['project_filing'] ?? null,
         );
 
         BrainSessionLogger::log($request, 'session_digest', [
@@ -62,6 +64,7 @@ class SessionDigestTool extends Tool
             'harness' => $params['harness'],
             'turn_range' => $params['turn_range'],
             'project' => $params['project'] ?? null,
+            'project_filing' => $params['project_filing'] ?? null,
         ], count($result['persisted']));
 
         return Response::structured($result);
@@ -76,7 +79,8 @@ class SessionDigestTool extends Tool
             'transcript' => $s->string()->required()->description('Sanitized transcript slice (turns since last digest).'),
             'recent_drawer_ids' => $s->array()->description('Drawer IDs already captured this session, for dedup.'),
             'auto_persist' => $s->boolean()->description('When false, returns proposals without writing. Default true.'),
-            'project' => $s->string()->description('The project the session ran in (e.g. its repository name). Project-specific drawers are filed in that project\'s wing, matched by slug or alias; an unrestricted token creates the wing if it does not exist.'),
+            'project' => $s->string()->description('The project the session ran in (e.g. its repository name). Project-specific drawers are filed in that project\'s wing, matched by slug or alias; an unrestricted token creates the wing if it does not exist. Without a project, project-specific drawers go to the `unfiled` wing.'),
+            'project_filing' => $s->string()->enum(['model'])->description('Send "model" when the project is left out on purpose (a repository spanning many projects): the model then picks the wing instead of `unfiled`.'),
         ];
     }
 }

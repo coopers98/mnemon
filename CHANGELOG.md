@@ -21,6 +21,15 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   by slug or by the wing's new **aliases**, creating the wing if the token is
   unrestricted. Person and other cross-project filings are unchanged. A repository that spans
   many projects can be excluded with `project_ignore` in `~/.mnemon/config.json`.
+- **A client that sent no project still had its drawers guessed into project
+  wings.** A device on plugin 0.3.4 sent no `project` for five weeks, and the
+  model spread its 3,096 drawers across 24 wings, most of them wrong. Without a
+  project, project-specific drawers now go to an **`unfiled`** wing, with the
+  model's guess kept as `suggested_wing` in the drawer's metadata, rather than
+  into another project's wing. A repository in `project_ignore` still wants the
+  model's choice: the capture hook (plugin 0.3.7) now says so by sending
+  `project_filing: "model"`. A wing-restricted token that cannot see `unfiled`
+  keeps the model's choice among its own wings. Person filings are unchanged.
 
 ### Changed
 - **Digests use `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`

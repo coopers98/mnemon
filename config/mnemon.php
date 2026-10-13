@@ -101,4 +101,17 @@ return [
         // timeout. Raise it if digests of long sessions still time out.
         'timeout' => env('MNEMON_DIGEST_TIMEOUT', 60),
     ],
+    // The public, read-only demo (trymnemon.com). Off unless MNEMON_DEMO=true.
+    // See docs/design/2026-10-13-public-demo-design.md.
+    'demo' => [
+        'enabled' => (bool) env('MNEMON_DEMO', false),
+        // The one hostname the demo answers to; any other Host gets a 404.
+        'host' => env('MNEMON_DEMO_HOST'),
+        // Requests per minute per client (per IPv4 address, per IPv6 /64).
+        'rate_limit' => (int) env('MNEMON_DEMO_RATE_LIMIT', 120),
+        // Set on a real install to link its pages to the public demo.
+        'url' => env('MNEMON_DEMO_URL'),
+        // Where DemoSeeder reads the synthetic brain from.
+        'fixtures' => database_path('demo'),
+    ],
 ];

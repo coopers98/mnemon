@@ -24,7 +24,7 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
 // Authenticated routes
-Route::middleware('auth')->group(function () {
+Route::middleware('auth.unless-demo')->group(function () {
     // Wiki
     Route::get('/wiki', [WikiController::class, 'index'])->name('wiki.index');
     Route::get('/wiki/search', [WikiController::class, 'search'])->name('wiki.search');

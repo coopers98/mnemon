@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Middleware\AuthenticateUnlessDemo;
 use App\Http\Middleware\CaptureConsentWings;
+use App\Http\Middleware\DemoMode;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -16,6 +18,14 @@ return Application::configure(basePath: dirname(__DIR__))
         // Capture OAuth consent wing data before the approve controller runs.
         $middleware->web(append: [
             CaptureConsentWings::class,
+        ]);
+
+        // The public demo's gate. Appended so it runs after TrustProxies and
+        // sees the real client IP; global, so it runs before routing.
+        $middleware->append(DemoMode::class);
+
+        $middleware->alias([
+            'auth.unless-demo' => AuthenticateUnlessDemo::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

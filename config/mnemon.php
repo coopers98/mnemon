@@ -84,7 +84,7 @@ return [
     // a specific model rather than a "latest" alias, so behaviour changes only
     // when the config does.
     'llm' => [
-        'model' => env('MNEMON_LLM_MODEL', 'gpt-5.4-mini'),
+        'model' => env('MNEMON_LLM_MODEL', 'gpt-5.6-luna'),
     ],
 
     'digest' => [

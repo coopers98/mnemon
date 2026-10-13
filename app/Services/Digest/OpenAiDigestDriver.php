@@ -17,7 +17,7 @@ class OpenAiDigestDriver
             return [];
         }
 
-        $model = config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.4-mini');
+        $model = config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.6-luna');
 
         // The session's project is known from where it ran; say so, so the
         // model writes for that project. The service enforces the filing.

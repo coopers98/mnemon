@@ -134,10 +134,12 @@ class SessionDigestService
             $roomSlug = $p['room_slug'] ?? 'notes';
             $existingRoom = Room::where('slug', $roomSlug)->where('wing_id', $wing->id)->first();
 
-            if (! $existingRoom) {
-                if (empty($p['propose_new_room'])) {
-                    continue;
-                }
+            if (! $existingRoom && empty($p['propose_new_room'])) {
+                // The model named a room the wing lacks without proposing it.
+                // Skipping it silently dropped the drawer; the wing is right,
+                // so keep the drawer and file it where any wing files by default.
+                $roomSlug = 'notes';
+            } elseif (! $existingRoom) {
                 // Pre-create the room with metadata so DrawerWriteService::createDrawer
                 // finds it via firstOrCreate without overwriting the metadata flag.
                 Room::create([

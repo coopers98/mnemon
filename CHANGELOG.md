@@ -10,6 +10,10 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 ## Unreleased
 
 ### Fixed
+- **A drawer naming a room its wing lacks was dropped.** When the digest model
+  picked an existing wing but a room that did not exist, without proposing it,
+  the drawer was skipped without a trace. It is now filed in the wing's
+  `notes` room.
 - **Captured sessions were filed under the wrong project.** `session_digest`
   received only the transcript, so the digest model guessed the wing — and a
   wiki compile on 2026-10-06 found most new drawers in the busiest wings
@@ -38,7 +42,11 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   tell `final-commit` from `final/commit`.
 
 ### Changed
-- **Digests use `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`
+- **Digests use `gpt-5.6-luna`** by default. On six real transcript slices it
+  wrote denser, self-contained drawers than `gpt-5.4-mini`, returned nothing for
+  a cron run that 5.4-mini filed two drawers from, and cost about a quarter as
+  much per digest, at 2–3× the latency (digests run detached).
+- **Digests used `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`
   setting names the chat model Mnemon's LLM work runs on, so the wiki compiler
   will share it; `MNEMON_DIGEST_OPENAI_MODEL` still overrides it for digests.
 

@@ -108,6 +108,26 @@ class SessionDigestServiceTest extends TestCase
         $this->assertTrue($room->metadata['auto_created'] ?? false);
     }
 
+    public function test_unknown_room_without_a_proposal_falls_back_to_notes(): void
+    {
+        // A model naming a room the wing lacks, without proposing it, used to
+        // have the drawer silently dropped.
+        $cooper = Wing::factory()->create(['slug' => 'person-cooper']);
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'Cooper prefers ASCII-only GitHub bios', 'wing_slug' => 'person-cooper',
+                'room_slug' => 'preferences', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], null, projectFiling: 'model');
+
+        $this->assertCount(1, $result['persisted']);
+        $drawer = Drawer::find($result['persisted'][0]['id']);
+        $this->assertSame('notes', $drawer->room->slug);
+        $this->assertSame($cooper->id, $drawer->room->wing_id);
+        $this->assertFalse(Room::where('wing_id', $cooper->id)->where('slug', 'preferences')->exists());
+    }
+
     public function test_llm_context_includes_recent_drawers_existing_wings_and_turn_range(): void
     {
         // Seed environment so context fields are non-empty.

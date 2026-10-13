@@ -535,6 +535,18 @@ mnemon_project_ignored() {
     jq -e --arg n "$1" '(.project_ignore // []) | index($n)' "$MNEMON_CONFIG" >/dev/null 2>&1
 }
 
+# Whether a repository name is listed in config.json's `capture_ignore`.
+# Args: <name>.
+#
+# A repository whose sessions are mostly machine-driven -- an assistant's
+# workspace answering a heartbeat every 20 minutes -- digests the same
+# checklist into near-identical drawers each time. Listing it here stops
+# capture for it outright; recall still runs.
+mnemon_capture_ignored() {
+    [ -n "$1" ] || return 1
+    jq -e --arg n "$1" '(.capture_ignore // []) | index($n)' "$MNEMON_CONFIG" >/dev/null 2>&1
+}
+
 # The project a working directory belongs to, named for its repository.
 # Echoes nothing outside a git repository, or for a name listed in
 # config.json's `project_ignore`. Args: <dir>.

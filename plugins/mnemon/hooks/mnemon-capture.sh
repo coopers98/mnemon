@@ -15,6 +15,7 @@ transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 
 [ -z "$session_id" ] && exit 0
+mnemon_capture_ignored "$(mnemon_repo_name "$cwd")" && exit 0
 
 # Claude Code's Stop payload carries `transcript_path` -- a path to the session
 # JSONL -- and neither an inline transcript nor a turn index. Reading a

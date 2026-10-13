@@ -437,6 +437,20 @@ sent_filing=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].param
 assert_eq "$sent_filing" "model" "capture: a repository in project_ignore sends project_filing=model"
 mv "$MNEMON_DIR/config.proj-orig.json" "$MNEMON_DIR/config.json"
 
+# A repository in capture_ignore is not digested at all: an assistant's
+# workspace answering a heartbeat filed the same checklist every 20 minutes.
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.cap-orig.json"
+jq '.capture_ignore=["widget-repo"]' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$BIG_LOG"
+rm -f "$MNEMON_DIR/sessions/s15.json"
+printf '{"session_id":"s15","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$proj_repo" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+sleep 2
+digests=$(grep -c 'session_digest' "$BIG_LOG" 2>/dev/null)
+assert_eq "${digests:-0}" "0" "capture: a repository in capture_ignore is not digested"
+mv "$MNEMON_DIR/config.cap-orig.json" "$MNEMON_DIR/config.json"
+
 # Test 10b: the request body stays under a reverse proxy's default 1MiB limit
 # even for a huge first digest. A 413 comes back as an HTML page, which the
 # caller feeds to jq -- surfacing as "Invalid numeric literal", not as a size

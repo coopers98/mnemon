@@ -43,6 +43,10 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   will share it; `MNEMON_DIGEST_OPENAI_MODEL` still overrides it for digests.
 
 ### Added
+- **`capture_ignore`** in `~/.mnemon/config.json` stops capture for the
+  repositories it names; recall still runs. An assistant's workspace answering
+  a heartbeat every 20 minutes had digested the same checklist into 518 drawers
+  in `project-mnemon`, ~400 of them near-identical. Plugin 0.3.9.
 - CI, license and stack badges at the top of the README.
 - `.gitleaksignore` covering the synthetic credentials in `ContentSanitizer`'s
   own tests, so a public clone does not report ten findings that all resolve to

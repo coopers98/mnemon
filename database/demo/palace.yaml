@@ -1,0 +1,973 @@
+# The public demo's palace: a fictional solo developer, Rowan Vale, and three
+# small products. Loaded by Database\Seeders\DemoSeeder. Every name, figure and
+# event here is invented. days_ago is counted back from the moment of seeding.
+
+wings:
+  - slug: person-rowan
+    name: "person:rowan"
+    description: Rowan Vale, a solo developer who ships small products from a cabin.
+    rooms:
+      - slug: preferences
+        name: Preferences
+        drawers:
+          - key: rowan-commit-style
+            days_ago: 93
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Commit messages: lower case, imperative, one line, no scope prefixes
+              ("fix tide import retry", not "fix(import): Fix retry logic"). The why goes in
+              the code comment, not the commit.
+          - key: rowan-boring-tech
+            days_ago: 89
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.93}
+            content: >
+              Rowan wants boring technology by default: Postgres or SQLite, server-rendered
+              pages, cron, systemd. A new tool has to replace something, not sit beside it.
+              Pushed back on adding Redis for Ledgerline's queue; the database queue handles
+              ~300 jobs a day.
+          - key: rowan-one-vps
+            days_ago: 87
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.95}
+            content: >
+              Everything runs on one VPS: 4 vCPU, 8 GB RAM, $24/month. Caddy in front,
+              each product a systemd service with its own Unix user. If a product needs a
+              second machine, that is a signal to simplify it first.
+          - key: rowan-no-docker
+            days_ago: 79
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.82}
+            content: >
+              No Docker in production. Rowan finds systemd units easier to read at 6 a.m.
+              than a compose file, and the VPS only runs three apps. Docker is fine for
+              throwaway local databases.
+          - key: rowan-tests
+            days_ago: 68
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              Testing rule of thumb: anything that touches money, time zones or dates gets a
+              test before it ships. UI gets clicked through by hand. Rowan asked not to add
+              browser tests to Ledgerline.
+          - key: rowan-morning-hours
+            days_ago: 47
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Deep work 06:00–11:00, no calls before noon. Customer email gets answered once,
+              after lunch.
+          - key: rowan-error-messages
+            days_ago: 14
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.71}
+            content: >
+              Rowan rewrote three of Ledgerline's validation messages and asked that new ones
+              follow the same rule: say what to do next, not what went wrong. "Add a due date
+              to send this invoice" instead of "due_date is required".
+      - slug: notes
+        name: Notes
+        drawers:
+          - key: rowan-cabin-internet
+            days_ago: 85
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              The cabin's satellite link has ~600 ms latency and drops for minutes at a time
+              in heavy rain. Deploys are one rsync plus a restart so a dropped connection
+              cannot leave a half-built release. It is also the reason Tidepool is
+              offline-first: Rowan tests it on the worst network available every day.
+          - key: rowan-budget
+            days_ago: 71
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Hosting budget across all products: $60/month. Currently $24 VPS + $4 object
+              storage + $3 for the transactional mail sender. Domains are paid yearly and
+              not counted.
+          - key: rowan-tomas-ops
+            days_ago: 64
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              Tomás Ferreira covers operations when Rowan is off-grid paddling. He has his own
+              sudo account on the VPS, receives the uptime alerts, and has a one-page runbook
+              (restart a service, roll back a deploy, restore a database). He asked for the
+              runbook to stay under one page.
+          - key: rowan-paddle-season
+            days_ago: 43
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Paddling season: no deploys on Fridays or the day before a trip. Tomás gets a
+              message with the trip dates and the last deploy's commit.
+          - key: rowan-weekly-review
+            days_ago: 36
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.77}
+            content: >
+              Sunday review, about 30 minutes: Ledgerline MRR and churn, errors from the
+              week's log digest, Tidepool active testers, Quarry issues. Ends by picking one
+              thing to stop doing.
+          - key: rowan-focus-decision
+            days_ago: 29
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.92}
+            content: >
+              Decided Ledgerline gets three days a week, since it is the only product that
+              pays. Tidepool gets one day until v1.0, Quarry gets whatever is left. Revisit
+              after Tidepool ships.
+          - key: rowan-launch-reflection
+            days_ago: 19
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.68}
+            content: >
+              Rowan noted that Quarry's forum post brought more users in a day than Tidepool's
+              two months of polished beta, and that the posts with a one-line install and a
+              GIF did best. Wants to post Tidepool earlier than planned.
+
+  - slug: project-tidepool
+    name: "project:tidepool"
+    description: Offline-first tide charts for sea kayakers.
+    rooms:
+      - slug: decisions
+        name: Decisions
+        drawers:
+          - key: tp-server-side-predictions
+            days_ago: 88
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.89}
+            content: >
+              Tide predictions are computed on the server and shipped as per-station JSON
+              (~40 KB for 14 days). Doing the harmonic maths in the browser would have added
+              180 KB of JavaScript and drained phones on long trips.
+          - key: tp-read-only-api
+            days_ago: 66
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              The API opens tides.sqlite read-only (mode=ro plus PRAGMA query_only). Only the
+              nightly import holds a write connection, and WAL mode keeps reads unblocked while
+              it runs.
+          - key: tp-precache-14-days
+            days_ago: 63
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.94}
+            content: >
+              The service worker now precaches 14 days of tides for every starred station,
+              up from 7. Two testers ran out of tides on a nine-day trip. Cost is about 40 KB
+              per station.
+          - key: tp-no-accounts-v1
+            days_ago: 57
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.87}
+            content: >
+              No user accounts in v1. Starred stations and settings live in IndexedDB on the
+              device. Accounts would mean passwords, email and concurrent writes for a feature
+              nobody has asked for yet.
+          - key: tp-chart-canvas
+            days_ago: 55
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.83}
+            content: >
+              Moved the tide chart from SVG to canvas. Scrubbing the 14-day chart went from
+              about 9 fps to 30+ fps on the oldest Android test phone. Lost free text
+              selection on labels, which nobody used.
+          - key: tp-sw-versioning
+            days_ago: 38
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.85}
+            content: >
+              Service worker version is now the build hash. A new worker waits until the
+              user taps "Update" in the toast; no more skipWaiting on install, which had
+              swapped assets under an open chart.
+          - key: tp-currents-declined
+            days_ago: 27
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.79}
+            content: >
+              Not adding tidal currents for v1. Current predictions come from a different
+              dataset with its own station IDs, and matching them would take weeks. Parked in
+              the v1.x list.
+          - key: tp-units-pref
+            days_ago: 5
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.72}
+            content: >
+              Added a feet/metres toggle. The default comes from navigator.language, so US
+              locales get feet. Three testers had asked.
+      - slug: bugs
+        name: Bugs
+        drawers:
+          - key: tp-idb-quota
+            days_ago: 60
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              QuotaExceededError in Firefox for Android when a tester starred 40 stations: the
+              precache plus chart fonts went past the origin's quota. Capped starred stations
+              at 12 and show a message at the limit.
+          - key: tp-dst-bug
+            days_ago: 48
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.92}
+            content: >
+              High and low tide times were an hour off for the week after the clocks changed.
+              The import stored local station times. Now everything is stored as UTC and
+              formatted with the station's IANA zone at render time.
+          - key: tp-sw-stale-tides
+            days_ago: 41
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.91}
+            content: >
+              Tide tables went stale for a week after the v0.9 release: the service worker
+              cached /api/tides with cache-first and no max-age. Switched that route to
+              stale-while-revalidate with a 6-hour ceiling; the app shell stays cache-first.
+          - key: tp-chart-label-overlap
+            days_ago: 31
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.66}
+            content: >
+              High/low labels overlapped at estuary stations with two lows under three hours
+              apart. Labels now nudge vertically when they would collide.
+          - key: tp-station-search-diacritics
+            days_ago: 23
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.7}
+            content: >
+              Station search missed names with accents when typed without them. Names and
+              queries are now NFD-normalised with combining marks stripped before matching.
+          - key: tp-import-timeout
+            days_ago: 20
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              The nightly import failed silently on two nights: the upstream download hung and
+              cron had nowhere to send output. Added a 10-minute timeout and a healthcheck
+              ping at the end; Tomás gets alerted if no ping arrives by 04:00.
+          - key: tp-ios-install-prompt
+            days_ago: 12
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.74}
+            content: >
+              iOS Safari never fires beforeinstallprompt, so the "Install" button did nothing
+              for half the beta testers. Replaced it on iOS with a two-line Share → Add to Home
+              Screen hint.
+          - key: tp-safari-storage-eviction
+            days_ago: 7
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.81}
+            content: >
+              A tester opened Tidepool on a beach with no signal and found no cached tides.
+              Safari clears script-written storage for sites not used in seven days unless
+              the app is installed to the home screen. The install hint now explains this.
+      - slug: notes
+        name: Notes
+        drawers:
+          - key: tp-origin
+            days_ago: 95
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.84}
+            content: >
+              Tidepool started after Rowan misread a printed tide table before a crossing.
+              The goal: tide charts that work with no signal, open in under a second, and
+              need no account.
+          - key: tp-station-source
+            days_ago: 91
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.78}
+            content: >
+              Predictions are generated from the hydrographic office's published harmonic
+              constants (one CSV per region, updated yearly). Reference stations only; the
+              secondary-station offsets are a later problem.
+          - key: tp-postgres-cost
+            days_ago: 82
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              The managed Postgres instance for Tidepool costs $38/month, more than the $24
+              VPS that runs all three products. Its CPU graph is flat except for the 03:10
+              import.
+          - key: tp-tide-import-size
+            days_ago: 72
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.93}
+            content: >
+              After the move to SQLite: the full dataset is 380 MB for 3,100 stations and grows
+              by about 2 MB a month. The nightly import at 03:10 takes about six minutes.
+          - key: tp-backup-litestream
+            days_ago: 70
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              Litestream now replicates tides.sqlite to object storage with a 10-second sync
+              interval and 7 days of snapshots. Runs as its own systemd unit next to the API.
+          - key: tp-v08-release
+            days_ago: 52
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.8}
+            content: >
+              v0.8 to 25 testers: canvas chart, 14-day precache, station search. Tagged and
+              deployed in one sitting; no issues reported in the first two days.
+          - key: tp-v09-release
+            days_ago: 45
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.87}
+            content: >
+              v0.9 went to 60 beta testers, mostly from two kayak club mailing lists. Adds
+              the DST fix and sunrise/sunset shading on the chart.
+          - key: tp-offline-indicator
+            days_ago: 34
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.76}
+            content: >
+              Replaced the green/grey online dot with "Tides synced 2 days ago". In feedback,
+              testers trusted the text more than the dot.
+          - key: tp-beta-feedback
+            days_ago: 30
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.83}
+            content: >
+              Beta check-in: 23 of 60 testers open Tidepool weekly. Most requested features:
+              tidal currents (11), feet/metres (3), dark chart for night launches (2).
+          - key: tp-moon-phase
+            days_ago: 24
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.62}
+            content: >
+              Added a moon phase glyph to each day header. About 40 lines; computed client-side.
+          - key: tp-lighthouse
+            days_ago: 16
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.69}
+            content: >
+              Lighthouse on the station page: PWA checks all pass, performance 94 after
+              preloading the one webfont and deferring the chart script.
+          - key: tp-restore-drill
+            days_ago: 9
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.95}
+            content: >
+              Restore drill: litestream restore onto a scratch VPS took 48 seconds. Row counts
+              matched production for all 3,100 stations. Deleted the scratch box afterwards.
+          - key: tp-v1-plan
+            days_ago: 3
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              v1.0 scope frozen: no accounts, no currents, reference stations only. Remaining:
+              install hint copy, maskable icon, a landing page. Target is the end of the month.
+          - key: tp-icon
+            days_ago: 2
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.64}
+            content: >
+              Regenerated the maskable icon with more padding; Android's circle mask was
+              clipping the wave.
+
+  - slug: project-ledgerline
+    name: "project:ledgerline"
+    description: Invoicing for freelancers, billed through Stripe.
+    rooms:
+      - slug: decisions
+        name: Decisions
+        drawers:
+          - key: ll-integer-cents
+            days_ago: 84
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.94}
+            content: >
+              All money columns are integer minor units (amount_cents) with a currency code
+              beside them. The last decimal column, invoices.discount, was migrated today.
+          - key: ll-pdf-renderer
+            days_ago: 86
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              Invoice PDFs moved from headless Chromium to a pure-PHP renderer. Chromium used
+              ~400 MB per render on the shared VPS; the new one renders in 0.3 s. It has no CSS
+              grid, so Priya is redoing the template with tables.
+          - key: ll-multicurrency
+            days_ago: 74
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              Invoices now carry their own currency (EUR, GBP, USD, CAD, AUD). No conversion:
+              reports group totals per currency instead of pretending to know the rate.
+          - key: ll-reminder-emails
+            days_ago: 55
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.87}
+            content: >
+              Overdue reminders go out 3, 10 and 21 days after the due date, then stop. Each of
+              a customer's clients can be opted out from the client page.
+          - key: ll-late-fees-declined
+            days_ago: 35
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.78}
+            content: >
+              Not building automatic late fees. The rules differ by country and contract, and
+              getting it wrong is the customer's legal problem. A manual "add fee" line item
+              covers the two people who asked.
+          - key: ll-annual-plan
+            days_ago: 22
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.91}
+            content: >
+              Annual plans at 10× the monthly price ($120 Solo, $290 Studio), switchable in the
+              billing portal. Three customers switched the same day.
+      - slug: bugs
+        name: Bugs
+        drawers:
+          - key: ll-tax-rounding
+            days_ago: 80
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.92}
+            content: >
+              Invoice totals were a cent off the sum of the lines on some VAT invoices: tax was
+              rounded once on the total. It is now rounded per line, which is what the
+              customer's accountant expected, and a test pins the 7-line case that broke.
+          - key: ll-stripe-webhook-dup
+            days_ago: 70
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.93}
+            content: >
+              Stripe delivered invoice.paid twice for one renewal and the customer got two
+              receipts. Webhook handling is now idempotent on the event id (processed_webhooks
+              table, unique index).
+          - key: ll-pdf-page-break
+            days_ago: 64
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.67}
+            content: >
+              Long invoices split a line item across two PDF pages. Added
+              page-break-inside: avoid on rows and repeated the table header on each page.
+          - key: ll-reminder-timezone
+            days_ago: 52
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.85}
+            content: >
+              Reminder emails reached Australian customers' clients at 3 a.m. The scheduler
+              ran at 09:00 UTC for everyone; it now runs hourly and sends at 09:00 in the
+              customer's own timezone.
+          - key: ll-sca-failure
+            days_ago: 45
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.84}
+            content: >
+              Four renewals failed with authentication_required for EU cards. The emails that
+              ask the cardholder to confirm the payment were switched off in Stripe settings.
+              Turned them on; three of the four paid within a day.
+          - key: ll-csv-encoding
+            days_ago: 46
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.73}
+            content: >
+              The new CSV export showed "Ã©" for "é" when opened in Excel. Added a UTF-8 byte
+              order mark to the file; other spreadsheet apps ignore it.
+          - key: ll-invoice-number-gap
+            days_ago: 28
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.91}
+            content: >
+              Deleting a draft left a gap in invoice numbers, and a customer's accountant in
+              Portugal flagged it: numbers there must be sequential. Numbers are now assigned
+              when an invoice is sent, not when the draft is created.
+          - key: ll-editor-autosave
+            days_ago: 13
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.89}
+            content: >
+              Autosave raced with Send: an invoice went out with the line items from before the
+              last edit. Send now waits for the pending save, then re-reads the invoice from
+              the database before rendering.
+      - slug: customers
+        name: Customers
+        drawers:
+          - key: ll-customers-count
+            days_ago: 95
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              34 paying customers: 26 on Solo ($12/month) and 8 on Studio ($29/month). MRR
+              $544. Nearly all came from one post in a freelancers' forum two years ago.
+          - key: ll-customer-multi-currency
+            days_ago: 77
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Sixth request for invoices in a currency other than the account's. This one is a
+              translator who bills clients in both EUR and GBP.
+          - key: ll-churn-note
+            days_ago: 58
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.75}
+            content: >
+              Two cancellations this month, both with the reason "not invoicing enough to
+              justify it". Neither had sent an invoice in the previous 60 days.
+          - key: ll-customer-csv-export
+            days_ago: 49
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.8}
+            content: >
+              A Studio customer's accountant wants a CSV of all invoices per tax year. Built an
+              export (date, number, client, net, tax, gross, currency, status); took an
+              afternoon.
+          - key: ll-customer-support-load
+            days_ago: 40
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.7}
+            content: >
+              Support averages four emails a week. Half are "where do I put my client's VAT
+              number"; moved that field from settings onto the client form.
+          - key: ll-late-fee-request
+            days_ago: 36
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.74}
+            content: >
+              Second customer this month asking for automatic late fees on overdue invoices.
+          - key: ll-customers-41
+            days_ago: 25
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.92}
+            content: >
+              41 paying customers: 30 Solo, 11 Studio, MRR $679. Up from 34 ten weeks ago,
+              after two cancellations along the way.
+          - key: ll-dark-mode-request
+            days_ago: 15
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Customer asked for dark mode. Told them it is on the list after the invoice
+              editor rework.
+          - key: ll-customer-quote-feature
+            days_ago: 6
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.83}
+            content: >
+              Fifth request for quotes (estimates that convert to invoices). Rowan wants it
+              next quarter, built on the new editor rather than the current one.
+      - slug: notes
+        name: Notes
+        drawers:
+          - key: ll-stack
+            days_ago: 94
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              Ledgerline is a Laravel monolith with server-rendered pages and Postgres 15,
+              both on the shared VPS. Stripe handles subscriptions; the app never sees card
+              numbers.
+          - key: ll-priya-contract
+            days_ago: 92
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              Priya Nair starts as Ledgerline's contract designer, about 10 hours a week. First
+              job: the invoice PDF template. She invoices Rowan through Ledgerline itself.
+          - key: ll-priya-invoice-redesign
+            days_ago: 66
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.82}
+            content: >
+              Priya's invoice template shipped: amount due and due date at top right, line
+              items as a plain table, payment details in a box at the bottom. Three customers
+              wrote in to say they liked it; there is no data on whether clients pay faster.
+          - key: ll-portal-cancellation
+            days_ago: 61
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.85}
+            content: >
+              Billing portal is live. Cancellations take effect at period end; the app learns
+              about them from customer.subscription.updated (cancel_at_period_end) and shows a
+              banner until the period runs out.
+          - key: ll-priya-hours
+            days_ago: 42
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.65}
+            content: >
+              Priya moves from 10 to 6 hours a week now that the template and onboarding are
+              done.
+          - key: ll-onboarding-redesign
+            days_ago: 39
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              Priya's onboarding went live: five steps down to two (business details, first
+              client), with the first invoice prefilled. Trial-to-paid was 5 of 30 in the
+              month before; check again in a month.
+          - key: ll-pg-upgrade
+            days_ago: 31
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.79}
+            content: >
+              Upgraded Postgres 15 to 16 with pg_upgrade --link at 05:00. Four minutes of
+              downtime behind the maintenance page; ran ANALYZE afterwards.
+          - key: ll-dunning-emails
+            days_ago: 18
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.8}
+            content: >
+              Of six failed renewals in the last 30 days, Stripe's retries plus the
+              portal's update-card link recovered four. The other two were cancellations.
+          - key: ll-priya-editor-mockups
+            days_ago: 10
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.84}
+            content: >
+              Priya delivered mockups for the invoice editor rework: line items as editable
+              rows with inline totals, the client picker moved to the top, a sticky Send bar.
+              Trial-to-paid since her onboarding went live: 9 of 31.
+          - key: ll-backup-check
+            days_ago: 4
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.77}
+            content: >
+              Monthly check: restored last night's pg_dump (212 MB) into a scratch database in
+              three minutes; invoice and customer counts matched.
+          - key: ll-editor-start
+            days_ago: 1
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.81}
+            content: >
+              Started the invoice editor rework from Priya's mockups on branch editor-v2.
+              First step: line items get their own save endpoint, so autosave stops rewriting
+              the whole invoice.
+
+  - slug: project-quarry
+    name: "project:quarry"
+    description: A Rust CLI that searches your shell history.
+    rooms:
+      - slug: notes
+        name: Notes
+        drawers:
+          - key: qy-origin
+            days_ago: 94
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.83}
+            content: >
+              Quarry exists because Ctrl-R cannot answer "what was that rsync I ran in this
+              directory last month?". Goal: search history by text, directory, date and exit
+              code, from one small binary.
+          - key: qy-parse-zsh
+            days_ago: 90
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              zsh extended history lines look like ": 1712345678:0;cargo build". Multi-line
+              commands continue with a trailing backslash, so the parser joins lines until one
+              does not end in an unescaped backslash.
+          - key: qy-fuzzy
+            days_ago: 85
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.8}
+            content: >
+              Tried fuzzy matching; the top results were noise for short queries like "git p".
+              Went with token prefix matching ranked by recency and frequency.
+          - key: qy-index
+            days_ago: 80
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.9}
+            content: >
+              The index is a SQLite file with an FTS5 table, kept under the XDG data
+              directory. Indexing 48,000 history lines takes 0.6 s; queries return in under
+              10 ms.
+          - key: qy-bash-history-no-timestamps
+            days_ago: 69
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.76}
+            content: >
+              bash history has no timestamps unless HISTTIMEFORMAT was set when the commands
+              ran. Quarry imports those lines in file order with no date and says so in
+              quarry stats.
+          - key: qy-hook-latency
+            days_ago: 58
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.91}
+            content: >
+              The precmd hook that records cwd and exit code added 11 ms to every prompt
+              because it spawned the binary. It now appends a line to a log file in shell, and
+              Quarry indexes the log lazily on the next search: 0.4 ms per prompt.
+          - key: qy-fish-request
+            days_ago: 44
+            source: manual
+            metadata: {captured_via: manual}
+            content: >
+              Issue #9 asks for fish support. Third person to ask. fish keeps history in its own
+              YAML-like format.
+          - key: qy-fish-parser
+            days_ago: 37
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.82}
+            content: >
+              fish history parser done: reads "- cmd:" and "when:" entries and ignores the
+              "paths:" list. Wrote it by hand rather than pulling in a YAML crate, since fish's
+              format is not quite YAML.
+          - key: qy-secrets-filter
+            days_ago: 26
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.88}
+            content: >
+              Quarry no longer indexes commands that export variables whose names end in
+              TOKEN, KEY, SECRET or PASSWORD, or that pass a password flag. They are skipped at
+              index time, not hidden at search time, so they never reach the database.
+          - key: qy-stars
+            days_ago: 21
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.72}
+            content: >
+              A post in a terminal-tools forum took Quarry from 12 to 140 GitHub stars in a day.
+              Six issues opened; four were install problems on older Linux distributions.
+          - key: qy-windows-declined
+            days_ago: 17
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.81}
+            content: >
+              Closed the Windows support issue as out of scope: PowerShell history has no
+              timestamps or directories, so most of Quarry's filters would do nothing there.
+          - key: qy-musl-build
+            days_ago: 6
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.86}
+            content: >
+              Release builds are now static musl binaries. The glibc build failed on older
+              distributions with "version GLIBC_2.34 not found", which was most of the install
+              issues after the forum post.
+          - key: qy-clap-bump
+            days_ago: 2
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.6}
+            content: >
+              Bumped clap to 4.5 and regenerated shell completions. No behaviour change.
+      - slug: releases
+        name: Releases
+        drawers:
+          - key: qy-release-0-1
+            days_ago: 76
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.87}
+            content: >
+              Quarry 0.1.0 published to crates.io: zsh and bash import, text search, --since.
+              Announced nowhere; three downloads that weren't Rowan.
+          - key: qy-release-0-2
+            days_ago: 62
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.85}
+            content: >
+              0.2.0: --cwd and --failed filters, backed by a precmd hook installed with
+              quarry init zsh.
+          - key: qy-release-0-3
+            days_ago: 50
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.83}
+            content: >
+              0.3.0: the hook writes to a log instead of spawning the binary (prompt latency
+              11 ms → 0.4 ms). Index format changed; the first run rebuilds it.
+          - key: qy-release-0-4
+            days_ago: 33
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.84}
+            content: >
+              0.4.0: fish support, and quarry import --dry-run to preview what would be
+              indexed.
+          - key: qy-release-0-5
+            days_ago: 11
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.87}
+            content: >
+              0.5.0: quarry stats (most-run commands, failure rate per directory) and the
+              secret filter. Binary is 2.1 MB stripped.
+
+  - slug: decisions
+    name: decisions
+    description: Cross-project decisions about architecture and tooling.
+    rooms:
+      - slug: architecture
+        name: Architecture
+        drawers:
+          - key: dec-one-vps
+            days_ago: 90
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.92}
+            content: >
+              Consolidated three small VPSs into one 4 vCPU / 8 GB machine. Saves $22/month
+              and one set of OS upgrades. The products are small enough that noisy neighbours
+              are each other.
+          - key: dec-quarry-rust
+            days_ago: 92
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.84}
+            content: >
+              Quarry is written in Rust, the one language Rowan does not already use daily.
+              Reasons: a single static binary to distribute, and startup fast enough to run
+              on every keypress.
+          - key: dec-caddy
+            days_ago: 88
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.87}
+            content: >
+              Caddy replaces nginx plus certbot. One 20-line Caddyfile serves all three
+              products with automatic TLS; the certbot renewal timer had failed silently once.
+          - key: dec-pg-on-vps
+            days_ago: 78
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.86}
+            content: >
+              Ledgerline's Postgres stays on the VPS rather than a managed service. Nightly
+              pg_dump to object storage plus a monthly restore check is enough at 212 MB.
+          - key: dec-tp-sqlite
+            days_ago: 74
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.94}
+            content: >
+              Tidepool moves from managed Postgres to a single SQLite file on the VPS. The
+              Postgres instance cost more than the VPS, and the workload is one nightly writer
+              and many readers. Revisit if user accounts ever add concurrent writes.
+          - key: dec-ll-billing-portal
+            days_ago: 63
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.91}
+            content: >
+              Ledgerline uses Stripe's hosted billing portal for plan changes, card updates,
+              invoices and cancellation, instead of building those pages. Roughly two weeks of
+              work avoided; the cost is that the portal looks like Stripe, not Ledgerline.
+          - key: dec-boring-budget
+            days_ago: 60
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.89}
+            content: >
+              Wrote down the rule Rowan has been following: each product may spend one "new
+              technology". Tidepool spent it on service workers, Quarry on Rust. Ledgerline has
+              spent none and should keep it that way while it pays the bills.
+          - key: dec-backup-drills
+            days_ago: 53
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              Every product with data gets a restore drill at least quarterly, on a scratch
+              machine, with row counts compared. A backup nobody has restored does not count.
+      - slug: tooling
+        name: Tooling
+        drawers:
+          - key: dec-deploy-script
+            days_ago: 86
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.85}
+            content: >
+              Deploys are a 30-line shell script: build locally, rsync to a new release
+              directory, flip the current symlink, restart the unit. Rollback flips the symlink
+              back.
+          - key: dec-ci-tests-only
+            days_ago: 81
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.8}
+            content: >
+              CI runs tests and linters on push but does not deploy. Deploying stays a
+              deliberate local command, so a green build at 2 a.m. cannot ship anything.
+          - key: dec-error-tracking
+            days_ago: 65
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.82}
+            content: >
+              No hosted error tracker. A nightly script greps the three apps' logs for errors,
+              groups them by message and emails a digest. The hosted option was $26/month,
+              more than the VPS.
+          - key: dec-uptime-monitor
+            days_ago: 47
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.84}
+            content: >
+              Tomás set up uptime checks for the three products, one request a minute each.
+              Alerts go to him and Rowan; he wrote the runbook entry for each alert.
+          - key: dec-codex-for-rust
+            days_ago: 40
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.73}
+            content: >
+              Quarry's Rust work moves to Codex; PHP and JavaScript stay mostly in Claude Code.
+              Both harnesses feed the same Mnemon, so decisions end up in one place either way.
+          - key: dec-renovate-off
+            days_ago: 33
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.78}
+            content: >
+              Turned off automated dependency pull requests: 31 open in a month, mostly patch
+              bumps. Replaced by a dependency day on the first Monday of each month.
+          - key: dec-cron-healthchecks
+            days_ago: 20
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.88}
+            content: >
+              After Tidepool's silent import failures: every cron job pings a healthcheck when
+              it finishes, and a missing ping alerts Tomás and Rowan. Five jobs across the
+              three products.
+          - key: dec-dns-ttl
+            days_ago: 10
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.61}
+            content: >
+              Lowered DNS TTLs on all three domains to 300 seconds, ahead of possibly moving the
+              VPS to a bigger plan.
+
+  - slug: unfiled
+    name: unfiled
+    description: Captured without a clear home; waiting to be filed.
+    rooms:
+      - slug: notes
+        name: Notes
+        drawers:
+          - key: unf-paddle-forecast
+            days_ago: 81
+            source: manual
+            metadata: {captured_via: manual, suggested_wing: person-rowan}
+            content: >
+              Rule for the home bay: wind over 15 knots against the ebb means stay home, however
+              good the forecast looks at breakfast.
+          - key: unf-tide-api-idea
+            days_ago: 67
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.63, suggested_wing: project-tidepool}
+            content: >
+              Idea: a kayak club asked whether they could embed a station's tides on their
+              website. A read-only widget would be cheap, since the API already exists.
+          - key: unf-font-license
+            days_ago: 57
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.69, suggested_wing: project-ledgerline}
+            content: >
+              Priya flagged that the invoice template's font license covers web use but not
+              embedding in PDFs. Swapped to an open-licensed font with similar metrics.
+          - key: unf-book-note
+            days_ago: 50
+            source: manual
+            metadata: {captured_via: manual, suggested_wing: project-ledgerline}
+            content: >
+              From a pricing book: raise prices for new customers first and leave existing ones
+              alone for a year. Worth trying on Studio.
+          - key: unf-vps-disk
+            days_ago: 32
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.71, suggested_wing: decisions}
+            content: >
+              VPS disk at 71%. Most of it is old release directories from the deploy script;
+              now keeping the last five.
+          - key: unf-sticker-order
+            days_ago: 27
+            source: claude-code:session_digest
+            metadata: {captured_via: session_digest, harness: claude-code, confidence: 0.6, suggested_wing: project-tidepool}
+            content: >
+              Ordered 200 Tidepool stickers for the kayak clubs' autumn meetups.
+          - key: unf-ssh-reminder
+            days_ago: 14
+            source: manual
+            metadata: {captured_via: manual, suggested_wing: decisions}
+            content: >
+              Rotate the VPS SSH keys before the end of next month, Tomás's included.
+          - key: unf-quarry-name
+            days_ago: 8
+            source: codex:session_digest
+            metadata: {captured_via: session_digest, harness: codex, confidence: 0.62, suggested_wing: project-quarry}
+            content: >
+              Someone asked whether Quarry will be renamed because another tool uses the same
+              name for something unrelated. Not planning to; the crate name is ours.

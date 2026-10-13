@@ -70,11 +70,18 @@ class DemoMode
 
     /**
      * The rate-limit identity of a client: an IPv4 address as-is, an IPv6
-     * address by its /64, since one host commonly holds a whole /64.
+     * address by its /64, since one host commonly holds a whole /64. An
+     * IPv4-mapped IPv6 address is keyed by the IPv4 address it carries.
      */
     public static function clientKey(string $ip): string
     {
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            // An IPv4 client seen through a dual-stack socket: key by its own address.
+            $packed = inet_pton($ip);
+            if (str_starts_with($packed, str_repeat("\0", 10)."\xff\xff")) {
+                return inet_ntop(substr($packed, 12));
+            }
+
             return inet_ntop(substr(inet_pton($ip), 0, 8).str_repeat("\0", 8)).'/64';
         }
 
@@ -83,6 +90,11 @@ class DemoMode
 
     private function refuse(int $status): Response
     {
-        return response('', $status)->header(self::REFUSED_HEADER, 'refused');
+        $response = response('', $status)->header(self::REFUSED_HEADER, 'refused');
+        if ($status === 429) {
+            $response->header('Retry-After', '60');
+        }
+
+        return $response;
     }
 }

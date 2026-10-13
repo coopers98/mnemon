@@ -159,7 +159,11 @@ class DemoModeTest extends TestCase
         $this->get('/admin');
         $this->get('/admin');
         $this->get('/');
-        $this->assertRefused($this->get('/'), 429);
+        $r = $this->get('/');
+        $this->assertRefused($r, 429);
+        $this->assertSame('60', $r->headers->get('Retry-After'));
+        $this->demo();
+        $this->assertNull($this->get('/admin')->headers->get('Retry-After'));
     }
 
     public function test_ipv6_clients_share_a_slash_64(): void
@@ -211,5 +215,17 @@ class DemoModeTest extends TestCase
     {
         $this->assertSame('203.0.113.5', DemoMode::clientKey('203.0.113.5'));
         $this->assertSame('2001:db8:1:2::/64', DemoMode::clientKey('2001:db8:1:2:3:4:5:6'));
+        $this->assertSame('203.0.113.5', DemoMode::clientKey('::ffff:203.0.113.5'));
+        $this->assertNotSame(DemoMode::clientKey('::ffff:203.0.113.5'), DemoMode::clientKey('::ffff:203.0.113.6'));
+    }
+
+    public function test_router_404_page_offers_the_palace_not_sign_in(): void
+    {
+        $this->demo();
+        $r = $this->get('/wiki/project:nope');
+        $r->assertNotFound();
+        $r->assertSee('Walk the palace');
+        $r->assertSee(route('palace.index'), false);
+        $r->assertDontSee(route('login'), false);
     }
 }

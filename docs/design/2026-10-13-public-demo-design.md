@@ -329,11 +329,13 @@ Steps 3–6 run with the lock held and release it in a `finally`.
 
 ### Forge site
 
-Site `3425569` on server `atlas-abs` (1153034) was created on 2026-10-13 with
-zero-downtime releases, `storage` shared, PHP 8.4, and `www` redirecting to the
-apex. It has no repository yet and serves a static holding page from
-`releases/000-placeholder`. Until demo mode is merged and the site is
-configured as below, the full app is never served from trymnemon.com.
+Site `3425882` on server `atlas-abs` (1153034) went live on 2026-10-13. It is
+isolated (Unix user `trymnemon`, its own PHP-FPM pool), deploys `main` with
+zero-downtime releases and push-to-deploy, shares `storage`, runs PHP 8.4, and
+redirects `www` to the apex. Its root is `/home/trymnemon/trymnemon.com`, and the
+demo database is `storage/demo.sqlite` there. Its Let's Encrypt certificate was
+issued by http-01 through Cloudflare. The first placeholder site, `3425569`,
+was deleted.
 
 **Isolation from production.** The production install is on the same server.
 
@@ -345,8 +347,12 @@ configured as below, the full app is never served from trymnemon.com.
   - If Forge cannot isolate an existing site, the site is deleted and recreated
     isolated. It is empty, and only the certificate needs reissuing.
 - **Cloudflare only.** The trymnemon.com nginx server block accepts connections
-  only from Cloudflare's IP ranges (`allow`/`deny`). Its origin cannot be hit
+  only from Cloudflare and from the server itself. Its origin cannot be hit
   directly to skip Cloudflare.
+  - The server's `conf.d/cloudflare.conf` already rewrites `$remote_addr` to the
+    visitor for Cloudflare's ranges, so `allow`/`deny` would check the visitor.
+    The rule compares `$realip_remote_addr` with `$remote_addr` instead: they
+    differ only when the rewrite fired.
   - Production stays unproxied and reachable as today. The shared IP is already
     public through mnemon.cooperhosting.net's DNS.
 - **No production credentials.** The demo's database is SQLite, so the site

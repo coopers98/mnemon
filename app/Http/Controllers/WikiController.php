@@ -64,7 +64,9 @@ class WikiController extends Controller
 
     public function search(Request $request): View
     {
-        $query = $request->string('q')->trim()->toString();
+        // `q[]=x` makes q an array; string() would cast it and throw.
+        $q = $request->query('q');
+        $query = is_string($q) ? trim($q) : '';
 
         $wikiResults = collect();
         $drawerResults = collect();

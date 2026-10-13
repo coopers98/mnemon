@@ -22,8 +22,8 @@ to being one person's install.
   login. It is not an MCP demo and not an interactive capture demo.
 - **Data:** a synthetic second brain written for the demo. No real data,
   including scrubbed real data.
-- **Hosting:** a separate instance with its own database, running the same
-  code with demo mode switched on. The real brain is never reachable from it.
+- **Hosting:** a separate Forge site with its own SQLite database, running the
+  same code with demo mode switched on. The real brain is never reachable from it.
 - **Domain:** trymnemon.com, on the apex. The landing page is at `/` and the
   demo is at `/wiki` and `/palace`. One site, one deploy.
 
@@ -174,24 +174,47 @@ script runs it after `migrate`.
 
 ### Forge site
 
-- **Site:** trymnemon.com (and `www` redirecting to the apex) on the existing
-  server, with Let's Encrypt.
+Created on 2026-10-13: site `3425569` on server `atlas-abs` (1153034), with
+zero-downtime releases, `storage` shared, PHP 8.4, and `www` redirecting to the
+apex. It has no repository yet and serves a static holding page from
+`releases/000-placeholder`. The repository is attached, and the web directory
+set to `current/public`, only once demo mode is merged. Until then the full app
+is never served from trymnemon.com.
+
 - **Repository and branch:** same repository, `main`, auto-deploy on push.
-- **Database:** a new Postgres database and a new database user that owns only
-  that database. The production database user is not reused.
+- **Database: SQLite**, at `storage/demo.sqlite` (shared across releases). The
+  production database is a Forge-managed Postgres cluster. Giving the demo a
+  database there would put credentials for that cluster on a public site, and
+  the Forge API cannot create databases on it anyway. SQLite keeps the demo
+  with no route to production data at all. Full-text search on SQLite matches
+  substrings rather than whole words, which is acceptable for a demo.
 - **`.env`:**
   - its own `APP_KEY`;
   - `MNEMON_DEMO=true`;
+  - `DB_CONNECTION=sqlite`;
   - `MNEMON_EMBEDDING_DRIVER=none`;
   - no `OPENAI_API_KEY`;
   - no mail credentials;
   - `SESSION_DRIVER=cookie` and `CACHE_STORE=file`, so neither sessions nor the
-    rate limiter write rows.
-- **Deploy script:** the production script plus `php artisan mnemon:demo-reset
-  --no-interaction`.
-- **Scheduler:** the usual Forge `schedule:run` cron.
-- **DNS:** the user registers trymnemon.com and points the apex and `www` at the
-  server.
+    rate limiter write to the database.
+- **Deploy script:** the production script without the Passport steps, plus
+  `php artisan mnemon:demo-reset --no-interaction`.
+- **Scheduler:** Forge's Laravel scheduler integration on the site.
+
+### DNS and Cloudflare
+
+- **The zone** trymnemon.com lives in Cloudflare. The domain's nameservers at
+  GoDaddy point at Cloudflare.
+- **Records:** the apex and `www` are A records to 165.245.153.92.
+- **Certificate:** both records start DNS-only, so Forge can issue a Let's
+  Encrypt certificate over HTTP-01. After that the proxy is turned on, with SSL
+  set to Full (strict) and "Always Use HTTPS" on.
+- **Real client IPs:** behind Cloudflare, `REMOTE_ADDR` is a Cloudflare edge
+  address. Demo mode trusts Cloudflare's published IP ranges as proxies
+  (`TrustProxies`, `CF-Connecting-IP` / `X-Forwarded-For`), so the per-IP rate
+  limit sees the visitor rather than putting everyone in one bucket. Only those
+  ranges are trusted, so a direct request cannot forge its IP. A test covers
+  this.
 
 ### mnemon.cooperhosting.net afterwards
 
@@ -204,7 +227,10 @@ can be decided once trymnemon.com is live.
 Feature tests, with `config(['mnemon.demo.enabled' => true])` set per test
 unless noted:
 
-- **Throttle:** request 121 in a minute from one IP returns 429.
+- **Throttle:** request 121 in a minute from one IP returns 429. Two clients
+  behind the same Cloudflare edge address, with different `CF-Connecting-IP`
+  headers, are limited separately. A request from outside Cloudflare's ranges
+  cannot set its IP with that header.
 - **Reachable pages:** with no user, `/`, `/how-it-works`, `/wiki`, a wiki page,
   its history, `/wiki/search?q=…`, `/palace`, a wing, a room and a drawer each
   return 200.
@@ -232,6 +258,4 @@ unless noted:
 
 - Whether `mnemon.cooperhosting.net/` redirects to trymnemon.com (decide after
   launch).
-- Registering trymnemon.com and adding its DNS records is the user's step.
-  Forge's GitHub connection was confirmed healthy on 2026-10-13, so the site can
-  be created once DNS is in place.
+- trymnemon.com was registered at GoDaddy on 2026-10-13.

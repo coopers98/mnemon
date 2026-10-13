@@ -37,7 +37,7 @@ class WikiController extends Controller
     {
         $page = WikiPage::where('name', $name)->firstOrFail();
 
-        $renderedContent = $this->markdownRenderer->render($page->content ?? '');
+        $renderedContent = $this->markdownRenderer->render($this->withoutDuplicateTitle($page->content ?? '', $page->title));
 
         // Get related pages
         $relatedPages = collect($page->related ?? [])
@@ -51,6 +51,20 @@ class WikiController extends Controller
             : collect();
 
         return view('wiki.show', compact('page', 'renderedContent', 'relatedPages', 'sourceDrawers'));
+    }
+
+    /**
+     * The page view already prints the title as its heading; drop a leading
+     * `# Title` from the rendered copy when it only repeats it.
+     */
+    private function withoutDuplicateTitle(string $content, ?string $title): string
+    {
+        if (preg_match('/\A\s*#[ \t]+(.+?)[ \t#]*\R/', $content."\n", $m)
+            && mb_strtolower(trim($m[1])) === mb_strtolower(trim((string) $title))) {
+            return ltrim(substr($content."\n", strlen($m[0])));
+        }
+
+        return $content;
     }
 
     public function history(string $name): View

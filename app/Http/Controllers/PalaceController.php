@@ -6,6 +6,7 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class PalaceController extends Controller
@@ -23,8 +24,10 @@ class PalaceController extends Controller
 
         $rooms = $wing->rooms()->withCount('drawers')->orderBy('name')->get();
 
-        // Check if a wiki page exists for this wing
-        $wikiPage = WikiPage::where('name', 'like', '%'.$wing->slug.'%')->first();
+        // A wing's page is named like the wing with its first '-' as ':'
+        // (project-x → project:x). The old `like '%project-x%'` never
+        // matched a page name, so the link never appeared.
+        $wikiPage = WikiPage::where('name', Str::replaceFirst('-', ':', $wing->slug))->first();
 
         return view('palace.wing', compact('wing', 'rooms', 'wikiPage'));
     }

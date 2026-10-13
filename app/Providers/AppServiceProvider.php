@@ -15,6 +15,7 @@ use App\Services\EmbeddingManager;
 use App\Services\SessionDigestService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\ClientRepository;
@@ -53,6 +54,11 @@ class AppServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([PurgeTokens::class]);
         }
+
+        // The public demo: @demo for demo-only markup, @browsable where a
+        // signed-in user and a demo visitor both get the wiki and palace.
+        Blade::if('demo', fn () => (bool) config('mnemon.demo.enabled'));
+        Blade::if('browsable', fn () => auth()->check() || (bool) config('mnemon.demo.enabled'));
 
         Drawer::observe(DrawerObserver::class);
         WikiPage::observe(WikiPageObserver::class);

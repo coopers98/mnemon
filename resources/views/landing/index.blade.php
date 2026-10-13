@@ -139,7 +139,7 @@
                     </p>
 
                     <div class="front-cta">
-                        @auth
+                        @browsable
                             <a class="btn" href="{{ route('wiki.index') }}">
                                 <span>Open the wiki</span><span class="arrow">→</span>
                             </a>
@@ -153,7 +153,12 @@
                             <a class="btn btn-ghost" href="{{ route('login') }}">
                                 <span>Sign in</span><span class="arrow">→</span>
                             </a>
-                        @endauth
+                            @if (config('mnemon.demo.url'))
+                                <a class="btn btn-ghost" href="{{ config('mnemon.demo.url') }}">
+                                    <span>See the demo</span><span class="arrow">→</span>
+                                </a>
+                            @endif
+                        @endbrowsable
                     </div>
 
                     <div class="front-meta">
@@ -385,7 +390,7 @@
                     </p>
 
                     <div style="margin-top:2rem;">
-                        @auth
+                        @browsable
                             <a class="btn btn-ghost" href="{{ route('palace.index') }}">
                                 <span>Walk the palace</span><span class="arrow">→</span>
                             </a>
@@ -393,7 +398,7 @@
                             <a class="btn btn-ghost" href="{{ route('login') }}">
                                 <span>Sign in to walk</span><span class="arrow">→</span>
                             </a>
-                        @endauth
+                        @endbrowsable
                     </div>
                 </div>
 
@@ -598,6 +603,12 @@
                 </div>
 
                 <div>
+                    @demo
+                        <p style="font-family:var(--serif);font-size:1.1rem;line-height:1.65;color:var(--ink-soft);">
+                            This demo is read-only, so it takes no messages. For questions, ideas and bugs, open an
+                            issue on <a href="https://github.com/coopers98/mnemon/issues" rel="noopener noreferrer" style="color:var(--rubric);border-bottom:1px solid var(--rubric);">GitHub</a>.
+                        </p>
+                    @else
                     @if (session('contact_success'))
                         <div class="contact-success">{{ session('contact_success') }}</div>
                     @endif
@@ -625,6 +636,7 @@
                             </button>
                         </div>
                     </form>
+                    @enddemo
                 </div>
             </div>
         </div>
@@ -644,11 +656,11 @@
             </p>
             <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
                 <a class="btn" href="#install"><span>Install Mnemon</span><span class="arrow">→</span></a>
-                @auth
+                @browsable
                     <a class="btn btn-ghost" href="{{ route('wiki.index') }}"><span>Read the wiki</span><span class="arrow">→</span></a>
                 @else
                     <a class="btn btn-ghost" href="{{ route('login') }}"><span>Sign in</span><span class="arrow">→</span></a>
-                @endauth
+                @endbrowsable
             </div>
         </div>
     </section>
@@ -672,10 +684,10 @@
                 <h5>Pages</h5>
                 <ul>
                     <li><a href="{{ route('landing') }}">Overview</a></li>
-                    @auth
+                    @browsable
                         <li><a href="{{ route('wiki.index') }}">Wiki</a></li>
                         <li><a href="{{ route('palace.index') }}">Palace</a></li>
-                    @endauth
+                    @endbrowsable
                     <li><a href="#specs">Spec sheet</a></li>
                     <li><a href="#contact">Correspondence</a></li>
                 </ul>

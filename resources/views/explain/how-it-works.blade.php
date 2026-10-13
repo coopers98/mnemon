@@ -188,10 +188,11 @@
                     evidence; one that only stores raw text makes the reader do all the work every time. The
                     split means a compiled claim can always be traced back to the verbatim record that
                     produced it — and when the two disagree, the drawer wins.</p>
-                <p>This instance currently holds
+                <p>{{ config('mnemon.demo.enabled') ? 'This demo holds' : 'This instance currently holds' }}
                     <strong>{{ number_format($stats['drawers']) }} drawers</strong>
                     across {{ number_format($stats['wings']) }} wings, compiled into
-                    {{ number_format($stats['wiki_pages']) }} wiki pages.</p>
+                    {{ number_format($stats['wiki_pages']) }} wiki pages.
+                    @demo The brain is synthetic: a made-up developer's notes, written for this demo. @enddemo</p>
             </div>
         </div>
     </section>
@@ -308,7 +309,7 @@
 
             <div class="ex-scroll">
                 <table class="ex-table">
-                    <caption>This instance, live</caption>
+                    <caption>{{ config('mnemon.demo.enabled') ? 'This demo, live' : 'This instance, live' }}</caption>
                     <thead>
                         <tr><th scope="col">Quantity</th><th scope="col" class="n">Count</th></tr>
                     </thead>

@@ -38,9 +38,11 @@
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <span class="tag"><span class="dot"></span>live</span>
-        <a class="btn" href="/admin" style="font-size:0.75rem;padding:0.5rem 0.85rem;">
-            <span>Open admin</span><span class="arrow">→</span>
-        </a>
+        @unless (config('mnemon.demo.enabled'))
+            <a class="btn" href="/admin" style="font-size:0.75rem;padding:0.5rem 0.85rem;">
+                <span>Open admin</span><span class="arrow">→</span>
+            </a>
+        @endunless
     </div>
 @endsection
 
@@ -98,6 +100,6 @@
         <span class="rubric">●</span><span>stored</span>
     </div>
     <div class="group">
-        <span>postgres · localhost:5432</span>
+        <span>{{ config('database.connections.'.config('database.default').'.driver') }}</span>
     </div>
 @endsection

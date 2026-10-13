@@ -14,7 +14,7 @@
     </form>
 
     @forelse ($grouped as $type => $pages)
-        <div class="toc-section"><span class="n">§</span><span>{{ ucfirst($type) }}s · {{ $pages->count() }}</span></div>
+        <div class="toc-section"><span class="n">§</span><span>{{ \Illuminate\Support\Str::plural(ucfirst($type)) }} · {{ $pages->count() }}</span></div>
         <ul class="toc-list">
             @foreach ($pages as $idx => $page)
                 <li>

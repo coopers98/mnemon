@@ -69,11 +69,11 @@
                         <a class="btn" href="{{ route('landing') }}">
                             <span>Return to the frontispiece</span><span class="arrow">→</span>
                         </a>
-                        @auth
+                        @browsable
                             <a class="btn btn-ghost" href="{{ route('palace.index') }}">
                                 <span>Walk the palace</span><span class="arrow">→</span>
                             </a>
-                        @endauth
+                        @endbrowsable
                     </div>
                 </div>
 

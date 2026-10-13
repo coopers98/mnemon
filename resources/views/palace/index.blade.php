@@ -49,9 +49,13 @@
 @section('stage')
     @if ($wings->isEmpty())
         <div class="empty" style="max-width: 32rem; margin: 4rem auto;">
-            No wings yet. Create your first wing through the
-            <a href="/admin" style="color:var(--rubric);border-bottom:1px solid var(--rubric);">admin panel</a>
-            or via MCP tools.
+            @unless (config('mnemon.demo.enabled'))
+                No wings yet. Create your first wing through the
+                <a href="/admin" style="color:var(--rubric);border-bottom:1px solid var(--rubric);">admin panel</a>
+                or via MCP tools.
+            @else
+                No wings yet.
+            @endunless
         </div>
     @else
         <div style="max-width: 64rem; margin: 0 auto;">

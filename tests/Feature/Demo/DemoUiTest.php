@@ -38,6 +38,12 @@ class DemoUiTest extends TestCase
         $this->get('/palace')->assertOk()->assertDontSee('Open admin');
     }
 
+    public function test_empty_palace_does_not_link_admin_in_demo_mode(): void
+    {
+        $this->demo();
+        $this->get('/palace')->assertOk()->assertDontSee('href="/admin"', false);
+    }
+
     public function test_how_it_works_says_demo(): void
     {
         $this->demo();

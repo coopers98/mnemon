@@ -31,13 +31,16 @@
     .rail-foot a:hover { color: var(--rubric); border-color: var(--rubric); }
 
     /* Stage */
-    .stage { position: relative; background: linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 32px 32px, linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 32px 32px, var(--paper-deep); display: flex; flex-direction: column; min-height: calc(100vh - 4rem); }
+    .stage { position: relative; --grid-line: color-mix(in oklch, var(--rule) 55%, transparent); background: linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 32px 32px, linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 32px 32px, var(--paper-deep); display: flex; flex-direction: column; min-height: calc(100vh - 4rem); }
     .stage-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.25rem; border-bottom: var(--hairline) solid var(--rule); background: color-mix(in oklch, var(--paper) 92%, transparent); backdrop-filter: blur(6px); gap: 1rem; flex-wrap: wrap; }
     .stage-bar .breadcrumb { display: flex; align-items: baseline; gap: 0.6rem; font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); flex-wrap: wrap; }
     .stage-bar .breadcrumb a { color: var(--ink-faint); border-bottom: 1px dotted var(--rule-strong); padding-bottom: 1px; }
     .stage-bar .breadcrumb a:hover { color: var(--rubric); border-color: var(--rubric); }
     .stage-bar .breadcrumb .here { font-family: var(--serif); text-transform: none; letter-spacing: 0; font-size: 1.05rem; color: var(--ink); font-style: italic; }
     .stage-body { flex: 1; padding: clamp(1.5rem, 3vw, 2.5rem); overflow-y: auto; }
+    /* Each page's content column sits on a sheet of paper, so the grid shows
+       only in the margins and never runs through text. */
+    .stage-body > * { background: var(--paper); border: var(--hairline) solid var(--rule-strong); padding: clamp(1.25rem, 3vw, 2.5rem); box-shadow: 0 1px 0 var(--rule), 0 12px 32px -24px color-mix(in oklch, var(--ink) 40%, transparent); }
     .stage-foot { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1.25rem; border-top: var(--hairline) solid var(--rule); background: color-mix(in oklch, var(--paper) 92%, transparent); font-family: var(--mono); font-size: var(--t-micro); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); gap: 1rem; flex-wrap: wrap; }
     .stage-foot .group { display: flex; gap: 1.5rem; }
     .stage-foot b { color: var(--ink); font-weight: 500; }

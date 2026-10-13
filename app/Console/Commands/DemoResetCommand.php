@@ -62,7 +62,6 @@ class DemoResetCommand extends Command
                 @unlink($live.$suffix);
             }
 
-            $this->callSilently('cache:clear');
         } catch (Throwable $e) {
             DB::purge('demo_build');
             $this->remove($building);
@@ -72,6 +71,14 @@ class DemoResetCommand extends Command
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
+        }
+
+        // After the swap and outside the try: a cache failure must not report
+        // the (completed) swap as a failure and abort deploy activation.
+        try {
+            $this->callSilently('cache:clear');
+        } catch (Throwable $e) {
+            $this->warn('Demo brain swapped in, but the cache was not cleared: '.$e->getMessage());
         }
 
         $this->info('Demo brain rebuilt.');

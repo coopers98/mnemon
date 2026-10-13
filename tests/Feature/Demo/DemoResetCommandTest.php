@@ -57,6 +57,18 @@ class DemoResetCommandTest extends TestCase
         $this->assertSame([], $this->leftovers());
     }
 
+    public function test_a_failing_cache_clear_warns_but_the_swap_stands(): void
+    {
+        config(['cache.default' => 'no_such_store']);
+
+        $this->artisan('mnemon:demo-reset')
+            ->expectsOutputToContain('swapped in')
+            ->assertSuccessful();
+
+        $this->assertFileExists($this->live);
+        $this->assertSame([], $this->leftovers());
+    }
+
     public function test_second_reset_replaces_the_first(): void
     {
         $this->artisan('mnemon:demo-reset')->assertSuccessful();

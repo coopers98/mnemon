@@ -19,6 +19,12 @@ class ApplyRetentionCommand extends Command
 
     public function handle(): int
     {
+        if (config('mnemon.demo.enabled')) {
+            $this->error('Refusing to run in demo mode: the demo brain is rebuilt nightly by mnemon:demo-reset.');
+
+            return self::FAILURE;
+        }
+
         $threshold = (float) config('mnemon.retention.soft_delete_threshold', 0.05);
         $dryRun = (bool) $this->option('dry-run');
 

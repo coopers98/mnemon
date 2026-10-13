@@ -25,6 +25,7 @@ class WikiPageWriter
     /**
      * @param  array<int>|null  $sources  Drawer ids the caller has already validated.
      * @param  array<string>|null  $related  Related page names.
+     * @param  int|null  $expectedRevision  The revision the caller read; checked again under the row lock.
      *
      * @throws \RuntimeException when another writer changed the page concurrently.
      */
@@ -36,6 +37,7 @@ class WikiPageWriter
         ?string $confidence = null,
         ?array $sources = null,
         ?array $related = null,
+        ?int $expectedRevision = null,
     ): WikiPage {
         $existing = WikiPage::where('name', $name)->first();
 
@@ -70,11 +72,11 @@ class WikiPageWriter
 
         // Wrap optimistic locking + write + revision insert in a transaction
         // to prevent concurrent agents from writing the same revision number
-        $page = DB::transaction(function () use ($name, $attributes, $content, $agent, $sources, $existing) {
+        $page = DB::transaction(function () use ($name, $attributes, $content, $agent, $sources, $existing, $expectedRevision) {
             // Re-check revision inside transaction for true optimistic locking
             if ($existing !== null) {
                 $freshRevision = WikiPage::where('name', $name)->lockForUpdate()->value('revision_count') ?? 1;
-                $expectedPrev = $attributes['revision_count'] - 1;
+                $expectedPrev = $expectedRevision ?? $attributes['revision_count'] - 1;
                 if ($freshRevision !== $expectedPrev) {
                     throw new \RuntimeException(
                         "Conflict: page '{$name}' was modified concurrently (expected revision {$expectedPrev}, found {$freshRevision}). "

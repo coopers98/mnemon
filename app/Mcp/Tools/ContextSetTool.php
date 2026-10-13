@@ -127,6 +127,7 @@ class ContextSetTool extends Tool
             confidence: $confidence,
             sources: $sources,
             related: $related,
+            expectedRevision: $existing !== null ? $expectedRevision : null,
         );
 
         $this->updateWikiIndex();

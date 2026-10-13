@@ -37,6 +37,25 @@ class WikiPageWriterTest extends TestCase
         $this->assertTrue(EntityRelationship::where('from_page', 'project:alpha')->where('to_page', 'concept:beta')->exists());
     }
 
+    public function test_stale_expected_revision_is_a_conflict(): void
+    {
+        $writer = app(WikiPageWriter::class);
+        $writer->write('project:alpha', 'First body, long enough to score.', 'tester');
+
+        try {
+            $writer->write('project:alpha', 'Second body, long enough.', 'tester', expectedRevision: 0);
+            $this->fail('Expected a conflict');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Conflict', $e->getMessage());
+        }
+
+        $this->assertSame(1, WikiPageRevision::where('page_name', 'project:alpha')->count());
+        $this->assertSame(1, WikiPage::where('name', 'project:alpha')->value('revision_count'));
+
+        $page = $writer->write('project:alpha', 'Third body, long enough.', 'tester', expectedRevision: 1);
+        $this->assertSame(2, $page->revision_count);
+    }
+
     public function test_type_for(): void
     {
         $this->assertSame('person', WikiPageWriter::typeFor('person:rowan'));

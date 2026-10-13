@@ -1025,6 +1025,21 @@ a separate TLS-terminating reverse proxy is **not yet supported** — Mnemon doe
 process `X-Forwarded-*` headers, so OAuth discovery and asset URLs would still be
 advertised as `http://` behind one. Use the `DOMAIN` path above instead.
 
+### Running a public demo
+
+Setting `MNEMON_DEMO=true` turns an install into a public, read-only demo of a synthetic brain, like https://trymnemon.com. It serves only GET and HEAD requests for the landing page, `/how-it-works`, `/wiki*`, `/palace*` and `/up`. Everything else, including `/admin`, `/mcp` and `/oauth`, gets a bare 404. Requests are rate-limited per client (`MNEMON_DEMO_RATE_LIMIT`, 120 a minute by default).
+
+It needs:
+
+- SQLite, with the database file inside `storage/` (`DB_CONNECTION=sqlite`).
+- `APP_DEBUG=false`. With debug on, the demo answers 503.
+- `MNEMON_DEMO_HOST`, the one hostname it answers to. Any other `Host` gets a 404.
+- `TRUSTED_PROXIES` if it sits behind a proxy such as Cloudflare, so the rate limit sees the real client address.
+
+The deploy runs `php artisan mnemon:demo-reset` in place of `migrate`. It builds the brain beside the live file and swaps it in atomically, and it refuses to run unless demo mode is on and the existing file is a demo database. Demo mode also runs it nightly at 04:00, which erases anything that drifted. No Passport keys are needed.
+
+The synthetic brain lives in `database/demo/`: `palace.yaml` for wings, rooms and drawers, and `wiki/*.md` for wiki pages. `Database\Seeders\DemoSeeder` loads them through the normal write path. On a real install, set `MNEMON_DEMO_URL` to link the landing page to a demo.
+
 ---
 
 ## Backup and disaster recovery

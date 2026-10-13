@@ -167,7 +167,8 @@ install.
   - The guest navigation shows Wiki (`/wiki`) and Palace (`/palace`). Today a
     guest gets no Wiki link and "Palace" points at `/#palace`.
 - **Landing** (`landing/index.blade.php`):
-  - The "Sign in" calls to action become "Browse the demo" (→ `/wiki`).
+  - The "Sign in" calls to action become "Open the wiki" (→ `/wiki`) and
+    "Walk the palace" (→ `/palace`).
   - The `@auth`-only footer navigation (Wiki, Palace) is shown in demo mode.
   - The contact form is hidden, because POST is refused. A link to the GitHub
     repository's issues replaces it.
@@ -205,7 +206,8 @@ a diff:
   (`person-rowan.md`), because a name like `person:rowan` cannot be checked out
   on Windows. Front matter holds:
   - `name` (`person:rowan`);
-  - type, title and description;
+  - title and description (the page type comes from the name prefix, so there
+    is no `type` field);
   - `sources:` (drawer fixture keys);
   - `related:` (page names);
   - `days_ago`.

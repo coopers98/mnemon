@@ -9,7 +9,34 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ## Unreleased
 
+### Added
+- **A public, read-only demo** (`MNEMON_DEMO=true`). The app serves only GET
+  and HEAD requests for the landing page, `/how-it-works`, `/wiki*`, `/palace*`
+  and `/up`; everything else, including `/admin`, `/mcp` and `/oauth`, gets a
+  bare 404. It answers only `MNEMON_DEMO_HOST`, refuses to run with
+  `APP_DEBUG=true`, and rate-limits each client (`MNEMON_DEMO_RATE_LIMIT`,
+  120 a minute by default). Its brain is a synthetic one in `database/demo/`.
+- **`php artisan mnemon:demo-reset`** rebuilds the demo brain from the fixtures
+  and swaps it in atomically. It refuses to run outside demo mode, on anything
+  but a SQLite file inside `storage/`, or over a database that is not a demo
+  one. Demo mode schedules it nightly at 04:00 and does not schedule decay or
+  retention.
+- **`TRUSTED_PROXIES`** names the proxy addresses or CIDRs whose
+  `X-Forwarded-For` is trusted. Unset trusts none.
+- **`MNEMON_DEMO_URL`** makes a real install's landing page and
+  `/how-it-works` link to the public demo.
+
+### Changed
+- **Wiki writes go through `WikiPageWriter`**, which `context_set` and the
+  demo seeder now share.
+- The wiki index says "Syntheses", a wiki page no longer shows its title twice,
+  and the palace footer shows the database driver in use rather than a fixed
+  "postgres · localhost:5432".
+
 ### Fixed
+- **`/wiki/search?q[]=` returned 500**, and **the palace wing page's wiki link
+  never appeared**: it looked for `like '%project-x%'`, which never matches a
+  page named `project:x`.
 - **A drawer naming a room its wing lacks was dropped.** When the digest model
   picked an existing wing but a room that did not exist, without proposing it,
   the drawer was skipped without a trace. It is now filed in the wing's

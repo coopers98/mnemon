@@ -7,6 +7,8 @@
 
 A self-hosted second brain for AI-augmented work. Mnemon stores everything you and your agents care about — verbatim — and exposes it back to any AI tool that speaks the [Model Context Protocol](https://modelcontextprotocol.io/). It is one shared memory across Claude, Cursor, ChatGPT, your own scripts, and whatever else you connect.
 
+**Try it:** a read-only demo with a sample brain is at https://trymnemon.com.
+
 Built on Laravel 13, PostgreSQL + pgvector, and Filament v5.
 
 ---

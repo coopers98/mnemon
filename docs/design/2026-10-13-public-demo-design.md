@@ -123,8 +123,8 @@ every request. Demo mode uses that mechanism instead of setting proxies itself;
 setting them inside `DemoMode` would be wiped when `TrustProxies` ran.
 
 - A new `config/trustedproxy.php` sets `proxies` from `TRUSTED_PROXIES`
-  (comma-separated; unset means none, which is today's behaviour on real
-  installs).
+  (comma-separated; unset keeps Laravel's default behaviour, so real
+  installs are unchanged).
 - The demo's `.env` sets `TRUSTED_PROXIES` to Cloudflare's published IPv4 and
   IPv6 ranges (https://www.cloudflare.com/ips/). The plan records the list with
   the date it was copied.

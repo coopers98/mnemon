@@ -99,7 +99,9 @@ class DemoResetCommandTest extends TestCase
         $before = md5_file($this->live);
         config(['mnemon.demo.enabled' => false]);
 
-        $this->artisan('mnemon:demo-reset')->assertFailed();
+        $this->artisan('mnemon:demo-reset')
+            ->expectsOutputToContain('demo mode is off')
+            ->assertFailed();
 
         $this->assertSame($before, md5_file($this->live));
     }
@@ -107,7 +109,9 @@ class DemoResetCommandTest extends TestCase
     public function test_refuses_a_non_sqlite_connection(): void
     {
         config(['database.connections.demo_live.driver' => 'pgsql']);
-        $this->artisan('mnemon:demo-reset')->assertFailed();
+        $this->artisan('mnemon:demo-reset')
+            ->expectsOutputToContain('not SQLite')
+            ->assertFailed();
         $this->assertFileDoesNotExist($this->live);
     }
 
@@ -116,7 +120,9 @@ class DemoResetCommandTest extends TestCase
         $outside = sys_get_temp_dir().'/mnemon-demo-reset-'.uniqid().'.sqlite';
         config(['database.connections.demo_live.database' => $outside]);
 
-        $this->artisan('mnemon:demo-reset')->assertFailed();
+        $this->artisan('mnemon:demo-reset')
+            ->expectsOutputToContain('not inside storage/')
+            ->assertFailed();
 
         $this->assertFileDoesNotExist($outside);
     }
@@ -129,7 +135,9 @@ class DemoResetCommandTest extends TestCase
         $pdo = null;
         $before = md5_file($this->live);
 
-        $this->artisan('mnemon:demo-reset')->assertFailed();
+        $this->artisan('mnemon:demo-reset')
+            ->expectsOutputToContain('demo_marker')
+            ->assertFailed();
 
         $this->assertSame($before, md5_file($this->live));
     }

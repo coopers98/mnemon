@@ -103,7 +103,6 @@
         .axiom { border-right: 0; border-bottom: var(--hairline) solid var(--rule); }
         .specs-grid { grid-template-columns: 1fr 1fr; }
         .footer-grid { grid-template-columns: 1fr 1fr; }
-        .nav { display: none; }
     }
 </style>
 @endpush

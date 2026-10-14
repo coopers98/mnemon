@@ -69,7 +69,7 @@
             <div style="display:grid;gap:0;border-top:var(--hairline) solid var(--rule);">
                 @foreach ($rooms as $room)
                     <a href="{{ route('palace.room', [$wing->slug, $room->slug]) }}"
-                       style="display:grid;grid-template-columns:5rem 1fr auto;gap:1.5rem;padding:1.4rem 0;border-bottom:var(--hairline) solid var(--rule);align-items:baseline;color:var(--ink);text-decoration:none;">
+                       class="room-row" style="padding:1.4rem 0;border-bottom:var(--hairline) solid var(--rule);align-items:baseline;color:var(--ink);text-decoration:none;">
                         <span style="font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.18em;color:var(--rubric);">
                             room · {{ str_pad((string)$loop->iteration, 2, '0', STR_PAD_LEFT) }}
                         </span>

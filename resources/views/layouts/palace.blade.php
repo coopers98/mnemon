@@ -5,8 +5,6 @@
     body { overflow-x: hidden; }
     .palace-shell { display: grid; grid-template-rows: auto 1fr; min-height: calc(100vh - 5rem); }
     .palace-main { display: grid; grid-template-columns: 16rem minmax(0, 1fr); min-height: 0; gap: 0; }
-    @media (max-width: 1180px) { .palace-main { grid-template-columns: 14rem 1fr; } }
-    @media (max-width: 820px) { .palace-main { grid-template-columns: 1fr; } .rooms-rail { display: none; } }
 
     /* Left rail */
     .rooms-rail { border-right: var(--hairline) solid var(--rule-strong); background: var(--paper); overflow-y: auto; display: flex; flex-direction: column; min-height: calc(100vh - 4rem); }
@@ -50,7 +48,23 @@
     .locus::before { content: ""; width: 6px; height: 6px; background: var(--rubric); transform: rotate(45deg); flex-shrink: 0; }
     .locus:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); transform: scale(1.04); }
 
+    .room-row { display: grid; grid-template-columns: 5rem minmax(0, 1fr) auto; gap: 1.5rem; }
+
     .empty { padding: 3rem 2rem; border: var(--hairline) solid var(--rule); background: var(--paper); text-align: center; color: var(--ink-faint); font-family: var(--serif); font-style: italic; font-size: 1.1rem; }
+
+    /* Narrow screens. These come last so they override the base rules above:
+       placed first, `.rooms-rail { display: flex }` won and the rail pushed
+       the stage below a screen-tall column. */
+    @media (max-width: 1180px) { .palace-main { grid-template-columns: 14rem minmax(0, 1fr); } }
+    @media (max-width: 820px) {
+        .palace-main { grid-template-columns: minmax(0, 1fr); }
+        .rooms-rail { display: none; }
+        .stage { min-height: 0; }
+        .stage-body { padding: 0.75rem; }
+        .stage-body > * { padding: 1.25rem 1rem; }
+        .room-row { grid-template-columns: minmax(0, 1fr) auto; gap: 0.35rem 1rem; }
+        .room-row > :first-child { grid-column: 1 / -1; }
+    }
 </style>
 @stack('palace-head')
 @endpush

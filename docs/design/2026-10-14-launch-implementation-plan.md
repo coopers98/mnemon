@@ -37,7 +37,7 @@
 ## Review Focus
 
 1. **A page whose `related` is `null`, or a wiki where no page has `related`.** The byline must show "Backlinks 0" without errors. Pinned in Task 1.
-2. **Page names containing `/` or `:`** (`wiki/index`, `project:alpha`). JSON encoding escapes `/` as `\/`, so a count done with a database `LIKE` would miss them. The count must compare decoded arrays. Pinned in Task 1.
+2. **One page name that is a prefix of another** (`project:alpha` vs `project:alpha-two`). A substring or `LIKE` match would count the longer name as a backlink of the shorter one. The count must compare exact names in decoded arrays. Pinned in Task 1.
 3. **The Postgres CI job.** `related` is a `json` column (not `jsonb`), so a `LIKE` or JSON operator in SQL behaves differently from SQLite or errors. The count must not depend on SQL JSON operators. Covered by Task 1 running in both CI legs.
 4. **Essay numbers drifting from the README's.** For example, writing "89%" where the README says hit_rate@1 0.886, or quoting the subset table as final. Task 4 ends with a line-by-line fact check against the README.
 5. **The README screenshot showing stale or broken UI.** For example, captured before the phone-menu or paper-sheet fixes are deployed, or at a size where text is unreadable on GitHub. Task 2 captures from the live site after the deploy, at 1440×900, and the image is checked by eye.
@@ -73,38 +73,39 @@
 
     public function test_backlinks_ignore_self_reference_and_null_related(): void
     {
-        WikiPage::factory()->create(['name' => 'wiki/index', 'related' => ['wiki/index']]);
+        WikiPage::factory()->create(['name' => 'concept:self', 'related' => ['concept:self']]);
         WikiPage::factory()->create(['name' => 'concept:z', 'related' => null]);
 
-        $this->actingAs($this->user)->get(route('wiki.show', 'wiki/index'))
+        $this->actingAs($this->user)->get(route('wiki.show', 'concept:self'))
             ->assertOk()
             ->assertSee('<b>Backlinks</b> 0', false);
     }
 
-    public function test_backlinks_match_names_containing_slashes(): void
+    public function test_backlinks_match_whole_names_not_prefixes(): void
     {
-        WikiPage::factory()->create(['name' => 'wiki/index', 'related' => []]);
-        WikiPage::factory()->create(['name' => 'wiki/log', 'related' => ['wiki/index']]);
+        WikiPage::factory()->create(['name' => 'project:alpha', 'related' => []]);
+        WikiPage::factory()->create(['name' => 'project:alpha-two', 'related' => []]);
+        WikiPage::factory()->create(['name' => 'person:ada', 'related' => ['project:alpha-two']]);
 
-        $this->actingAs($this->user)->get(route('wiki.show', 'wiki/index'))
+        $this->actingAs($this->user)->get(route('wiki.show', 'project:alpha'))
             ->assertOk()
-            ->assertSee('<b>Backlinks</b> 1', false);
+            ->assertSee('<b>Backlinks</b> 0', false);
     }
 ```
 
-If `route('wiki.show', 'wiki/index')` doesn't resolve (the route parameter may not accept `/`), check `routes/web.php`. If the route really cannot serve slashed names, replace the slashed name with `synthesis:a/b`-style names that the route does accept, and say so in the report. The test must still exercise a `/` in a name that appears in `related`.
+The wiki route accepts only `[a-z0-9:_-]+` (`routes/web.php:32`), so names containing slashes cannot be viewed and are not tested.
 
 - [ ] **Step 2: Run the tests and confirm they fail.**
 
 Run: `php artisan test --compact --filter=backlinks`
-Expected: the first and third tests FAIL (the page shows "Backlinks 0"); the second passes.
+Expected: the first test FAILS (the page shows "Backlinks 0"). The other two pass already: they pin the behaviour the fix must keep.
 
 - [ ] **Step 3: Implement it.** In `WikiController::show`, after `$relatedPages`:
 
 ```php
         // Backlinks: other pages whose `related` list names this one. Counted in
-        // PHP because `related` is a json column, and SQL JSON matching differs
-        // between SQLite and Postgres (and LIKE misses names json_encode escapes).
+        // PHP because `related` is a json column and SQL JSON matching differs
+        // between SQLite and Postgres; a LIKE would also match name prefixes.
         $backlinkCount = WikiPage::where('name', '!=', $page->name)
             ->get(['related'])
             ->filter(fn (WikiPage $other) => in_array($page->name, $other->related ?? [], true))

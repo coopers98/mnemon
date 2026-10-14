@@ -7,7 +7,8 @@
     <title>@yield('title', 'Mnemon — The memory your AI deserves')</title>
     <meta name="description" content="@yield('meta_description', 'A self-hosted second brain for AI agents. Verbatim storage, hybrid retrieval, a living wiki — exposed over MCP.')" />
     <link rel="icon" href="{{ asset('favicon.ico') }}" />
-    <link rel="stylesheet" href="{{ asset('styles/mnemon.css') }}" />
+    {{-- Versioned by mtime so a deploy is never hidden behind a cached copy (Cloudflare caches .css). --}}
+    <link rel="stylesheet" href="{{ asset('styles/mnemon.css') }}?v={{ filemtime(public_path('styles/mnemon.css')) }}" />
     @stack('head')
 </head>
 <body>

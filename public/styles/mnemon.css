@@ -461,17 +461,16 @@ p { margin: 0 0 1em; }
 }
 .nav-meta span, .nav-meta a { white-space: nowrap; }
 
-/* Narrow screens: the nav drops to its own row and scrolls sideways rather
-   than pushing the page wider than the screen. */
+/* Narrow screens: the nav drops to its own row and wraps onto a second line
+   rather than pushing the page wider than the screen. Each link stays whole. */
 @media (max-width: 960px) {
   .colophon-inner { flex-wrap: wrap; gap: 0.35rem 1.25rem; padding-block: 0.7rem 0; }
   .nav {
     order: 3; flex-basis: 100%; min-width: 0;
-    gap: 1.4rem; overflow-x: auto; white-space: nowrap;
+    flex-wrap: wrap; gap: 0.1rem 1.4rem;
     padding: 0.2rem 0 0.6rem;
-    scrollbar-width: none;
   }
-  .nav::-webkit-scrollbar { display: none; }
+  .nav a { white-space: nowrap; }
   .nav a.is-active::after { bottom: 0; }
 }
 @media (max-width: 560px) {

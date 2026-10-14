@@ -29,6 +29,10 @@ class DemoUiTest extends TestCase
         $this->assertStringNotContainsString('href="'.route('login').'"', $html);
         $this->assertStringNotContainsString('action="'.route('contact.store').'"', $html);
         $this->assertStringContainsString('github.com/coopers98/mnemon/issues', $html);
+        // The correspondence copy points at GitHub, not at a form or an operator setting.
+        $this->assertStringNotContainsString('write it down here', $html);
+        $this->assertStringNotContainsString('MNEMON_CONTACT_TO', $html);
+        $this->assertStringContainsString("go to the project's GitHub issues", $html);
     }
 
     public function test_palace_index_hides_admin_in_demo_mode(): void
@@ -70,6 +74,8 @@ class DemoUiTest extends TestCase
         $this->assertStringNotContainsString('read-only sample brain', $html);
         $this->assertStringContainsString('href="'.route('login').'"', $html);
         $this->assertStringContainsString('action="'.route('contact.store').'"', $html);
+        $this->assertStringContainsString('write it down here', $html);
+        $this->assertStringNotContainsString('MNEMON_CONTACT_TO', $html);
         $this->assertStringContainsString('href="https://trymnemon.com"', $html);
         $this->get('/how-it-works')->assertSee('This instance currently holds');
     }

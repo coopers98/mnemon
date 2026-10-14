@@ -584,7 +584,11 @@
                 <span class="num">§ V — Correspondence</span>
                 <div>
                     <div class="title">Questions, RFCs, or a quiet hello.</div>
-                    <span class="lede">Submissions are stored in this instance and listed in its admin panel. Whether anyone replies is up to whoever runs it.</span>
+                    @demo
+                        <span class="lede">Ideas, objections and bug reports go to the project's GitHub issues, where they can be read and answered in the open.</span>
+                    @else
+                        <span class="lede">Submissions are stored in this instance and listed in its admin panel. Whether anyone replies is up to whoever runs it.</span>
+                    @enddemo
                 </div>
             </div>
 
@@ -592,12 +596,12 @@
                 <div class="contact-prose">
                     <p>
                         If you have an idea about the schema, an objection to the compile pipeline, or a
-                        request for a feature that would make Mnemon useful in your own house — write it
-                        down here. Set <code>MNEMON_CONTACT_TO</code> to have submissions emailed as well
-                        as stored.
+                        request for a feature that would make Mnemon useful in your own house —
+                        @demo open an issue on GitHub. @else write it down here. @enddemo
                     </p>
                     <p style="margin-top:1.25rem;">
-                        For source, issues, and patches, see the project's repository.
+                        For source, issues, and patches, see the project's
+                        <a href="https://github.com/coopers98/mnemon" rel="noopener noreferrer" style="color:var(--rubric);border-bottom:1px solid var(--rubric);">repository</a>.
                     </p>
                 </div>
 

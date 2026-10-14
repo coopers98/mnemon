@@ -78,7 +78,16 @@ class DemoUiTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
         Wing::factory()->create();
-        $this->get('/palace')->assertOk()->assertDontSee('localhost:5432')->assertSee('sqlite');
+        // CI runs the suite on both SQLite and Postgres, so expect whichever
+        // driver this run uses, and never its host or port.
+        $connection = config('database.connections.'.config('database.default'));
+        $response = $this->get('/palace')->assertOk()
+            ->assertSee('<span>'.$connection['driver'].'</span>', false)
+            ->assertDontSee('localhost:5432');
+
+        if (! empty($connection['host'])) {
+            $response->assertDontSee($connection['host'].':'.$connection['port']);
+        }
     }
 
     public function test_wiki_index_pluralises_types(): void

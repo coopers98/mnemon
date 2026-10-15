@@ -1,13 +1,13 @@
 # Changelog
 
 Notable changes to Mnemon. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project does not
-yet tag releases, so entries are grouped by the date the work landed on `main`.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); releases are tagged
+from v1.0.0; earlier entries are grouped by the date the work landed on `main`.
 Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ---
 
-## Unreleased
+## [1.0.0] — 2026-10-15
 
 ### Added
 - **A public, read-only demo** (`MNEMON_DEMO=true`). The app serves only GET

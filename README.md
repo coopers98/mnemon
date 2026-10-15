@@ -90,11 +90,19 @@ automatic HTTPS from Let's Encrypt instead:
    base to the internet — leaving them at the defaults while `DOMAIN` is set is
    the single most likely reason certificate issuance fails.
 
-Running behind a TLS-terminating reverse proxy is **not yet supported**: the
-app does not process `X-Forwarded-*` headers, so behind such a proxy OAuth
-discovery and asset URLs would still be advertised as `http://`, and a browser
-blocks the mixed content that results on the consent screen. Use the `DOMAIN`
-path above for HTTPS.
+To run behind your own TLS-terminating reverse proxy instead, leave `DOMAIN`
+blank (so Caddy serves plain HTTP on port 80 inside the container), point the
+proxy at the published HTTP port, and set `TRUSTED_PROXIES` in `.env` to the
+proxy's address or CIDR range, comma-separated if there are several. The app
+then honours that proxy's `X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and
+`-Prefix` headers, so client IPs and `https://` URLs come out right. Set
+`APP_URL` to the public `https://` address as well. Caveats: `TRUSTED_PROXIES`
+takes addresses and CIDRs only, not `*`, and it must match the address the
+app sees the proxy connecting from (for a proxy on the same host, that is the
+Docker network gateway, not `127.0.0.1`). Unset, no proxy is trusted and the
+app advertises `http://` URLs. The test suite covers the `X-Forwarded-For`
+handling; the `X-Forwarded-Proto` path comes from Laravel's own proxy
+middleware and has not been exercised against a real proxy in this repo.
 
 See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#native-install-the-alternative-to-docker) for the native
 (non-Docker) install, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for running the

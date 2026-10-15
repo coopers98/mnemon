@@ -91,6 +91,7 @@ class SessionDigestService
 
         $persisted = [];
         $pendingWings = [];
+        $dropped = 0;
 
         foreach ($proposals as $p) {
             if (($p['confidence'] ?? 0) < $floor) {
@@ -109,9 +110,14 @@ class SessionDigestService
             // The model reads the transcript, so the wing it names is
             // untrusted input. A restricted token files only into its own
             // wings and proposes only wings it could later reach -- an
-            // approved proposal lands in whatever wing it names.
+            // approved proposal lands in whatever wing it names. Anything
+            // still outside them here had no visible session or unfiled wing
+            // to go to; it is counted, never named, so the caller knows
+            // something was lost without learning where it would have gone.
             if ($allowedWingPatterns !== null
                 && ! WingPatterns::matches((string) ($p['wing_slug'] ?? ''), $allowedWingPatterns)) {
+                $dropped++;
+
                 continue;
             }
 
@@ -196,6 +202,7 @@ class SessionDigestService
             'persisted' => $persisted,
             'queued_for_review' => [],
             'pending_wings' => $pendingWings,
+            'dropped_outside_wings' => $dropped,
         ];
     }
 
@@ -337,6 +344,7 @@ class SessionDigestService
             'persisted' => $persisted,
             'queued_for_review' => [],
             'pending_wings' => [],
+            'dropped_outside_wings' => 0,
             'replayed' => true,
         ];
     }

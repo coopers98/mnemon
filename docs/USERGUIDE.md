@@ -958,13 +958,17 @@ Set the env vars to the contents (one-line, can be plain or base64 — Passport 
 
 OAuth 2.1 requires `https://` for non-localhost redirect URIs. If `APP_URL` is `http://`, the OAuth flow will reject DCR client registrations with `https://` redirects.
 
-**Running behind a TLS-terminating reverse proxy is not yet supported.** There is no
-`TrustProxies` configuration anywhere in this codebase, so Mnemon does not process
-`X-Forwarded-*` headers — a proxy terminating TLS in front of the app would still see
-Mnemon advertise `http://` URLs (OAuth discovery, Vite asset URLs), and a browser blocks
-the resulting mixed content on the consent screen. Until proxy trust is implemented,
-terminate TLS in the same process that serves Mnemon (for example the Docker `DOMAIN`
-path, which handles this via Caddy) rather than behind a separate reverse proxy.
+**Running behind a TLS-terminating reverse proxy.** Leave `DOMAIN` blank, point the proxy
+at the stack's published HTTP port, and set `TRUSTED_PROXIES` in `.env` to the proxy's
+address or CIDR range (comma-separated for several). Mnemon then honours that proxy's
+`X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and `-Prefix` headers, and you should set
+`APP_URL` to the public `https://` address. `TRUSTED_PROXIES` takes addresses and CIDRs
+only, not `*`, and the value must match the address Mnemon sees the proxy connecting from
+(for a proxy on the same Docker host, the network gateway rather than `127.0.0.1`). Unset,
+no proxy is trusted and OAuth discovery and asset URLs are advertised as `http://`, which a
+browser blocks as mixed content on the consent screen. The test suite covers
+`X-Forwarded-For`; `X-Forwarded-Proto` is Laravel's own behaviour and has not been
+exercised against a real proxy in this repo.
 
 #### Migrations on deploy
 
@@ -1020,10 +1024,10 @@ overwritten.
 
 For a real hostname with automatic HTTPS, see the [Quickstart](../README.md#quickstart)
 in the README — set `DOMAIN`, and set `HTTP_BIND=0.0.0.0:80` / `HTTPS_BIND=0.0.0.0:443`
-so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. Running behind
-a separate TLS-terminating reverse proxy is **not yet supported** — Mnemon does not
-process `X-Forwarded-*` headers, so OAuth discovery and asset URLs would still be
-advertised as `http://` behind one. Use the `DOMAIN` path above instead.
+so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. To run behind your own TLS-terminating reverse proxy
+instead, see
+[HTTPS and OAuth redirect_uri](#https-and-oauth-redirect_uri): leave `DOMAIN` blank and set
+`TRUSTED_PROXIES` to the proxy's address or CIDR.
 
 ### Running a public demo
 

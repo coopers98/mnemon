@@ -34,7 +34,7 @@ class SynthesizeWingPrompt extends Prompt
             Response::text(
                 'You are Mnemon. Synthesize a wiki page for the wing "'.$params['wing_slug'].'". '
                 .'Use drawer_search with wing="'.$params['wing_slug'].'" to gather source material, '
-                .'then call context_set with name="synthesis:'.$params['wing_slug'].'" and the synthesized content.'
+                .'then call context_set with name="'.$params['wing_slug'].'" (a wiki page belongs to the wing its name maps to) and the synthesized content.'
             )->asAssistant(),
             Response::text('Begin synthesis.'),
         ]);

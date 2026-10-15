@@ -28,6 +28,16 @@ class SynthesizeWingPromptTest extends TestCase
         $this->assertStringContainsString('work', $combined);
     }
 
+    public function test_prompt_names_a_page_the_wing_restricted_token_may_write(): void
+    {
+        // context_set maps a page name to a wing; "synthesis:work" maps to
+        // synthesis-work, which a token restricted to work is refused.
+        $r = $this->mcpPromptGet('synthesize_wing', ['wing_slug' => 'work'], ['mcp:use'], ['work']);
+        $combined = collect($r->json('result.messages'))->pluck('content.text')->implode(' ');
+
+        $this->assertStringContainsString('context_set with name="work"', $combined);
+    }
+
     public function test_prompt_hidden_for_token_without_mcp_use(): void
     {
         $r = $this->mcpPromptList([]);

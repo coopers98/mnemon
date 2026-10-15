@@ -99,9 +99,9 @@ class SessionDigestService
 
             $suggestedWing = null;
 
-            if ($sessionWingSlug !== null && $this->isProjectFiling($p)) {
+            if ($sessionWingSlug !== null && $this->isProjectFiling($p, $existingWings)) {
                 $p = $this->refileTo($p, $sessionWingSlug, 'project:'.Str::after($sessionWingSlug, 'project-'));
-            } elseif ($unfiledWingSlug !== null && $this->isProjectFiling($p)) {
+            } elseif ($unfiledWingSlug !== null && $this->isProjectFiling($p, $existingWings)) {
                 $suggestedWing = $p['wing_slug'] ?? null;
                 $p = $this->refileTo($p, $unfiledWingSlug, self::UNFILED_WING);
             }
@@ -259,15 +259,21 @@ class SessionDigestService
      * belongs to the session's project. Person, decision and other standing
      * wings are cross-project, so the model's choice there stands.
      *
+     * "Made up" means absent from the token's own wings, not from the
+     * database: a wing the token cannot see must be handled exactly like one
+     * that does not exist, or whether the proposal is refiled says which
+     * hidden wings exist.
+     *
      * @param  array<string, mixed>  $p
+     * @param  array<int, Wing>  $tokenWings
      */
-    private function isProjectFiling(array $p): bool
+    private function isProjectFiling(array $p, array $tokenWings): bool
     {
         $slug = Wing::slugify((string) ($p['wing_slug'] ?? ''));
 
         return str_starts_with($slug, 'project-')
             || ! empty($p['propose_new_wing'])
-            || ! Wing::where('slug', $slug)->exists();
+            || ! collect($tokenWings)->contains(fn (Wing $w) => $w->slug === $slug);
     }
 
     /**

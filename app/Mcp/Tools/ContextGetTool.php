@@ -80,7 +80,8 @@ class ContextGetTool extends Tool
             'sources' => $sources,
             'related' => $related,
             'confidence_score' => $page->confidence_score,
-            'source_count' => $page->source_count,
+            // A count of hidden sources is still a disclosure about them.
+            'source_count' => $patterns === null ? $page->source_count : count($sources),
             'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
             'revision_count' => $page->revision_count,
             'content' => $page->content,

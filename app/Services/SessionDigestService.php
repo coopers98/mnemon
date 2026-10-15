@@ -7,6 +7,7 @@ use App\Models\Room;
 use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use App\Support\WingPatterns;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 
@@ -51,7 +52,7 @@ class SessionDigestService
         // The capture hook can dispatch the same range twice -- two workers
         // racing, or a session replaying a range after a resume -- and each
         // dispatch otherwise costs a reader call and duplicates drawers.
-        if ($replay = $this->replayFor($sessionId, $turnRange)) {
+        if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns)) {
             return $replay;
         }
 
@@ -61,7 +62,14 @@ class SessionDigestService
         $existingRooms = Room::query()
             ->whereIn('wing_id', collect($existingWings)->pluck('id'))
             ->get(['slug', 'wing_id']);
-        $recentDrawers = Drawer::whereIn('id', $recentDrawerIds)->get(['id', 'content']);
+        // Recent drawers go to the reader as context; ids from a hidden wing
+        // must not put that wing's content in front of it.
+        $recentDrawers = Drawer::whereIn('id', $recentDrawerIds)
+            ->when($allowedWingPatterns !== null, fn ($q) => $q->whereHas(
+                'room',
+                fn ($r) => $r->whereIn('wing_id', collect($existingWings)->pluck('id'))
+            ))
+            ->get(['id', 'content']);
         $sessionWingSlug = $project !== null
             ? $this->sessionWingSlug($project, $existingWings, $allowedWingPatterns)
             : null;
@@ -96,6 +104,15 @@ class SessionDigestService
             } elseif ($unfiledWingSlug !== null && $this->isProjectFiling($p)) {
                 $suggestedWing = $p['wing_slug'] ?? null;
                 $p = $this->refileTo($p, $unfiledWingSlug, self::UNFILED_WING);
+            }
+
+            // The model reads the transcript, so the wing it names is
+            // untrusted input. A restricted token files only into its own
+            // wings and proposes only wings it could later reach -- an
+            // approved proposal lands in whatever wing it names.
+            if ($allowedWingPatterns !== null
+                && ! WingPatterns::matches((string) ($p['wing_slug'] ?? ''), $allowedWingPatterns)) {
+                continue;
             }
 
             if (! empty($p['propose_new_wing'])) {
@@ -279,7 +296,7 @@ class SessionDigestService
      * @param  array{start: int, end: int}  $turnRange
      * @return array<string, mixed>|null
      */
-    private function replayFor(string $sessionId, array $turnRange): ?array
+    private function replayFor(string $sessionId, array $turnRange, ?array $allowedWingPatterns): ?array
     {
         $digest = SessionDigest::query()
             ->where('session_id', $sessionId)
@@ -297,11 +314,16 @@ class SessionDigestService
             ->whereIn('id', $digest->drawer_ids)
             ->with('room.wing')
             ->get()
+            // Session ids are the caller's to choose, so a replay can name a
+            // slice another device digested into wings this token cannot see.
+            ->filter(fn (Drawer $drawer) => $allowedWingPatterns === null
+                || WingPatterns::matches((string) $drawer->room?->wing?->slug, $allowedWingPatterns))
             ->map(fn (Drawer $drawer) => [
                 'id' => $drawer->id,
                 'wing' => $drawer->room?->wing?->slug,
                 'room' => $drawer->room?->slug,
             ])
+            ->values()
             ->all();
 
         return [

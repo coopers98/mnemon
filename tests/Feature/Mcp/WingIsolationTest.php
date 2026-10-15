@@ -263,6 +263,9 @@ class WingIsolationTest extends TestCase
 
         $this->mcpCall('session_digest', $args, ['mcp:use'])->assertOk();
 
+        // The guard caches the user, and with it the first request's token.
+        $this->app['auth']->forgetGuards();
+
         $res = $this->mcpCall('session_digest', $args, ['mcp:use'], self::RESTRICTED);
 
         $res->assertOk();

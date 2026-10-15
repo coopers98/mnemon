@@ -60,7 +60,7 @@ class WikiLintTool extends Tool
             $this->detectStalePages($findings, $allPages);
         }
         if ($focus === 'all' || $focus === 'orphans') {
-            $this->detectOrphanPages($findings, $allPages);
+            $this->detectOrphanPages($findings, $allPages, $patterns);
         }
         if ($focus === 'all' || $focus === 'empty') {
             $this->detectEmptyPages($findings, $allPages);
@@ -73,8 +73,9 @@ class WikiLintTool extends Tool
         }
 
         // Detect across every page, then drop what the token cannot read.
-        // Filtering the pages first would turn a page referenced only by a
-        // hidden page into a false orphan.
+        // Orphan detection is the exception: it counts references from
+        // readable pages only (see detectOrphanPages), because whether a
+        // hidden page links to a readable one is itself hidden.
         if ($patterns !== null) {
             $findings = array_values(array_filter(
                 $findings,
@@ -166,17 +167,27 @@ class WikiLintTool extends Tool
     }
 
     /**
+     * A restricted token sees a page as an orphan when no page *it can read*
+     * references it. Counting hidden references would let the orphan flag
+     * reveal that a hidden page links to a readable one. The orphans that
+     * produces are false only from the whole wiki's point of view, and
+     * nothing acts on them: auto_fix needs an unrestricted token.
+     *
      * @param  Collection<int, WikiPage>  $allPages
+     * @param  array<string>|null  $patterns
      */
-    private function detectOrphanPages(array &$findings, Collection $allPages): void
+    private function detectOrphanPages(array &$findings, Collection $allPages, ?array $patterns = null): void
     {
         $excludedNames = ['wiki:index', 'wiki:log'];
 
         $filteredPages = $allPages->whereNotIn('name', $excludedNames);
+        $referencingPages = $patterns === null
+            ? $filteredPages
+            : $filteredPages->filter(fn (WikiPage $p) => $p->readableWith($patterns));
 
         // Collect all page names referenced in any page's 'related' array
         $referencedNames = collect();
-        foreach ($filteredPages as $page) {
+        foreach ($referencingPages as $page) {
             if (! empty($page->related)) {
                 $referencedNames = $referencedNames->merge($page->related);
             }

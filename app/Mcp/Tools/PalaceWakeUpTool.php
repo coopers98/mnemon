@@ -116,8 +116,10 @@ class PalaceWakeUpTool extends Tool
             ])->values()->all();
 
         // Pages with pending updates
-        $pendingUpdatePages = WikiPage::pendingUpdates()
-            ->get()
+        $pendingUpdatePages = WikiPage::readableSubset(
+            WikiPage::pendingUpdates()->get(),
+            $patterns
+        )
             ->map(fn ($p) => [
                 'name' => $p->name,
                 'type' => $p->type,

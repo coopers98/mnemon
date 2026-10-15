@@ -63,7 +63,7 @@
 
     <div class="doc-byline">
         <span><b>Compiled</b> from {{ $sourceDrawers->count() }} verbatim source{{ $sourceDrawers->count() !== 1 ? 's' : '' }}</span>
-        <span><b>Backlinks</b> {{ $page->backlinks_count ?? 0 }}</span>
+        <span><b>Backlinks</b> {{ $backlinkCount }}</span>
         <span><b>Type</b> {{ ucfirst($page->type) }}</span>
         @if ($page->last_compiled_at)
             <span><b>Last compiled</b> {{ $page->last_compiled_at->format('Y-m-d') }}</span>

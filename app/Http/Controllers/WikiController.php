@@ -44,13 +44,21 @@ class WikiController extends Controller
             ->map(fn (string $pageName) => WikiPage::where('name', $pageName)->first())
             ->filter();
 
+        // Backlinks: other pages whose `related` list names this one. Counted in
+        // PHP because `related` is a json column and SQL JSON matching differs
+        // between SQLite and Postgres; a LIKE would also match name prefixes.
+        $backlinkCount = WikiPage::where('name', '!=', $page->name)
+            ->get(['related'])
+            ->filter(fn (WikiPage $other) => in_array($page->name, $other->related ?? [], true))
+            ->count();
+
         // Get source drawers
         $sourceDrawerIds = collect($page->sources ?? []);
         $sourceDrawers = $sourceDrawerIds->isNotEmpty()
             ? Drawer::whereIn('id', $sourceDrawerIds)->with('room.wing')->get()
             : collect();
 
-        return view('wiki.show', compact('page', 'renderedContent', 'relatedPages', 'sourceDrawers'));
+        return view('wiki.show', compact('page', 'renderedContent', 'relatedPages', 'sourceDrawers', 'backlinkCount'));
     }
 
     /**

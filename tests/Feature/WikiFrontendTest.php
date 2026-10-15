@@ -285,4 +285,39 @@ class WikiFrontendTest extends TestCase
                 ->assertSee($title);
         }
     }
+
+    // ---- Backlinks ----
+
+    public function test_backlinks_count_pages_that_list_this_one_as_related(): void
+    {
+        WikiPage::factory()->create(['name' => 'project:alpha', 'related' => []]);
+        WikiPage::factory()->create(['name' => 'person:ada', 'related' => ['project:alpha', 'concept:x']]);
+        WikiPage::factory()->create(['name' => 'concept:x', 'related' => ['project:alpha']]);
+        WikiPage::factory()->create(['name' => 'concept:y', 'related' => ['person:ada']]);
+
+        $this->actingAs($this->user)->get(route('wiki.show', 'project:alpha'))
+            ->assertOk()
+            ->assertSee('<b>Backlinks</b> 2', false);
+    }
+
+    public function test_backlinks_ignore_self_reference_and_null_related(): void
+    {
+        WikiPage::factory()->create(['name' => 'concept:self', 'related' => ['concept:self']]);
+        WikiPage::factory()->create(['name' => 'concept:z', 'related' => null]);
+
+        $this->actingAs($this->user)->get(route('wiki.show', 'concept:self'))
+            ->assertOk()
+            ->assertSee('<b>Backlinks</b> 0', false);
+    }
+
+    public function test_backlinks_match_whole_names_not_prefixes(): void
+    {
+        WikiPage::factory()->create(['name' => 'project:alpha', 'related' => []]);
+        WikiPage::factory()->create(['name' => 'project:alpha-two', 'related' => []]);
+        WikiPage::factory()->create(['name' => 'person:ada', 'related' => ['project:alpha-two']]);
+
+        $this->actingAs($this->user)->get(route('wiki.show', 'project:alpha'))
+            ->assertOk()
+            ->assertSee('<b>Backlinks</b> 0', false);
+    }
 }

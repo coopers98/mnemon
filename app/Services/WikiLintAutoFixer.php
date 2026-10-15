@@ -91,7 +91,7 @@ class WikiLintAutoFixer
     }
 
     /**
-     * Soft-delete an empty page (skip wiki/index, wiki/log).
+     * Soft-delete an empty page (skip wiki:index, wiki:log).
      *
      * @return array<string, mixed>|null
      */

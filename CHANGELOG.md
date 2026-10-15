@@ -22,11 +22,30 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   one. Demo mode schedules it nightly at 04:00 and does not schedule decay or
   retention.
 - **`TRUSTED_PROXIES`** names the proxy addresses or CIDRs whose
-  `X-Forwarded-For` is trusted. Unset, no proxy is trusted (except on Laravel
-  Cloud and `*.on-forge.com` / `*.on-vapor.com` hosts, where the framework
-  default trusts all).
+  `X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and `-Prefix` headers are
+  trusted. Unset, no proxy is trusted (except on Laravel Cloud and
+  `*.on-forge.com` / `*.on-vapor.com` hosts, where the framework default
+  trusts all).
 - **`MNEMON_DEMO_URL`** makes a real install's landing page and
   `/how-it-works` link to the public demo.
+- **`capture_ignore`** in `~/.mnemon/config.json` stops capture for the
+  repositories it names; recall still runs. An assistant's workspace answering
+  a heartbeat every 20 minutes had digested the same checklist into 518 drawers
+  in `project-mnemon`, ~400 of them near-identical. Plugin 0.3.9.
+- CI, license and stack badges at the top of the README.
+- `.gitleaksignore` covering the synthetic credentials in `ContentSanitizer`'s
+  own tests, so a public clone does not report ten findings that all resolve to
+  "this is the test for the redactor".
+- **Connected Devices** (`/admin/connected-devices`) — what has actually
+  reached this instance and when, with per-device call counts and tool variety.
+  Devices provisioned with `mnemon:device-client` that have never successfully
+  connected are listed as **never seen** rather than being silently absent,
+  which is the failure worth catching when wiring up a new machine.
+- `brain_sessions.device` stores the bare credential name alongside the display
+  `source`. `source` embeds the token id and device tokens refresh hourly, so
+  grouping the audit trail by it counted one machine once per hour — the live
+  instance showed a single laptop as sixteen devices. Existing rows are
+  backfilled by the migration.
 
 ### Changed
 - **Wiki writes go through `WikiPageWriter`**, which `context_set` and the
@@ -34,6 +53,15 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - The wiki index says "Syntheses", a wiki page no longer shows its title twice,
   and the palace footer shows the database driver in use rather than a fixed
   "postgres · localhost:5432".
+- **Digests use `gpt-5.6-luna`** by default. On six real transcript slices it
+  wrote denser, self-contained drawers than `gpt-5.4-mini`, returned nothing for
+  a cron run that 5.4-mini filed two drawers from, and cost about a quarter as
+  much per digest, at 2–3× the latency (digests run detached).
+- **Digests used `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`
+  setting names the chat model Mnemon's LLM work runs on, so the wiki compiler
+  will share it; `MNEMON_DIGEST_OPENAI_MODEL` still overrides it for digests.
+- The LongMemEval results now open the README, with the scope caveat (palace
+  layer only, self-judged QA) and the subset correction stated inline.
 
 ### Fixed
 - **`/wiki/search?q[]=` returned 500**, and **the palace wing page's wiki link
@@ -69,39 +97,6 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   0.3.8) now treats a scratchpad as the directory it belongs to, rebuilding that
   path from the slug by walking the filesystem, since the slug alone cannot
   tell `final-commit` from `final/commit`.
-
-### Changed
-- **Digests use `gpt-5.6-luna`** by default. On six real transcript slices it
-  wrote denser, self-contained drawers than `gpt-5.4-mini`, returned nothing for
-  a cron run that 5.4-mini filed two drawers from, and cost about a quarter as
-  much per digest, at 2–3× the latency (digests run detached).
-- **Digests used `gpt-5.4-mini`**, not `gpt-4o-mini`. A single `MNEMON_LLM_MODEL`
-  setting names the chat model Mnemon's LLM work runs on, so the wiki compiler
-  will share it; `MNEMON_DIGEST_OPENAI_MODEL` still overrides it for digests.
-
-### Added
-- **`capture_ignore`** in `~/.mnemon/config.json` stops capture for the
-  repositories it names; recall still runs. An assistant's workspace answering
-  a heartbeat every 20 minutes had digested the same checklist into 518 drawers
-  in `project-mnemon`, ~400 of them near-identical. Plugin 0.3.9.
-- CI, license and stack badges at the top of the README.
-- `.gitleaksignore` covering the synthetic credentials in `ContentSanitizer`'s
-  own tests, so a public clone does not report ten findings that all resolve to
-  "this is the test for the redactor".
-
-### Added
-- **Connected Devices** (`/admin/connected-devices`) — what has actually
-  reached this instance and when, with per-device call counts and tool variety.
-  Devices provisioned with `mnemon:device-client` that have never successfully
-  connected are listed as **never seen** rather than being silently absent,
-  which is the failure worth catching when wiring up a new machine.
-- `brain_sessions.device` stores the bare credential name alongside the display
-  `source`. `source` embeds the token id and device tokens refresh hourly, so
-  grouping the audit trail by it counted one machine once per hour — the live
-  instance showed a single laptop as sixteen devices. Existing rows are
-  backfilled by the migration.
-
-### Fixed
 - **`wiki/index` and `wiki/log` were a permanent 404 on the web UI.** The wiki
   show route constrains the page name to `[a-z0-9:_-]+`, which has no `/`, so
   the two pages the application maintains for itself could never be opened.
@@ -109,32 +104,6 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   convention every other page already uses. Widening the route was rejected:
   with `/` allowed, the greedy `wiki.show` pattern swallows the `/history`
   suffix of the route registered after it.
-
-### Changed
-- The LongMemEval results now open the README, with the scope caveat (palace
-  layer only, self-judged QA) and the subset correction stated inline.
-
-### Security
-- **Wing restrictions now cover the wiki.** `wiki_pages` had no wing dimension,
-  so any token carrying `mcp:use` could read any wiki page whatever its
-  restrictions — through `context_get`, `context_list`, `palace_wake_up`,
-  `brain_status`, and `recall`, which runs automatically on every prompt. Wiki
-  pages are compiled palace content, so a token restricted to `work` could read
-  a synthesis of `personal` drawers.
-
-  A page's wing is derived from its name using the mapping `wiki_compile`
-  already enforces (`project:atlas` → `project-atlas`), so the fix needs no
-  column and no backfill. Pages that map to no permitted wing — including the
-  `wiki/index` and `wiki/log` pages that enumerate other pages — are treated as
-  non-existent for a restricted token rather than public. `context_get` returns
-  the same "not found" for a forbidden page as for a missing one, so the error
-  is not an existence oracle across wings.
-- **`brain_status` listed every wing by name** to any token, regardless of
-  restrictions. Not the documented wiki hole, but the same boundary: a
-  `work`-restricted agent learned that `personal` existed and how much was in
-  it. Now filtered.
-
-### Fixed
 - **A long prompt silently disabled recall for the whole session.**
   `RecallTool` validates `prompt` => `max:4000` and `mnemon-recall.sh` sent it
   uncapped, so any prompt over the limit was rejected whole and the session got
@@ -166,8 +135,28 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
   Verified end to end against a real Ollama server: `nomic-embed-text` returns
   768 dimensions, they store, and semantic search ranks correctly.
+- **Wiki pages always showed "Backlinks 0".** The count is now the number of
+  other pages whose `related` list names the page, matched on the whole name.
 
 ### Security
+- **Wing restrictions now cover the wiki.** `wiki_pages` had no wing dimension,
+  so any token carrying `mcp:use` could read any wiki page whatever its
+  restrictions — through `context_get`, `context_list`, `palace_wake_up`,
+  `brain_status`, and `recall`, which runs automatically on every prompt. Wiki
+  pages are compiled palace content, so a token restricted to `work` could read
+  a synthesis of `personal` drawers.
+
+  A page's wing is derived from its name using the mapping `wiki_compile`
+  already enforces (`project:atlas` → `project-atlas`), so the fix needs no
+  column and no backfill. Pages that map to no permitted wing — including the
+  `wiki/index` and `wiki/log` pages that enumerate other pages — are treated as
+  non-existent for a restricted token rather than public. `context_get` returns
+  the same "not found" for a forbidden page as for a missing one, so the error
+  is not an existence oracle across wings.
+- **`brain_status` listed every wing by name** to any token, regardless of
+  restrictions. Not the documented wiki hole, but the same boundary: a
+  `work`-restricted agent learned that `personal` existed and how much was in
+  it. Now filtered.
 - Replaced the fixture person name used across the search, recall and hook
   tests, the fixture server and the user guide. It was a real individual, named
   with a job title. The replacement preserves the properties the tests depend
@@ -175,6 +164,13 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   comments cite to explain the D11 tsquery defect.
 - Scrubbed the maintainer's live instance hostname, a server IP and a rotated
   OAuth client id from the full history.
+- **The wiki MCP resource ignored wing restrictions.** `context_get` hid a
+  page outside the token's wings, but `resources/read mnemon://wiki/{slug}`
+  returned its full body. The resource now applies the same rule and returns
+  the same "not found" for a forbidden page as for a missing one. `wiki_history`
+  (revision hashes, agent ids) and `wiki_graph` (page names and edges) were open
+  the same way and are now filtered too: the graph neither returns a forbidden
+  page nor traverses through one.
 
 ---
 
@@ -310,3 +306,5 @@ error message**:
 
 The palace (wings → rooms → drawers), the wiki layer, hybrid retrieval over
 pgvector plus PostgreSQL full-text, and the Filament admin panel.
+
+[1.0.0]: https://github.com/coopers98/mnemon/releases/tag/v1.0.0

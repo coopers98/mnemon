@@ -133,7 +133,7 @@ scores the hits into `results/metrics-{tag}.json` — both `hit_rate@{1,3,5,10}`
 breakdown — and excludes any errored search from the denominator rather than
 counting it as a miss.
 
-**The keyless number is the shipped default.** A fresh Mnemon install ships
+**The keyless number is the quickstart default.** The Docker quickstart ships
 `MNEMON_EMBEDDING_DRIVER=none` — no OpenAI account, no spend, works
 out of the box. This tag measures exactly that configuration: full-text +
 temporal ranking, no semantic leg. Ollama was not a substitute at the time of

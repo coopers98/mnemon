@@ -384,7 +384,7 @@ After accumulating several drawers about a topic, ask Claude to synthesize:
 
 > "Synthesize what we know about Dorothy Vaughan into a wiki page"
 
-Claude calls `drawer_search` to gather sources, then `context_set` with `name: "person:dorothy-vaughan"` and the synthesized content. The page auto-updates `wiki/index` and `wiki/log`.
+Claude calls `drawer_search` to gather sources, then `context_set` with `name: "person:dorothy-vaughan"` and the synthesized content. The page auto-updates `wiki:index` and `wiki:log`.
 
 The `SynthesizeWingPrompt` MCP prompt automates this — your client can offer it as a one-click action.
 
@@ -423,7 +423,7 @@ All Mnemon tools require the single OAuth scope **`mcp:use`**. There are no per-
 Wing restrictions control *which wings* the token can access.
 
 - **All wings (no restriction)** — token sees every wing. Use for trusted personal-device agents.
-- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's *palace* content — drawers, drawer search, and the wing, room and drawer resources. This does **not** extend to the wiki: wiki pages have no wing dimension, so any token can read any wiki page. See [Limitations](../README.md#limitations).
+- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's palace content — drawers, drawer search, and the wing, room and drawer resources — or read its wiki pages. The wiki is scoped by page name: a page's wing is derived from its name (`project:atlas` → wing `project-atlas`), so name pages after the wing they synthesise. `wiki_lint` is not wing-scoped. See [Limitations](../README.md#limitations).
 
 Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each matching wing, or grant "All wings" and rely on the agent to scope its calls.
 
@@ -472,7 +472,7 @@ Suggested layout:
 
 All tokens carry the single `mcp:use` scope — wing restrictions are the real isolation mechanism. To create a "read-only" agent, restrict it to wings where writing would be harmless or nonexistent.
 
-This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` *palace* content. They can read every wiki page, though — wing restrictions do not apply to the wiki layer — so anything compiled into the wiki is exposed by any leaked token regardless of its restrictions. See [Limitations](../README.md#limitations).
+This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` palace content or `personal` wiki pages. Wiki pages are scoped by name, since page names map to wings (`project:atlas` → `project-atlas`), so a page named generically but compiled from `personal` drawers is scoped by its name, not its content. `wiki_lint` is not wing-scoped and exposes every page's name and metadata. See [Limitations](../README.md#limitations).
 
 ### Auditing what each device did
 
@@ -1239,7 +1239,7 @@ True multi-tenancy (per-user wings, per-user tokens scoped to their own data) is
 
 Yes, with `MNEMON_EMBEDDING_DRIVER=none` (full-text + temporal search, no semantic ranking). No external API calls. The OAuth flow needs a browser but doesn't require external servers. This is the Docker Quickstart's default.
 
-A local-Ollama driver is implemented in config but currently can't store embeddings — see the note in [Re-embedding](#re-embedding) — so it isn't a working offline option for semantic search today.
+For semantic search offline, use the `ollama` driver: it is the fully local semantic option, embedding with `nomic-embed-text` on your own Ollama server, so no content leaves the host. See the note in [Re-embedding](#re-embedding).
 
 **Q: Can I use Mnemon as a knowledge base for a static site?**
 

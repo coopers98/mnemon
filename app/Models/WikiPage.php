@@ -52,7 +52,7 @@ class WikiPage extends Model
      * Whether a token holding these patterns may read this page.
      *
      * `null` patterns mean unrestricted. A page whose derived wing matches
-     * nothing — `wiki/index`, `wiki/log`, anything off-convention — is
+     * nothing — `wiki:index`, `wiki:log`, anything off-convention — is
      * unreadable by a restricted token rather than readable by everyone.
      * Failing closed is the point: the alternative is the hole this replaces,
      * and those index pages enumerate other pages by name.

@@ -293,7 +293,7 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)
-- **Tests:** PHPUnit 12, Livewire-style Filament page tests (611 passed / 9 skipped on SQLite)
+- **Tests:** PHPUnit 12, Livewire-style Filament page tests (696 passed / 9 skipped on SQLite)
 
 The MCP server is built on [`laravel/mcp`](https://github.com/laravel/mcp) and [`laravel/passport`](https://laravel.com/docs/passport) — Streamable HTTP + OAuth 2.1 + Dynamic Client Registration + tool/resource/prompt dispatch + audit logging.
 
@@ -315,7 +315,7 @@ The classical **method of loci** is the naming convention. A wing is a section o
 
 ## What's built
 
-All sprints complete. 611 passing, 9 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
+All sprints complete. 696 passing, 9 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
@@ -383,7 +383,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Common commands
 
 ```bash
-php artisan test --compact              # run the test suite (611 passed / 9 skipped on SQLite)
+php artisan test --compact              # run the test suite (696 passed / 9 skipped on SQLite)
 ./vendor/bin/pint                       # format PHP
 php artisan migrate:fresh --seed        # rebuild the DB from scratch
 php artisan mnemon:reembed              # re-embed all drawers + wiki pages with the current driver

@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\WikiPage;
 use App\Services\WikiLintAutoFixer;
@@ -17,7 +18,7 @@ use Laravel\Mcp\Server\Tool;
 #[Description('Scan wiki pages for quality issues (stale, orphans, empty, low confidence, low quality). Optionally auto-fix safe issues.')]
 class WikiLintTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'wiki_lint';
 
@@ -38,6 +39,18 @@ class WikiLintTool extends Tool
 
         $focus = $params['focus'] ?? 'all';
         $autoFix = (bool) ($params['auto_fix'] ?? false);
+        $patterns = $this->wingPatternsFor($request);
+
+        // Auto-fix soft-deletes stubs and prunes `related` arrays across the
+        // whole wiki. A restricted token cannot be allowed to do that to wings
+        // it cannot see, and narrowing the fixer to its own wings would still
+        // prune references based on pages it cannot see. Refused outright.
+        if ($autoFix && $patterns !== null) {
+            $reason = 'auto_fix requires a token without wing restrictions';
+            BrainSessionLogger::logDenial($request, 'wiki_lint', $params, $reason);
+
+            return Response::error($reason);
+        }
 
         // Load all pages once and pass the collection to each detector
         $allPages = WikiPage::all();
@@ -57,6 +70,16 @@ class WikiLintTool extends Tool
         }
         if ($focus === 'all' || $focus === 'low_quality') {
             $this->detectLowQuality($findings, $allPages);
+        }
+
+        // Detect across every page, then drop what the token cannot read.
+        // Filtering the pages first would turn a page referenced only by a
+        // hidden page into a false orphan.
+        if ($patterns !== null) {
+            $findings = array_values(array_filter(
+                $findings,
+                fn ($f) => WikiPage::nameReadableWith($f['page'], $patterns)
+            ));
         }
 
         // Deferred lint detectors (require LLM calls, not yet implemented):

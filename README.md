@@ -135,7 +135,7 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 - **Verbatim retention.** No lossy summarisation at ingest. The drawer you stored is the drawer you retrieve, minus any credentials `ContentSanitizer` redacted on the way in.
 - **Hybrid retrieval.** Semantic, keyword, and recency together — so finding "that thing about retries last week" works even when the keyword is misremembered and the meeting note didn't use the same words.
 - **Synthesis without losing source.** The wiki is the compiled view; the palace remains the canonical record. Wiki pages can be regenerated from drawers; the reverse is not true.
-- **Per-agent authorisation.** OAuth tokens carry the single scope `mcp:use` and optional per-token wing restrictions captured at the consent screen. Wing restrictions are the real isolation mechanism **for palace content and wiki pages** — a project-specific agent reads only its own wing's drawers; a read-only agent gets a token restricted to wings that have no write-capable counterpart. They also cover the wiki layer, scoped by page name — see [Limitations](#limitations).
+- **Per-agent authorisation.** OAuth tokens carry the single scope `mcp:use` and optional wing restrictions captured at the consent screen and stored per OAuth client, so they apply to every token that client holds, refreshed ones included. Wing restrictions are the real isolation mechanism **for palace content and wiki pages** — a project-specific agent reads only its own wing's drawers; a read-only agent gets a token restricted to wings that have no write-capable counterpart. They also cover the wiki layer, scoped by page name — see [Limitations](#limitations).
 - **Audit trail.** Every MCP tool invocation lands in `brain_sessions`. You can see what each agent has been doing, when, and against which key.
 - **Knowledge graph.** Entities and typed relationships extracted from wiki pages — `extractEntity()` takes a `WikiPage`, so drawers are not a source — with graph traversal queries for discovering connections across your knowledge base.
 - **Confidence & quality scoring.** Every piece of content carries a confidence score that decays over time, plus a multi-factor quality score. Stale or low-quality content surfaces automatically for review.
@@ -174,7 +174,7 @@ Then visit `http://localhost:8000/admin`. The panel ships:
 - **Dashboard** — drawer count, wiki page count, drawers added in the last 7 days (with sparkline), and the timestamp of the latest write.
 - **Wings / Rooms / Drawers** — full CRUD plus a Drawer view page with soft-delete, force-delete with confirmation, and restore. Drawers can be filtered by wing, source, date range, or trashed status.
 - **Wiki pages** — markdown-rendered view, type badge, type filter, word count, last-compiled-at staleness tracking. Edits only reset staleness when the actual content changes.
-- **OAuth clients & tokens** — view registered OAuth clients (via Dynamic Client Registration or manual creation), revoke access tokens, and inspect per-token wing restrictions. Managed in the Filament panel.
+- **OAuth clients & tokens** — view registered OAuth clients (via Dynamic Client Registration or manual creation), revoke access tokens, and inspect each client's wing restrictions. Managed in the Filament panel.
 - **MCP audit log** — read-only browser for every tool invocation. Filter by tool name, source, or date range. The full input JSON is pretty-printed on the view page.
 - **Search** — custom page at `/admin/search` with a live form. Toggle between palace, wiki, or both; optionally narrow by wing. Cross-source results are jointly normalised before sorting so the merged ranking is meaningful.
 
@@ -189,7 +189,7 @@ claude mcp add --transport http mnemon https://mnemon.example.com/mcp
 # Complete the browser OAuth flow — log in, grant scopes, select wing restrictions
 ```
 
-All tools require scope `mcp:use`. Wing restrictions on the token provide per-agent isolation.
+All tools require scope `mcp:use`. Wing restrictions on the token's OAuth client provide per-agent isolation.
 
 | Tool | What it does |
 |---|---|
@@ -208,7 +208,7 @@ All tools require scope `mcp:use`. Wing restrictions on the token provide per-ag
 | `recall` | Hybrid recall of wiki excerpts and drawer snippets for a prompt, packed into a token budget; powers the Claude Code `mnemon-recall.sh` hook |
 | `session_digest` | Digest a sanitized transcript slice into drawer proposals; persists high-confidence ones, filing project-specific drawers under the session's project wing; powers the Claude Code `mnemon-capture.sh` hook |
 
-Wing restrictions on a token short-circuit before the tool even runs — a token restricted to `project:atlas` can never see a drawer in `personal`.
+Wing restrictions on a token's OAuth client short-circuit before the tool even runs — a client restricted to `project:atlas` can never see a drawer in `personal`.
 
 ---
 
@@ -338,7 +338,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 
 - **A wiki page's wing is derived from its name, not from its sources.** Wing restrictions now cover the wiki: `context_get`, `context_list`, `palace_wake_up`, `brain_status` and `recall` all filter pages a token may not read, and a page whose name maps to no permitted wing is treated as non-existent rather than public. The association uses the same mapping `wiki_compile` enforces (`project:atlas` → wing `project-atlas`), so it needs no column and no backfill — on a real instance 28 of 32 pages mapped by name. The residual gap is that the wing follows the **name**: a page named generically but compiled from drawers in a restricted wing would be scoped by its name rather than by its content. Name your pages after the wing they synthesise, and the isolation holds. Index pages (`wiki/index`, `wiki/log`) map to no wing and are therefore invisible to restricted tokens by design — they enumerate other pages.
 - **The wiki does not maintain itself.** Wiki pages are compiled when an agent is asked to compile them. `mnemon:auto-compile-stale` reports which pages have pending drawers; it does not rewrite them, and nothing is scheduled to. Each recompile is a model call, so the trigger is deliberately yours.
-- **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-token wing restrictions.
+- **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-client wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.
 - **Semantic search needs Postgres + pgvector.** SQLite (the test DB) gracefully falls back to full-text + temporal, but if you run locally on SQLite you get no semantic ranking.
 - **Word count is ASCII-only.** `getWordCountAttribute()` uses PHP's `str_word_count`. Multi-byte content under-counts. Documented; will be revisited if it ever matters.

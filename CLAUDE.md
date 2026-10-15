@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. OAuth 2.1 via Passport with the `mcp:use` scope and per-token wing restrictions controls access.
+Mnemon is a self-hosted second brain built on Laravel 13. It has two layers: the **palace** (verbatim, append-only storage organized into wings → rooms → drawers) and the **wiki** (compiled, synthesized pages that distill palace content into structured knowledge). The system is exposed via MCP (Model Context Protocol) tools so AI agents can read and write to it programmatically, and managed through a Filament 5 admin panel. OAuth 2.1 via Passport with the `mcp:use` scope and per-OAuth-client wing restrictions controls access.
 
 ## Stack
 
@@ -52,9 +52,9 @@ Raw content lives in a three-level hierarchy:
 
 Endpoint: `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Built on [`laravel/mcp`](https://github.com/laravel/mcp).
 
-Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant the token and restrict which wings it can access.
+Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant access and restrict which wings the client can reach.
 
-Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_token_restrictions`) are the real per-agent isolation mechanism.
+Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_client_restrictions`, keyed by OAuth client) are the real per-agent isolation mechanism.
 
 **Layer 2 tools (automatic memory for Claude Code):** `recall` (per-prompt context injection, called by `mnemon-recall.sh`) and `session_digest` (end-of-session transcript digestion, called by `mnemon-capture.sh`) extend the original 12 tools.
 
@@ -67,7 +67,7 @@ See full spec at `docs/design/2026-04-26-mcp-rework-design.md` (dated rationale,
 Authentication is handled by Laravel Passport (OAuth 2.1):
 - **OAuth clients** are registered via DCR (MCP clients like Claude Code do this automatically) or manually via `php artisan passport:client`.
 - **Access tokens** carry the single scope `mcp:use`.
-- **Per-token wing restrictions** are captured at the consent screen and stored in `mcp_token_restrictions` (FK → `oauth_access_tokens`).
+- **Per-client wing restrictions** are captured at the consent screen and stored in `mcp_client_restrictions` (primary key `client_id`), so they apply to every token the client holds, including refreshed ones. The legacy `mcp_token_restrictions` table (FK → `oauth_access_tokens`) is no longer written; it is read only as a fallback when no client row exists.
 - Token revocation via the Filament admin panel under OAuth Access Tokens.
 
 ### Audit Trail
@@ -85,7 +85,7 @@ app/
     Prompts/       — MCP prompt handlers
     Concerns/      — Shared traits (RequiresScope, RequiresWingAccess, ResolvesAgentSource, etc.)
     Support/       — BrainSessionLogger and other support classes
-  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, McpTokenRestriction, WikiPendingWing)
+  Models/          — Eloquent models (Wing, Room, Drawer, WikiPage, BrainSession, McpClientRestriction, McpTokenRestriction (legacy), WikiPendingWing)
   Console/
     Commands/      — Artisan commands (includes InstallClaudeCodeHooks.php for Layer 2 setup)
   Providers/

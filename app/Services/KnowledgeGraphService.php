@@ -14,14 +14,17 @@ class KnowledgeGraphService
      * Returns a subgraph: nodes (page names + metadata) and edges (typed relationships).
      *
      * @param  string[]|null  $edgeTypes  Filter to specific edge types; null = all
+     * @param  string[]|null  $wingPatterns  The caller's wing restriction; null = unrestricted.
+     *                                       Pages outside it are neither returned nor traversed
+     *                                       through, and edges touching them are dropped.
      */
-    public function traverse(string $startPage, int $maxDepth = 2, ?array $edgeTypes = null): array
+    public function traverse(string $startPage, int $maxDepth = 2, ?array $edgeTypes = null, ?array $wingPatterns = null): array
     {
         $visited = [];
         $nodes = [];
         $edges = [];
 
-        $this->bfs($startPage, $maxDepth, $edgeTypes, $visited, $nodes, $edges);
+        $this->bfs($startPage, $maxDepth, $edgeTypes, $wingPatterns, $visited, $nodes, $edges);
 
         return [
             'start' => $startPage,
@@ -42,6 +45,7 @@ class KnowledgeGraphService
         string $startPage,
         int $maxDepth,
         ?array $edgeTypes,
+        ?array $wingPatterns,
         array &$visited,
         array &$nodes,
         array &$edges
@@ -56,6 +60,9 @@ class KnowledgeGraphService
                     continue;
                 }
                 $visited[$pageName] = true;
+                if (! WikiPage::nameReadableWith($pageName, $wingPatterns)) {
+                    continue;
+                }
                 $toVisit[] = $pageName;
             }
 
@@ -100,6 +107,13 @@ class KnowledgeGraphService
 
             $nextLevel = [];
             foreach ($relationships as $rel) {
+                // An edge to an unreadable page would name it; skipping it
+                // here also stops traversal from passing through that page.
+                if (! WikiPage::nameReadableWith($rel->from_page, $wingPatterns)
+                    || ! WikiPage::nameReadableWith($rel->to_page, $wingPatterns)) {
+                    continue;
+                }
+
                 $edgeKey = "{$rel->from_page}:{$rel->edge_type}:{$rel->to_page}";
 
                 if (! isset($edges[$edgeKey])) {

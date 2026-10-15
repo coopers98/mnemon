@@ -171,4 +171,46 @@ class WikiHistoryToolTest extends TestCase
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_history']);
     }
+
+    // -----------------------------------------------------------------------
+    // Wing restrictions — an unreadable page looks exactly like a missing one
+    // -----------------------------------------------------------------------
+
+    public function test_restricted_token_gets_not_found_for_a_page_outside_its_wings(): void
+    {
+        $this->makePage('person:secret');
+        $this->makeRevision('person:secret', 1, ['content_hash' => hash('sha256', 'secret-v1')]);
+
+        $hidden = $this->mcpCall('wiki_history', ['name' => 'person:secret'], ['mcp:use'], ['work']);
+
+        $this->assertTrue($hidden->json('result.isError') ?? false);
+        $this->assertStringNotContainsString(hash('sha256', 'secret-v1'), $hidden->getContent());
+
+        WikiPage::where('name', 'person:secret')->forceDelete();
+        $missing = $this->mcpCall('wiki_history', ['name' => 'person:secret'], ['mcp:use'], ['work']);
+
+        $this->assertSame($missing->json('result'), $hidden->json('result'));
+    }
+
+    public function test_restricted_token_still_reads_history_inside_its_wings(): void
+    {
+        $this->makePage('person:alice');
+        $this->makeRevision('person:alice', 1);
+
+        $r = $this->mcpCall('wiki_history', ['name' => 'person:alice'], ['mcp:use'], ['person-*']);
+
+        $this->assertFalse($r->json('result.isError') ?? false);
+        $this->assertCount(1, $r->json('result.structuredContent.revisions'));
+    }
+
+    public function test_unrestricted_token_reads_any_history(): void
+    {
+        $this->makePage('person:secret');
+        $this->makeRevision('person:secret', 1);
+
+        $r = $this->mcpCall('wiki_history', ['name' => 'person:secret'], ['mcp:use'], null);
+
+        $this->assertFalse($r->json('result.isError') ?? false);
+        $this->assertCount(1, $r->json('result.structuredContent.revisions'));
+    }
 }

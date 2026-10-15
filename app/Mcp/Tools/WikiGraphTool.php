@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\EntityRelationship;
 use App\Models\WikiPage;
@@ -19,7 +20,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsReadOnly]
 class WikiGraphTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'wiki_graph';
 
@@ -43,6 +44,12 @@ class WikiGraphTool extends Tool
         $edgeTypes = $params['edge_types'] ?? null;
 
         $page = WikiPage::where('name', $startPage)->first();
+        $patterns = $this->wingPatternsFor($request);
+
+        // An unreadable start page must look exactly like a missing one.
+        if ($page !== null && ! $page->readableWith($patterns)) {
+            $page = null;
+        }
 
         if ($page === null) {
             BrainSessionLogger::log($request, 'wiki_graph', ['start_page' => $startPage], 0);
@@ -50,7 +57,7 @@ class WikiGraphTool extends Tool
             return Response::error("Wiki page not found: {$startPage}");
         }
 
-        $graph = $this->graphService->traverse($startPage, $maxDepth, $edgeTypes);
+        $graph = $this->graphService->traverse($startPage, $maxDepth, $edgeTypes, $patterns);
 
         BrainSessionLogger::log($request, 'wiki_graph', $params, $graph['node_count']);
 

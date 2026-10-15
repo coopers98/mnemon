@@ -197,4 +197,60 @@ class WikiGraphToolTest extends TestCase
 
         $this->assertDatabaseHas('brain_sessions', ['tool_name' => 'wiki_graph']);
     }
+
+    // -----------------------------------------------------------------------
+    // Wing restrictions
+    // -----------------------------------------------------------------------
+
+    public function test_restricted_token_gets_not_found_for_a_start_page_outside_its_wings(): void
+    {
+        $this->makePage('person:secret');
+
+        $hidden = $this->mcpCall('wiki_graph', ['start_page' => 'person:secret'], ['mcp:use'], ['project-*']);
+
+        $this->assertTrue($hidden->json('result.isError') ?? false);
+
+        WikiPage::where('name', 'person:secret')->forceDelete();
+        $missing = $this->mcpCall('wiki_graph', ['start_page' => 'person:secret'], ['mcp:use'], ['project-*']);
+
+        $this->assertSame($missing->json('result'), $hidden->json('result'));
+    }
+
+    public function test_restricted_token_sees_no_unreadable_nodes_or_edges(): void
+    {
+        $this->makePage('project:atlas');
+        $this->makePage('project:hermes');
+        $this->makePage('person:secret');
+        $this->makePage('project:behind-secret');
+        $this->makeEdge('project:atlas', 'project:hermes', 'uses');
+        $this->makeEdge('project:atlas', 'person:secret', 'references');
+        $this->makeEdge('person:secret', 'project:behind-secret', 'references');
+
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'project:atlas', 'max_depth' => 3], ['mcp:use'], ['project-*']);
+        $r->assertStatus(200);
+        $this->assertFalse($r->json('result.isError') ?? false);
+
+        $graph = $r->json('result.structuredContent');
+        $names = array_column($graph['nodes'], 'name');
+
+        $this->assertContains('project:hermes', $names);
+        $this->assertStringNotContainsString('person:secret', $r->getContent());
+        // Reachable only through the unreadable page: its existence would
+        // reveal the hidden page's links, so traversal must not pass through.
+        $this->assertNotContains('project:behind-secret', $names);
+        $this->assertSame(2, $graph['node_count']);
+        $this->assertSame(1, $graph['edge_count']);
+    }
+
+    public function test_unrestricted_token_sees_the_whole_graph(): void
+    {
+        $this->makePage('project:atlas');
+        $this->makePage('person:secret');
+        $this->makeEdge('project:atlas', 'person:secret', 'references');
+
+        $r = $this->mcpCall('wiki_graph', ['start_page' => 'project:atlas'], ['mcp:use'], null);
+
+        $names = array_column($r->json('result.structuredContent.nodes'), 'name');
+        $this->assertContains('person:secret', $names);
+    }
 }

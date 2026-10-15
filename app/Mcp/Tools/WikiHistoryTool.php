@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Concerns\RequiresScope;
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\WikiPage;
 use App\Models\WikiPageRevision;
@@ -18,7 +19,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsReadOnly]
 class WikiHistoryTool extends Tool
 {
-    use RequiresScope;
+    use RequiresScope, RequiresWingAccess;
 
     protected string $name = 'wiki_history';
 
@@ -37,6 +38,11 @@ class WikiHistoryTool extends Tool
         $limit = (int) ($params['limit'] ?? 10);
 
         $page = WikiPage::where('name', $name)->first();
+
+        // An unreadable page must look exactly like a missing one.
+        if ($page !== null && ! $page->readableWith($this->wingPatternsFor($request))) {
+            $page = null;
+        }
 
         if ($page === null) {
             BrainSessionLogger::log($request, 'wiki_history', ['name' => $name], 0);

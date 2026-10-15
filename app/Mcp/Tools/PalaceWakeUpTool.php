@@ -32,18 +32,13 @@ class PalaceWakeUpTool extends Tool
         }
 
         $patterns = $this->wingPatternsFor($request);
+        $wingIds = Wing::readableIds($patterns);
 
         // Recent drawers (wing-filtered when restrictions apply)
         $drawerQuery = Drawer::with('room.wing')->latest('created_at')->limit(10);
 
-        if ($patterns !== null) {
-            $drawerQuery->whereHas('room.wing', function ($q) use ($patterns) {
-                $q->where(function ($inner) use ($patterns) {
-                    foreach ($patterns as $p) {
-                        $inner->orWhere('slug', 'like', str_replace('*', '%', $p));
-                    }
-                });
-            });
+        if ($wingIds !== null) {
+            $drawerQuery->whereHas('room', fn ($q) => $q->whereIn('wing_id', $wingIds));
         }
 
         $recentDrawers = $drawerQuery->get()->map(fn ($d) => [
@@ -68,12 +63,8 @@ class PalaceWakeUpTool extends Tool
             ->groupBy('wings.id')
             ->orderByDesc('latest_drawer_at');
 
-        if ($patterns !== null) {
-            $wingQuery->where(function ($q) use ($patterns) {
-                foreach ($patterns as $p) {
-                    $q->orWhere('wings.slug', 'like', str_replace('*', '%', $p));
-                }
-            });
+        if ($wingIds !== null) {
+            $wingQuery->whereIn('wings.id', $wingIds);
         }
 
         $activeWings = $wingQuery->get()->map(fn ($w) => [

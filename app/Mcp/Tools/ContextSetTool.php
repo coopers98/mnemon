@@ -80,15 +80,9 @@ class ContextSetTool extends Tool
             // Everything downstream (the consolidation update) relies on this
             // check having narrowed $sources to visible drawers.
             $sourceQuery = Drawer::whereIn('id', $sources);
-            $patterns = $this->wingPatternsFor($request);
-            if ($patterns !== null) {
-                $sourceQuery->whereHas('room.wing', function ($q) use ($patterns) {
-                    $q->where(function ($inner) use ($patterns) {
-                        foreach ($patterns as $p) {
-                            $inner->orWhere('slug', 'like', str_replace('*', '%', $p));
-                        }
-                    });
-                });
+            $wingIds = Wing::readableIds($this->wingPatternsFor($request));
+            if ($wingIds !== null) {
+                $sourceQuery->whereHas('room', fn ($q) => $q->whereIn('wing_id', $wingIds));
             }
 
             if ($sourceQuery->count() !== count($sources)) {

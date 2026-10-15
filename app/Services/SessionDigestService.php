@@ -374,22 +374,11 @@ class SessionDigestService
      */
     protected function wingsForToken(?array $patterns): array
     {
-        if ($patterns === null) {
-            return Wing::all()->all();
-        }
+        $ids = Wing::readableIds($patterns);
 
-        return Wing::all()
-            ->filter(function (Wing $w) use ($patterns) {
-                foreach ($patterns as $pattern) {
-                    $regex = '/^'.str_replace('\*', '.*', preg_quote($pattern, '/')).'$/';
-                    if ($pattern === $w->slug || preg_match($regex, $w->slug)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            })
-            ->values()
+        return Wing::query()
+            ->when($ids !== null, fn ($q) => $q->whereIn('id', $ids))
+            ->get()
             ->all();
     }
 }

@@ -9,7 +9,6 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
-use App\Support\WingPatterns;
 use Closure;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Schema;
@@ -63,9 +62,7 @@ class BrainStatusTool extends Tool
 
         // Counts are scoped to the token's wings too: totals across hidden
         // wings say how much is there and when it last changed.
-        $readableWingIds = $patterns === null ? null : Wing::all()
-            ->filter(fn (Wing $w) => WingPatterns::matches($w->slug, $patterns))
-            ->pluck('id');
+        $readableWingIds = Wing::readableIds($patterns);
         $drawers = fn () => Drawer::query()->when(
             $readableWingIds !== null,
             fn ($q) => $q->whereHas('room', fn ($r) => $r->whereIn('wing_id', $readableWingIds))
@@ -87,10 +84,8 @@ class BrainStatusTool extends Tool
                 ->whereNull('drawers.deleted_at');
         }])->get();
 
-        if ($patterns !== null) {
-            $wingsQuery = $wingsQuery->filter(
-                fn (Wing $w) => WingPatterns::matches($w->slug, $patterns)
-            )->values();
+        if ($readableWingIds !== null) {
+            $wingsQuery = $wingsQuery->whereIn('id', $readableWingIds)->values();
         }
 
         $wingsWithCounts = $wingsQuery->map(fn ($w) => [

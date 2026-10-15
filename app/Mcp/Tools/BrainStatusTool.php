@@ -98,7 +98,7 @@ class BrainStatusTool extends Tool
             'wings' => count($wingsWithCounts),
             'rooms' => Room::query()->when($readableWingIds !== null, fn ($q) => $q->whereIn('wing_id', $readableWingIds))->count(),
             'drawers' => $drawers()->count(),
-            'wiki_pages' => WikiPage::readableSubset(WikiPage::get(['name']), $patterns)->count(),
+            'wiki_pages' => $patterns === null ? WikiPage::count() : WikiPage::readableSubset(WikiPage::get(['name']), $patterns)->count(),
             'drawers_by_tier' => $drawersByTier,
             'wings_detail' => $wingsWithCounts,
             'last_write' => $lastWrite ? $lastWrite->toIso8601String() : null,

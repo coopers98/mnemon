@@ -283,6 +283,19 @@ class WingIsolationTest extends TestCase
         $this->assertContains('work:lonely', array_column($res->json('result.structuredContent.findings'), 'page'));
     }
 
+    public function test_drawer_add_files_a_kind_colon_wing_into_the_existing_wing(): void
+    {
+        $atlas = Wing::create(['name' => 'project:atlas', 'slug' => 'project-atlas']);
+        $wings = Wing::count();
+
+        $res = $this->mcpCall('drawer_add', ['wing' => 'project:atlas', 'room' => 'notes', 'content' => 'atlas note'], ['mcp:use'], ['project-atlas']);
+
+        $this->assertFalse($res->json('result.isError') ?? false, $res->getContent());
+        $this->assertSame($wings, Wing::count(), 'no new wing');
+        $drawer = Drawer::find($res->json('result.structuredContent.id'));
+        $this->assertSame($atlas->id, $drawer->room->wing_id);
+    }
+
     // I1: `%` and `_` are wildcards to SQL LIKE but literal characters in a pattern.
     public function test_like_wildcards_in_a_pattern_match_nothing_extra(): void
     {
@@ -338,6 +351,35 @@ class WingIsolationTest extends TestCase
         }
 
         $this->assertSame([['project-work'], ['project-work']], $persisted);
+    }
+
+    public function test_session_digest_files_a_kind_colon_wing_name_into_its_slug(): void
+    {
+        Wing::create(['name' => 'project:mnemon', 'slug' => 'project-mnemon']);
+        $proposal = ['content' => 'a mnemon note', 'wing_slug' => 'project:mnemon', 'room_slug' => 'notes', 'confidence' => 0.9];
+
+        $runs = [
+            'restricted' => [['project-mnemon'], []],
+            'unrestricted, model filing' => [null, ['project_filing' => 'model']],
+        ];
+
+        foreach ($runs as $label => [$patterns, $extra]) {
+            $this->app['auth']->forgetGuards();
+            $this->mockDigest([$proposal], new \ArrayObject);
+
+            $res = $this->mcpCall('session_digest', [
+                'session_id' => "sess-slug-{$label}",
+                'harness' => 'claude-code',
+                'turn_range' => ['start' => 0, 'end' => 3],
+                'transcript' => 'anything',
+            ] + $extra, ['mcp:use'], $patterns);
+
+            $body = $res->json('result.structuredContent');
+            $this->assertSame(['project-mnemon'], array_column($body['persisted'], 'wing'), $label);
+            $this->assertSame(0, $body['dropped_outside_wings'], $label);
+        }
+
+        $this->assertSame(1, Wing::where('slug', 'like', 'project%')->count());
     }
 
     public function test_session_digest_reports_a_count_of_dropped_proposals(): void

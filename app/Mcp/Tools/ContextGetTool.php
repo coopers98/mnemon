@@ -7,6 +7,7 @@ use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
+use App\Support\WingPatterns;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -32,12 +33,13 @@ class ContextGetTool extends Tool
         $params = $request->validate(['name' => 'required|string|max:255']);
 
         $page = WikiPage::where('name', $params['name'])->first();
+        $patterns = $this->wingPatternsFor($request);
 
         // A page outside the token's wings must be indistinguishable from one
         // that does not exist, or the error message becomes an existence
         // oracle across wings -- the same reasoning ContextSetTool applies to
         // source drawers.
-        if ($page !== null && ! $page->readableWith($this->wingPatternsFor($request))) {
+        if ($page !== null && ! $page->readableWith($patterns)) {
             $page = null;
         }
 
@@ -49,6 +51,25 @@ class ContextGetTool extends Tool
 
         $page->update(['last_accessed_at' => now()]);
 
+        // A readable page can still point into hidden wings: an unrestricted
+        // writer may relate it to, or compile it from, anything. Those
+        // pointers are other wings' names and drawer contents, so they are
+        // narrowed to what the token could read on its own.
+        $related = $page->related;
+        if ($patterns !== null && is_array($related)) {
+            $related = array_values(array_filter(
+                $related,
+                fn ($name) => is_string($name) && WikiPage::nameReadableWith($name, $patterns)
+            ));
+        }
+
+        $sourceDrawers = empty($page->sources) ? collect() : Drawer::with('room.wing')
+            ->whereIn('id', $page->sources)
+            ->get()
+            ->filter(fn ($d) => $patterns === null || WingPatterns::matches((string) $d->room?->wing?->slug, $patterns))
+            ->values();
+        $sources = $patterns === null ? $page->sources : $sourceDrawers->pluck('id')->all();
+
         $payload = [
             'id' => $page->id,
             'name' => $page->name,
@@ -56,8 +77,8 @@ class ContextGetTool extends Tool
             'title' => $page->title,
             'description' => $page->description,
             'confidence' => $page->confidence,
-            'sources' => $page->sources,
-            'related' => $page->related,
+            'sources' => $sources,
+            'related' => $related,
             'confidence_score' => $page->confidence_score,
             'source_count' => $page->source_count,
             'pending_drawers_since_compile' => $page->pending_drawers_since_compile,
@@ -69,7 +90,7 @@ class ContextGetTool extends Tool
         ];
 
         if (! empty($page->sources)) {
-            $payload['source_details'] = Drawer::whereIn('id', $page->sources)->get()->map(fn ($d) => [
+            $payload['source_details'] = $sourceDrawers->map(fn ($d) => [
                 'id' => $d->id,
                 'content_preview' => mb_substr($d->content, 0, 200),
                 'source' => $d->source,

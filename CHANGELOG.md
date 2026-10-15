@@ -181,8 +181,10 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
     checked against the token's wings before the page is looked up.
   - `wiki_lint` reported every page's name, id and scores, and `auto_fix`
     soft-deleted stubs and pruned `related` arrays across all wings. Findings
-    are now filtered to readable pages after detection, with the summary
-    counted after filtering; `auto_fix` is refused for a restricted token.
+    are now filtered to readable pages, with the summary counted after
+    filtering, and for a restricted token a page is an orphan when no page it
+    can read references it, so the orphan flag says nothing about hidden
+    pages. `auto_fix` is refused for a restricted token.
   - `brain_status` totals (wiki pages, wings, rooms, drawers, drawers by tier,
     last write, embedding counts) spanned every wing; they now count only the
     token's wings.
@@ -191,12 +193,30 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
     "Drawer not found", so ids could be enumerated to map drawers to wings.
     A hidden drawer now answers exactly like a missing one.
   - `context_get` on a readable page returned `related` names of hidden pages
-    and `source_details` previews of hidden drawers; both are now narrowed.
+    and `source_details` previews of hidden drawers; `related`, `sources`,
+    `source_details` and `source_count` are now narrowed to what the token can
+    read.
+  - `drawer_search` and `recall` searched every wing and filtered afterwards,
+    so hidden drawers took limit slots and set the score normalisation: a
+    `limit: 1` search came back empty exactly when a stronger hidden match
+    existed. The search is now scoped to readable wings in SQL, and recall's
+    wiki leg widens its search until it has three readable pages.
+  - `palace_wake_up` and `context_set`'s source check matched patterns with
+    SQL `LIKE`, where `%` and `_` are wildcards, and `drawer_add` stored its
+    raw `wing` argument as the slug, so such characters could reach a
+    pattern. Every wing scope now matches through one helper,
+    `Wing::readableIds()`, and `drawer_add` slugifies its wing.
   - `session_digest` filed drawers into whatever wing the model named,
     unchecked against the token, and could queue new-wing proposals for any
-    wing. Proposals outside the token's wings are now dropped, recent drawer
+    wing; whether it refiled a proposal also depended on whether a hidden
+    wing existed. A wing outside the token's is now treated as missing:
+    refiled into the session or `unfiled` wing when the token can see one,
+    otherwise dropped and counted in `dropped_outside_wings`. Recent drawer
     ids from hidden wings no longer reach the model, and a replayed slice
     reports only drawers the token can read.
+  - The `synthesize_wing` prompt told agents to write `synthesis:<wing>`,
+    which a token restricted to that wing is refused; it now names the page
+    after the wing.
 
 ---
 

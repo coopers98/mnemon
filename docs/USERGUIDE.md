@@ -1117,7 +1117,9 @@ The token's wing restrictions exclude the wing you're trying to read or write. E
 - Re-authorize with broader wing access
 - Or have the agent stay within the granted wings
 
-A drawer or wiki page that lives in a wing the token cannot reach is reported as **not found** rather than refused, so an id or page name cannot be used to probe other wings. If an agent reports "Drawer not found" or "Wiki page not found" for something you can see in the admin panel, check the token's wing restrictions; the refusal is recorded as `denied` in the audit log.
+Reads of a drawer or wiki page that lives in a wing the token cannot reach answer **not found** rather than refused, so an id or page name cannot be used to probe other wings. If an agent reports "Drawer not found" or "Wiki page not found" for something you can see in the admin panel, check the token's wing restrictions; drawer refusals are recorded as `denied` in the audit log.
+
+Writes addressed by name — `context_set` and `wiki_compile` take a page name, `drawer_add` a wing — are refused with "Token does not have access to wing" based on the name alone, so the response is the same whether or not a page or wing by that name exists. `session_digest` never files into a wing outside the token's: such a proposal goes to the session's project wing or `unfiled` when the token can see one, and is otherwise dropped and counted in `dropped_outside_wings`.
 
 ### `419 CSRF mismatch` on `/oauth/authorize`
 

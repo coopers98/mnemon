@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Resources;
 
+use App\Mcp\Concerns\RequiresWingAccess;
 use App\Models\WikiPage;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -16,6 +17,8 @@ use Laravel\Mcp\Support\UriTemplate;
 #[MimeType('text/markdown')]
 class WikiPageResource extends Resource implements HasUriTemplate
 {
+    use RequiresWingAccess;
+
     public function uriTemplate(): UriTemplate
     {
         return new UriTemplate('mnemon://wiki/{slug}');
@@ -33,6 +36,14 @@ class WikiPageResource extends Resource implements HasUriTemplate
         $name = urldecode($slug);
 
         $page = WikiPage::where('name', $name)->first();
+
+        // The same rule context_get applies: a page outside the token's wings
+        // must be indistinguishable from one that does not exist, or this
+        // resource is a side door to pages the tools refuse to serve.
+        if ($page !== null && ! $page->readableWith($this->wingPatternsFor($request))) {
+            $page = null;
+        }
+
         if (! $page) {
             return Response::error("Wiki page not found: {$name}");
         }

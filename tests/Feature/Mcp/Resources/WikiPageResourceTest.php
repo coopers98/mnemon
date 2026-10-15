@@ -44,4 +44,67 @@ class WikiPageResourceTest extends TestCase
         $this->assertEquals("mnemon://wiki/{$encodedName}", $body['uri']);
         $this->assertStringContainsString('Cooper', $body['text']);
     }
+
+    // -----------------------------------------------------------------------
+    // Wing restrictions
+    //
+    // context_get hides a page outside the token's wings; the resource must
+    // apply the same rule, or `resources/read` becomes a side door to the
+    // full page body. An unreadable page must look exactly like a missing one.
+    // -----------------------------------------------------------------------
+
+    /**
+     * @return array{0: string, 1: ?string} [page text, JSON-RPC error message]
+     */
+    private function readPage(string $name, ?array $wingPatterns): array
+    {
+        $r = $this->mcpResourceRead('mnemon://wiki/'.urlencode($name), ['mcp:use'], $wingPatterns);
+        $r->assertStatus(200);
+
+        return [$r->json('result.contents.0.text') ?? '', $r->json('error.message')];
+    }
+
+    public function test_restricted_token_cannot_read_a_page_outside_its_wings(): void
+    {
+        WikiPage::factory()->create([
+            'name' => 'person:secret',
+            'content' => 'SECRET body a work token must never read.',
+        ]);
+
+        [$text, $error] = $this->readPage('person:secret', ['work']);
+
+        $this->assertStringNotContainsString('SECRET body', $text);
+        $this->assertSame('Wiki page not found: person:secret', $error);
+    }
+
+    public function test_unreadable_page_is_indistinguishable_from_a_missing_one(): void
+    {
+        WikiPage::factory()->create(['name' => 'person:secret', 'content' => 'SECRET']);
+
+        $hidden = $this->mcpResourceRead('mnemon://wiki/'.urlencode('person:secret'), ['mcp:use'], ['work']);
+        WikiPage::where('name', 'person:secret')->forceDelete();
+        $missing = $this->mcpResourceRead('mnemon://wiki/'.urlencode('person:secret'), ['mcp:use'], ['work']);
+
+        $this->assertSame($missing->json(), $hidden->json());
+    }
+
+    public function test_restricted_token_still_reads_a_page_inside_its_wings(): void
+    {
+        WikiPage::factory()->create(['name' => 'work', 'content' => 'Synthesis of work drawers.']);
+
+        [$text, $error] = $this->readPage('work', ['work']);
+
+        $this->assertStringContainsString('Synthesis of work drawers.', $text);
+        $this->assertNull($error);
+    }
+
+    public function test_unrestricted_token_reads_every_page(): void
+    {
+        WikiPage::factory()->create(['name' => 'person:secret', 'content' => 'SECRET body.']);
+
+        [$text, $error] = $this->readPage('person:secret', null);
+
+        $this->assertStringContainsString('SECRET body.', $text);
+        $this->assertNull($error);
+    }
 }

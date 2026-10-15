@@ -22,7 +22,9 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   one. Demo mode schedules it nightly at 04:00 and does not schedule decay or
   retention.
 - **`TRUSTED_PROXIES`** names the proxy addresses or CIDRs whose
-  `X-Forwarded-For` is trusted. Unset trusts none.
+  `X-Forwarded-For` is trusted. Unset, no proxy is trusted (except on Laravel
+  Cloud and `*.on-forge.com` / `*.on-vapor.com` hosts, where the framework
+  default trusts all).
 - **`MNEMON_DEMO_URL`** makes a real install's landing page and
   `/how-it-works` link to the public demo.
 

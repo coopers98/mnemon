@@ -1028,10 +1028,10 @@ overwritten.
 
 For a real hostname with automatic HTTPS, see the [Quickstart](../README.md#quickstart)
 in the README — set `DOMAIN`, and set `HTTP_BIND=0.0.0.0:80` / `HTTPS_BIND=0.0.0.0:443`
-so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. To run behind your own TLS-terminating reverse
-proxy instead, see
-[HTTPS and OAuth redirect_uri](#https-and-oauth-redirect_uri): leave `DOMAIN` blank and set
-`TRUSTED_PROXIES` to the proxy's address or CIDR.
+so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. To run
+behind your own TLS-terminating reverse proxy instead, see
+[HTTPS and OAuth redirect_uri](#https-and-oauth-redirect_uri): leave `DOMAIN` blank
+and set `TRUSTED_PROXIES` to the proxy's address or CIDR.
 
 ### Running a public demo
 

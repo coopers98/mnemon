@@ -32,12 +32,14 @@ class DrawerResource extends Resource implements HasUriTemplate
     public function handle(Request $request): Response|ResponseFactory
     {
         $drawer = Drawer::with('room.wing')->find($request->get('id'));
-        if (! $drawer) {
-            return Response::error("Drawer not found: {$request->get('id')}");
+
+        // The same rule drawer_get applies: hidden must look like missing.
+        if ($drawer && $this->hidesWing($request, $drawer->room->wing->slug)) {
+            $drawer = null;
         }
 
-        if ($err = $this->requireWingAccess($request, $drawer->room->wing->slug)) {
-            return $err;
+        if (! $drawer) {
+            return Response::error("Drawer not found: {$request->get('id')}");
         }
 
         return Response::text($drawer->content);

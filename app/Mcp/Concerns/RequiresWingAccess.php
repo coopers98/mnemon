@@ -27,6 +27,34 @@ trait RequiresWingAccess
     }
 
     /**
+     * Whether an item that exists in this wing must be answered as missing.
+     *
+     * requireWingAccess() suits arguments the caller chose (a wing slug, a
+     * page name): its refusal depends only on what was asked. When the wing
+     * is learned from a lookup by id, a distinct refusal would confirm the
+     * item exists and name its wing, so the caller answers "not found"
+     * instead. The denial is still recorded for the audit trail, which only
+     * the admin reads.
+     */
+    protected function hidesWing(Request $request, string $wingSlug): bool
+    {
+        $restriction = $this->resolveRestriction($request);
+
+        if ($restriction === null || $restriction->matches($wingSlug)) {
+            return false;
+        }
+
+        BrainSessionLogger::logDenial(
+            $request,
+            $this->auditToolName(),
+            ['wing' => $wingSlug],
+            "Token does not have access to wing: {$wingSlug}"
+        );
+
+        return true;
+    }
+
+    /**
      * @return array<string>|null null = unrestricted (all wings allowed)
      */
     protected function wingPatternsFor(Request $request): ?array

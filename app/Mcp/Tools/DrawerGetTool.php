@@ -31,12 +31,14 @@ class DrawerGetTool extends Tool
         $params = $request->validate(['id' => 'required|integer']);
 
         $drawer = Drawer::with('room.wing')->find($params['id']);
-        if (! $drawer) {
-            return Response::error("Drawer not found: {$params['id']}");
+
+        // A drawer in a forbidden wing answers exactly like a missing one.
+        if ($drawer && $this->hidesWing($request, $drawer->room->wing->slug)) {
+            $drawer = null;
         }
 
-        if ($err = $this->requireWingAccess($request, $drawer->room->wing->slug)) {
-            return $err;
+        if (! $drawer) {
+            return Response::error("Drawer not found: {$params['id']}");
         }
 
         $payload = [

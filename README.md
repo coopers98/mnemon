@@ -135,7 +135,7 @@ Mnemon picks **all three**: store raw at the bottom (MemPalace's verbatim insigh
 - **Verbatim retention.** No lossy summarisation at ingest. The drawer you stored is the drawer you retrieve, minus any credentials `ContentSanitizer` redacted on the way in.
 - **Hybrid retrieval.** Semantic, keyword, and recency together — so finding "that thing about retries last week" works even when the keyword is misremembered and the meeting note didn't use the same words.
 - **Synthesis without losing source.** The wiki is the compiled view; the palace remains the canonical record. Wiki pages can be regenerated from drawers; the reverse is not true.
-- **Per-agent authorisation.** OAuth tokens carry the single scope `mcp:use` and optional per-token wing restrictions captured at the consent screen. Wing restrictions are the real isolation mechanism **for palace content** — a project-specific agent reads only its own wing's drawers; a read-only agent gets a token restricted to wings that have no write-capable counterpart. They do not extend to the wiki layer — see [Limitations](#limitations).
+- **Per-agent authorisation.** OAuth tokens carry the single scope `mcp:use` and optional per-token wing restrictions captured at the consent screen. Wing restrictions are the real isolation mechanism **for palace content and wiki pages** — a project-specific agent reads only its own wing's drawers; a read-only agent gets a token restricted to wings that have no write-capable counterpart. They also cover the wiki layer, scoped by page name — see [Limitations](#limitations).
 - **Audit trail.** Every MCP tool invocation lands in `brain_sessions`. You can see what each agent has been doing, when, and against which key.
 - **Knowledge graph.** Entities and typed relationships extracted from wiki pages — `extractEntity()` takes a `WikiPage`, so drawers are not a source — with graph traversal queries for discovering connections across your knowledge base.
 - **Confidence & quality scoring.** Every piece of content carries a confidence score that decays over time, plus a multi-factor quality score. Stale or low-quality content surfaces automatically for review.
@@ -279,7 +279,7 @@ Switching drivers requires `php artisan mnemon:reembed` to backfill embeddings u
 - **Admin UI:** [Filament v5](https://filamentphp.com)
 - **Database:** PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension; SQLite is supported as a test backend (vector columns are skipped on SQLite, so semantic mode falls back to full-text)
 - **Vector PHP client:** [`pgvector/pgvector`](https://github.com/pgvector/pgvector-php)
-- **Tests:** PHPUnit 12, Livewire-style Filament page tests (430 passed / 1 skipped on SQLite, 431 passed on PostgreSQL)
+- **Tests:** PHPUnit 12, Livewire-style Filament page tests (611 passed / 9 skipped on SQLite)
 
 The MCP server is built on [`laravel/mcp`](https://github.com/laravel/mcp) and [`laravel/passport`](https://laravel.com/docs/passport) — Streamable HTTP + OAuth 2.1 + Dynamic Client Registration + tool/resource/prompt dispatch + audit logging.
 
@@ -301,7 +301,7 @@ The classical **method of loci** is the naming convention. A wing is a section o
 
 ## What's built
 
-All sprints complete. 440 passing, 7 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
+All sprints complete. 611 passing, 9 skipped on SQLite; CI runs the same suite against PostgreSQL 17.
 
 - **Sprint 1 — Foundation.** Wings/Rooms/Drawers/WikiPages/BrainSessions models + migrations, config, seeders.
 - **Sprint 2 — Embedding engine.** Driver pattern (OpenAI / Ollama / none), `mnemon:reembed` artisan command, automatic embedding on drawer/wiki create+update.
@@ -366,7 +366,7 @@ This is a working personal tool, not a finished product. Honest constraints toda
 ## Common commands
 
 ```bash
-php artisan test --compact              # run the test suite (430 passed / 1 skipped on SQLite)
+php artisan test --compact              # run the test suite (611 passed / 9 skipped on SQLite)
 ./vendor/bin/pint                       # format PHP
 php artisan migrate:fresh --seed        # rebuild the DB from scratch
 php artisan mnemon:reembed              # re-embed all drawers + wiki pages with the current driver

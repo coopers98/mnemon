@@ -136,10 +136,12 @@ counting it as a miss.
 **The keyless number is the shipped default.** A fresh Mnemon install ships
 `MNEMON_EMBEDDING_DRIVER=none` — no OpenAI account, no spend, works
 out of the box. This tag measures exactly that configuration: full-text +
-temporal ranking, no semantic leg. Ollama is not a substitute today — product
-defect D10 means the Ollama driver cannot store an embedding at all
-(`nomic-embed-text`'s 768 dimensions don't fit the `vector(1536)` column), so
-OpenAI is the only working embedding path.
+temporal ranking, no semantic leg. Ollama was not a substitute at the time of
+this run — product defect D10 meant the Ollama driver could not store an
+embedding at all (`nomic-embed-text`'s 768 dimensions didn't fit the
+`vector(1536)` column), so OpenAI was the only working embedding path. D10 was
+fixed afterwards (commit `48f19be`, 2026-09-21: the column is now an
+unconstrained `vector`); the benchmark itself has not been re-run on Ollama.
 
 ## 4. Switch to the embedded driver and re-embed
 
@@ -285,7 +287,7 @@ which reads like "embeddings only re-rank, they don't find more evidence."
 Run against the full 500-question corpus, that conclusion doesn't hold —
 embeddings improve every metric at every depth, including recall@10
 (0.912 → 0.983). See the roadmap
-(`docs/superpowers/specs/2026-08-28-release-roadmap.md`, Piece 3) for the
+(`docs/design/2026-08-28-release-roadmap.md`, Piece 3) for the
 full 500-question retrieval table. The lesson: a saturated small-n subset
 can look like agreement between two configurations that a bigger run shows
 clearly apart — worth remembering before trusting any subset figure,
@@ -463,7 +465,7 @@ retrieved sessions the reader sees:
 
 K=10 would feed the reader everything retrieval found, roughly doubling
 reader cost — but on the full 500-question run, retrieval's own recall@5
-vs. recall@10 differ by only **+0.080** (keyless, 0.833→0.912) and **+0.031**
+vs. recall@10 differ by only **+0.080** (keyless, 0.832→0.912) and **+0.031**
 (embedded, 0.952→0.983): the second five sessions rarely add evidence and
 always add cost. K=5 was run for both legs; K=10 was not, on that basis.
 
@@ -577,10 +579,12 @@ still only reaches 0.183. Retrieval is no longer the binding constraint for
 this category and something else is. n=30, so treat it as a lead rather than
 a finding.
 
-**Caveats carried forward.** Same three as §7 — the judge is the same model
-family as the reader, this measures the palace layer only, and `retrieval_hit`
-is credited at K=5 while the retrieval column here is `hit_rate@1`, which is
-why QA can exceed retrieval for one category rather than being bounded by it.
+**Caveats carried forward.** Same three as §7 — a split judge verdict
+contributes 0.5, the reader abstains rather than guesses, and the reader and
+judge are the same model. One further note specific to this table:
+`retrieval_hit` is credited at K=5 while the retrieval column here is
+`hit_rate@1`, which is why QA can exceed retrieval for one category rather than
+being bounded by it.
 
 To regenerate:
 

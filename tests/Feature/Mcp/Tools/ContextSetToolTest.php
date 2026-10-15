@@ -220,7 +220,7 @@ class ContextSetToolTest extends TestCase
         $theirs = $this->drawerInWing('personal', 'private note');
 
         $this->mcpCall('context_set', [
-            'name' => 'concept:leak',
+            'name' => 'work',
             'content' => 'A page.',
             'sources' => [$mine->id, $theirs->id],
         ], ['mcp:use'], ['work']);
@@ -234,7 +234,7 @@ class ContextSetToolTest extends TestCase
         $theirs = $this->drawerInWing('personal', 'private note');
 
         $r = $this->mcpCall('context_set', [
-            'name' => 'concept:probe',
+            'name' => 'work',
             'content' => 'A page.',
             'sources' => [$theirs->id],
         ], ['mcp:use'], ['work']);

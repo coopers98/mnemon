@@ -8,6 +8,7 @@ use App\Mcp\Concerns\ResolvesAgentSource;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
 use App\Models\WikiPage;
+use App\Models\Wing;
 use App\Services\WikiPageWriter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -43,6 +44,16 @@ class ContextSetTool extends Tool
         ]);
 
         $name = $params['name'];
+
+        // A page belongs to the wing its name maps to -- the mapping
+        // wiki_compile and every wiki read path use. Checked before anything
+        // looks the page up, so the refusal depends only on the name: an
+        // existing page in a forbidden wing (live, trashed or at another
+        // revision) answers exactly like one that was never written.
+        if ($err = $this->requireWingAccess($request, Wing::slugify($name))) {
+            return $err;
+        }
+
         $content = $params['content'];
         $description = $params['description'] ?? null;
         $confidence = $params['confidence'] ?? null;

@@ -116,6 +116,8 @@ class WingIsolationTest extends TestCase
             'wiki_compile own' => ['tool', 'wiki_compile', ['name' => 'work']],
             'wiki_history own' => ['tool', 'wiki_history', ['name' => 'work']],
             'wiki_graph own' => ['tool', 'wiki_graph', ['start_page' => 'work']],
+            'context_set own' => ['tool', 'context_set', ['name' => 'work:new', 'content' => 'a new work page']],
+            'drawer_add own' => ['tool', 'drawer_add', ['wing' => 'work', 'room' => 'notes', 'content' => 'a new work note']],
             'resource drawer own' => ['resource', 'mnemon://drawer/{work_drawer}', []],
             'resource wiki own' => ['resource', 'mnemon://wiki/work', []],
             'resource wing own' => ['resource', 'mnemon://wing/work', []],

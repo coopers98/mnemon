@@ -26,6 +26,9 @@ class PalaceSearchService
      * @param  int  $limit  Maximum number of results
      * @param  string  $mode  Search mode: 'hybrid', 'fulltext', or 'semantic'
      * @param  string|null  $tier  Drawer tier filter: 'raw', 'reviewed', or 'consolidated'
+     * @param  array<int>|null  $wingIds  Only search drawers in these wings; null = every wing.
+     *                                    Applied in SQL, so the limit and any score
+     *                                    normalisation never see a row outside them.
      */
     public function search(
         string $query,
@@ -34,15 +37,16 @@ class PalaceSearchService
         int $limit = 5,
         string $mode = 'hybrid',
         ?string $tier = null,
+        ?array $wingIds = null,
     ): Collection {
         if (trim($query) === '') {
             return collect();
         }
 
         return match ($mode) {
-            'semantic' => $this->semanticSearch($query, $wing, $room, $limit, $tier),
-            'fulltext' => $this->fulltextSearch($query, $wing, $room, $limit, $tier),
-            default => $this->hybridSearch($query, $wing, $room, $limit, $tier),
+            'semantic' => $this->semanticSearch($query, $wing, $room, $limit, $tier, $wingIds),
+            'fulltext' => $this->fulltextSearch($query, $wing, $room, $limit, $tier, $wingIds),
+            default => $this->hybridSearch($query, $wing, $room, $limit, $tier, $wingIds),
         };
     }
 
@@ -56,6 +60,7 @@ class PalaceSearchService
         ?string $room,
         int $limit,
         ?string $tier = null,
+        ?array $wingIds = null,
     ): Collection {
         if (! $this->isPostgres()) {
             Log::warning('PalaceSearchService: semantic search requires PostgreSQL with pgvector; returning empty results.');
@@ -89,7 +94,7 @@ class PalaceSearchService
         // semantic search until `mnemon:reembed` rewrites them.
         $dimensions = count($vector);
 
-        $base = $this->baseQuery($wing, $room, $tier);
+        $base = $this->baseQuery($wing, $room, $tier, $wingIds);
         $rows = $base
             ->whereNotNull('drawers.embedding')
             ->whereRaw('vector_dims(drawers.embedding) = ?', [$dimensions])
@@ -150,6 +155,7 @@ class PalaceSearchService
         ?string $room,
         int $limit,
         ?string $tier = null,
+        ?array $wingIds = null,
     ): Collection {
         ['terms' => $terms, 'literal' => $literal] = $this->searchTerms($query);
 
@@ -164,7 +170,7 @@ class PalaceSearchService
             'drawers.content_tsv',
         );
 
-        $rows = $this->baseQuery($wing, $room, $tier)
+        $rows = $this->baseQuery($wing, $room, $tier, $wingIds)
             ->selectRaw("
                 drawers.id,
                 drawers.content,
@@ -202,6 +208,7 @@ class PalaceSearchService
         ?string $room,
         int $limit,
         ?string $tier = null,
+        ?array $wingIds = null,
     ): Collection {
         $weights = config('mnemon.retrieval.weights');
         $temporalWeight = (float) ($weights['temporal'] ?? 0.1);
@@ -212,11 +219,11 @@ class PalaceSearchService
             $semanticWeight = (float) ($weights['semantic'] ?? 0.6);
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier);
+            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier, $wingIds);
             $ftById = $fulltextResults->keyBy('id');
 
             if (! ($driver instanceof NullDriver)) {
-                $semanticResults = $this->semanticSearch($query, $wing, $room, $limit * 3, $tier);
+                $semanticResults = $this->semanticSearch($query, $wing, $room, $limit * 3, $tier, $wingIds);
                 $semById = $semanticResults->keyBy('id');
             } else {
                 $semById = collect();
@@ -260,7 +267,7 @@ class PalaceSearchService
             // SQLite: fulltext + temporal only
             $fulltextWeight = (float) ($weights['fulltext'] ?? 0.3);
 
-            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier);
+            $fulltextResults = $this->fulltextSearch($query, $wing, $room, $limit * 3, $tier, $wingIds);
 
             $combined = $fulltextResults->map(function ($row) use ($fulltextWeight, $temporalWeight, $boostDays) {
                 $ftScore = (float) $row->score;
@@ -297,7 +304,7 @@ class PalaceSearchService
     /**
      * Build the base query with joins and optional wing/room/tier scoping.
      */
-    protected function baseQuery(?string $wing, ?string $room, ?string $tier = null): Builder
+    protected function baseQuery(?string $wing, ?string $room, ?string $tier = null, ?array $wingIds = null): Builder
     {
         $query = DB::table('drawers')
             ->join('rooms', 'drawers.room_id', '=', 'rooms.id')
@@ -306,6 +313,10 @@ class PalaceSearchService
 
         if ($wing !== null) {
             $query->where('wings.slug', $wing);
+        }
+
+        if ($wingIds !== null) {
+            $query->whereIn('wings.id', $wingIds);
         }
 
         if ($room !== null) {

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Wing;
 use App\Support\WingPatterns;
 
 class DrawerSearchService
@@ -29,10 +30,13 @@ class DrawerSearchService
             room: null,
             limit: $limit,
             mode: 'hybrid',
+            // Scoped in SQL: filtering after the search let hidden drawers
+            // take limit slots and set the normalisation maximum, so an empty
+            // or reordered result said a stronger hidden match existed.
+            wingIds: Wing::readableIds($allowedWingPatterns),
         );
 
-        // Defense-in-depth: filter results to allowed wings even when no explicit
-        // wing filter was passed (restricted tokens must not see other wings).
+        // Second guard: the same filter on the way out.
         if ($allowedWingPatterns !== null) {
             $results = $results->filter(
                 fn ($r) => $this->wingMatchesPatterns($r->wing_slug, $allowedWingPatterns)

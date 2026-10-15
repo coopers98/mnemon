@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\WingPatterns;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -53,6 +54,30 @@ class Wing extends Model
     public static function slugify(string $name): string
     {
         return Str::slug(str_replace(':', '-', $name));
+    }
+
+    /**
+     * Ids of the wings a token holding these patterns may reach, or null when
+     * the patterns are null (unrestricted).
+     *
+     * Every query that scopes by wing goes through this, so the matching is
+     * WingPatterns' and never SQL LIKE's: to LIKE, `%` and `_` in a pattern
+     * are wildcards, and a pattern is literal apart from `*`.
+     *
+     * @param  array<string>|null  $patterns
+     * @return array<int>|null
+     */
+    public static function readableIds(?array $patterns): ?array
+    {
+        if ($patterns === null) {
+            return null;
+        }
+
+        return static::query()->get(['id', 'slug'])
+            ->filter(fn (Wing $w) => WingPatterns::matches($w->slug, $patterns))
+            ->pluck('id')
+            ->values()
+            ->all();
     }
 
     protected static function booted(): void

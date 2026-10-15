@@ -22,16 +22,7 @@ class RecallService
     ): array {
         $floor = (float) config('mnemon.recall.confidence_floor', 0.45);
 
-        // Wiki pages carry a wing derived from their name, and this leg runs on
-        // every prompt via the UserPromptSubmit hook -- so an unfiltered search
-        // here handed forbidden syntheses to an agent that never asked for
-        // them. Fetch a wider window before filtering: narrowing after the
-        // limit would let forbidden pages consume the three slots and silently
-        // return less than the budget allows.
-        $wikiHits = WikiPage::readableSubset(
-            collect($this->wikiSearch->search($prompt, limit: $allowedWingPatterns === null ? 3 : 24)),
-            $allowedWingPatterns
-        )->take(3);
+        $wikiHits = $this->readableWikiHits($prompt, $allowedWingPatterns, 3);
         $drawerHits = $this->drawerSearch->run(
             query: $prompt,
             limit: 10,
@@ -106,6 +97,34 @@ class RecallService
             'drawers' => $packed['drawers'],
             'tokens_used' => $packed['tokens_used'],
         ];
+    }
+
+    /**
+     * The best `$want` wiki hits the token may read.
+     *
+     * Wiki pages carry a wing derived from their name, and this leg runs on
+     * every prompt via the UserPromptSubmit hook. A page's wing is derived
+     * from its name, which SQL cannot match, so the search widens until it
+     * has `$want` readable hits or runs out of matches. A fixed window let
+     * enough stronger hidden pages crowd out every readable one, so an empty
+     * wiki leg said that they existed.
+     *
+     * @param  array<string>|null  $patterns
+     */
+    protected function readableWikiHits(string $prompt, ?array $patterns, int $want)
+    {
+        if ($patterns === null) {
+            return collect($this->wikiSearch->search($prompt, limit: $want));
+        }
+
+        for ($limit = $want * 8; ; $limit *= 4) {
+            $rows = collect($this->wikiSearch->search($prompt, limit: $limit));
+            $readable = WikiPage::readableSubset($rows, $patterns);
+
+            if ($readable->count() >= $want || $rows->count() < $limit) {
+                return $readable->take($want);
+            }
+        }
     }
 
     /**

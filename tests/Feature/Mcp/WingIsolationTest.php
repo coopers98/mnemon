@@ -209,6 +209,10 @@ class WingIsolationTest extends TestCase
 
     public function test_brain_status_counts_only_readable_items(): void
     {
+        // The hidden drawer is the newest, so an unscoped last_write would name its time.
+        Drawer::whereKey($this->workDrawer->id)->update(['created_at' => now()->subDay()]);
+        Drawer::whereKey($this->personalDrawer->id)->update(['created_at' => now()]);
+
         $res = $this->mcpCall('brain_status', [], ['mcp:use'], self::RESTRICTED);
 
         $status = $res->json('result.structuredContent');
@@ -216,6 +220,142 @@ class WingIsolationTest extends TestCase
         $this->assertSame(1, $status['wings']);
         $this->assertSame(1, $status['rooms']);
         $this->assertSame(1, $status['drawers']);
+        $this->assertSame(['raw' => 1], $status['drawers_by_tier']);
+        $this->assertSame(1, $status['embedding']['unembedded_drawers']);
+        $this->assertSame($this->workDrawer->fresh()->created_at->toIso8601String(), $status['last_write']);
+    }
+
+    public function test_context_get_lists_only_readable_sources(): void
+    {
+        $res = $this->mcpCall('context_get', ['name' => 'work'], ['mcp:use'], self::RESTRICTED);
+
+        $page = $res->json('result.structuredContent');
+        $this->assertSame([$this->workDrawer->id], $page['sources']);
+        $this->assertSame(1, $page['source_count'], 'a count of hidden sources is still a disclosure');
+        $this->assertSame(['work:thing'], $page['related']);
+    }
+
+    // C1: a search limit or score normalisation that sees hidden rows turns the
+    // shape of the result into an oracle on hidden content.
+    public function test_drawer_search_limit_is_not_spent_on_hidden_drawers(): void
+    {
+        $res = $this->mcpCall('drawer_search', ['query' => 'alpha PSECRET', 'limit' => 1], ['mcp:use'], self::RESTRICTED);
+
+        $this->assertSame([$this->workDrawer->id], array_column($res->json('result.structuredContent.results'), 'id'));
+    }
+
+    public function test_recall_drawer_leg_is_not_crowded_out_by_hidden_drawers(): void
+    {
+        for ($i = 0; $i < 12; $i++) {
+            Drawer::create(['content' => "alpha PSECRET drawer {$i}", 'room_id' => $this->personalDrawer->room_id]);
+        }
+
+        $res = $this->mcpCall('recall', ['prompt' => 'alpha PSECRET'], ['mcp:use'], self::RESTRICTED);
+
+        $this->assertSame([$this->workDrawer->id], array_column($res->json('result.structuredContent.drawers'), 'id'));
+    }
+
+    public function test_recall_wiki_leg_is_not_crowded_out_by_hidden_pages(): void
+    {
+        for ($i = 0; $i < 30; $i++) {
+            WikiPage::create(['name' => "personal:g{$i}", 'type' => 'synthesis', 'content' => 'gamma delta hidden']);
+        }
+        WikiPage::create(['name' => 'work:gamma', 'type' => 'synthesis', 'content' => 'gamma for the work wing']);
+
+        $res = $this->mcpCall('recall', ['prompt' => 'gamma delta'], ['mcp:use'], self::RESTRICTED);
+
+        $this->assertSame(['work:gamma'], array_column($res->json('result.structuredContent.wiki'), 'slug'));
+    }
+
+    // C3
+    public function test_wiki_lint_orphans_ignore_references_from_hidden_pages(): void
+    {
+        WikiPage::create([
+            'name' => 'work:lonely',
+            'type' => 'synthesis',
+            'content' => 'a work page that only a hidden page links to, long enough to not be a stub.',
+        ]);
+        WikiPage::where('name', 'personal')->first()->update(['related' => ['work:lonely']]);
+
+        $res = $this->mcpCall('wiki_lint', ['focus' => 'orphans'], ['mcp:use'], self::RESTRICTED);
+
+        $this->assertContains('work:lonely', array_column($res->json('result.structuredContent.findings'), 'page'));
+    }
+
+    // I1: `%` and `_` are wildcards to SQL LIKE but literal characters in a pattern.
+    public function test_like_wildcards_in_a_pattern_match_nothing_extra(): void
+    {
+        $res = $this->mcpCall('palace_wake_up', [], ['mcp:use'], ['%']);
+
+        $this->assertSame([], $res->json('result.structuredContent.recent_drawers'));
+        $this->assertSame([], $res->json('result.structuredContent.active_wings'));
+    }
+
+    public function test_like_wildcards_do_not_widen_context_set_sources(): void
+    {
+        $res = $this->mcpCall('context_set', [
+            'name' => 'work',
+            'content' => 'x',
+            'sources' => [$this->personalDrawer->id],
+        ], ['mcp:use'], ['work', '%']);
+
+        $this->assertTrue($res->json('result.isError') ?? false);
+        $this->assertSame('raw', $this->personalDrawer->fresh()->tier);
+    }
+
+    public function test_drawer_add_slugifies_the_wing(): void
+    {
+        $res = $this->mcpCall('drawer_add', ['wing' => 'My_Notes%', 'room' => 'notes', 'content' => 'hello'], ['mcp:use']);
+
+        $res->assertOk();
+        $this->assertFalse($res->json('result.isError') ?? false, $res->getContent());
+        $this->assertTrue(Wing::where('slug', 'my-notes')->exists());
+        $this->assertFalse(Wing::where('slug', 'like', '%\_%')->orWhere('slug', 'like', '%\%%')->exists());
+    }
+
+    // C2 + I4
+    public function test_session_digest_treats_a_hidden_wing_like_a_missing_one(): void
+    {
+        Wing::create(['name' => 'project:work', 'slug' => 'project-work']);
+        $patterns = ['work', 'work-*', 'project-work'];
+        $persisted = [];
+
+        foreach (['personal', 'personal-ghost'] as $i => $slug) {
+            $this->mockDigest([
+                ['content' => "note {$i}", 'wing_slug' => $slug, 'room_slug' => 'notes', 'confidence' => 0.9],
+            ], new \ArrayObject);
+
+            $res = $this->mcpCall('session_digest', [
+                'session_id' => "sess-c2-{$i}",
+                'harness' => 'claude-code',
+                'turn_range' => ['start' => 0, 'end' => 3],
+                'transcript' => 'anything',
+                'project' => 'work',
+            ], ['mcp:use'], $patterns);
+
+            $persisted[] = array_column($res->json('result.structuredContent.persisted'), 'wing');
+        }
+
+        $this->assertSame([['project-work'], ['project-work']], $persisted);
+    }
+
+    public function test_session_digest_reports_a_count_of_dropped_proposals(): void
+    {
+        $this->mockDigest([
+            ['content' => 'one', 'wing_slug' => 'personal', 'room_slug' => 'diary', 'confidence' => 0.9],
+            ['content' => 'two', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9],
+        ], new \ArrayObject);
+
+        $res = $this->mcpCall('session_digest', [
+            'session_id' => 'sess-i4',
+            'harness' => 'claude-code',
+            'turn_range' => ['start' => 0, 'end' => 3],
+            'transcript' => 'anything',
+        ], ['mcp:use'], self::RESTRICTED);
+
+        $body = $res->json('result.structuredContent');
+        $this->assertSame(1, $body['dropped_outside_wings']);
+        $this->assertSame(['work'], array_column($body['persisted'], 'wing'));
     }
 
     public function test_session_digest_never_files_into_another_wing(): void
@@ -241,6 +381,7 @@ class WingIsolationTest extends TestCase
         $body = $res->json('result.structuredContent');
         $this->assertSame(['work'], array_column($body['persisted'], 'wing'));
         $this->assertSame([], $body['pending_wings']);
+        $this->assertSame(2, $body['dropped_outside_wings']);
         $this->assertSame($before, $this->personalDrawer->room->drawers()->count());
         $this->assertSame(0, WikiPendingWing::count());
         $this->assertSame(1, Wing::where('slug', 'like', 'personal%')->count());

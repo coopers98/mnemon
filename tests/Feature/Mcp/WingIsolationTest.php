@@ -158,6 +158,7 @@ class WingIsolationTest extends TestCase
             'resource drawer' => ['resource', 'mnemon://drawer/{arg}', null, '{personal_drawer}', 999999, []],
             'resource wiki' => ['resource', 'mnemon://wiki/{arg}', null, 'personal', 'personal-ghost', []],
             'resource wing' => ['resource', 'mnemon://wing/{arg}', null, 'personal', 'personal-ghost', []],
+            'prompt synthesize_wing' => ['prompt', 'synthesize_wing', 'wing_slug', 'personal', 'personal-ghost', []],
         ];
     }
 

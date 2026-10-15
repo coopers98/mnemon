@@ -6,6 +6,7 @@ use App\Mcp\Concerns\RequiresScope;
 use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Concerns\ResolvesAgentSource;
 use App\Mcp\Support\BrainSessionLogger;
+use App\Models\Wing;
 use App\Services\DrawerWriteService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -36,6 +37,14 @@ class DrawerAddTool extends Tool
             'source' => 'nullable|string',
             'metadata' => 'nullable|array',
         ]);
+
+        // Slugged the way Wing's creating event slugs a name, so the stored
+        // slug -- the thing consent patterns are built from -- never carries
+        // characters such as `%` or `_` from the raw argument.
+        $params['wing'] = Wing::slugify($params['wing']);
+        if ($params['wing'] === '') {
+            return Response::error('Parameter "wing" must contain at least one letter or digit.');
+        }
 
         if ($err = $this->requireWingAccess($request, $params['wing'])) {
             return $err;

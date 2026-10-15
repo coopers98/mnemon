@@ -98,6 +98,12 @@ class SessionDigestService
                 continue;
             }
 
+            // The model names wings the way they are titled (`project:mnemon`);
+            // every check and lookup below is by slug (`project-mnemon`).
+            if (isset($p['wing_slug'])) {
+                $p['wing_slug'] = Wing::slugify((string) $p['wing_slug']);
+            }
+
             $suggestedWing = null;
 
             if ($sessionWingSlug !== null && $this->isProjectFiling($p, $existingWings)) {

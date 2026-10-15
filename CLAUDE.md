@@ -54,7 +54,7 @@ Endpoint: `POST /mcp` (Streamable HTTP, JSON-RPC 2.0). Built on [`laravel/mcp`](
 
 Authentication: OAuth 2.1 via Passport. Clients register via Dynamic Client Registration (DCR) or manually via `php artisan passport:client`. The consent screen (`/oauth/authorize`) lets the user grant access and restrict which wings the client can reach.
 
-Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_client_restrictions`, keyed by OAuth client) are the real per-agent isolation mechanism.
+Single scope: **`mcp:use`** — required for all 14 tools. The `laravel/mcp` package auto-injects this via `Registrar::ensureMcpScope()`. Wing restrictions (`mcp_client_restrictions`, keyed by OAuth client) are the real per-agent isolation mechanism. Every tool, resource and prompt honours them, and an item in a hidden wing must answer exactly like a missing one; `tests/Feature/Mcp/WingIsolationTest.php` holds one row per surface — add a row when you add a surface.
 
 **Layer 2 tools (automatic memory for Claude Code):** `recall` (per-prompt context injection, called by `mnemon-recall.sh`) and `session_digest` (end-of-session transcript digestion, called by `mnemon-capture.sh`) extend the original 12 tools.
 

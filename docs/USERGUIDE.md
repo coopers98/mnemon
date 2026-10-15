@@ -423,7 +423,7 @@ All Mnemon tools require the single OAuth scope **`mcp:use`**. There are no per-
 Wing restrictions control *which wings* the token can access.
 
 - **All wings (no restriction)** — token sees every wing. Use for trusted personal-device agents.
-- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's palace content — drawers, drawer search, and the wing, room and drawer resources — or read its wiki pages. The wiki is scoped by page name: a page's wing is derived from its name (`project:atlas` → wing `project-atlas`), so name pages after the wing they synthesise. `wiki_lint` is not wing-scoped. See [Limitations](../README.md#limitations).
+- **Specific wings** — check the wings you want this agent to see. The token cannot read or write any other wing's palace content — drawers, drawer search, and the wing, room and drawer resources — or read its wiki pages. The wiki is scoped by page name: a page's wing is derived from its name (`project:atlas` → wing `project-atlas`), so name pages after the wing they synthesise. A drawer or wiki page in a wing the token cannot reach is reported as not found, exactly like one that does not exist. `wiki_lint` reports only pages the token can read, and its `auto_fix` mode needs an unrestricted token. See [Limitations](../README.md#limitations).
 
 Wing restrictions support wildcard patterns. The consent screen exposes one checkbox per wing in your database. To grant `project:*` (all project-prefixed wings), check each matching wing, or grant "All wings" and rely on the agent to scope its calls.
 
@@ -472,7 +472,7 @@ Suggested layout:
 
 All tokens carry the single `mcp:use` scope — wing restrictions are the real isolation mechanism. To create a "read-only" agent, restrict it to wings where writing would be harmless or nonexistent.
 
-This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` palace content or `personal` wiki pages. Wiki pages are scoped by name, since page names map to wings (`project:atlas` → `project-atlas`), so a page named generically but compiled from `personal` drawers is scoped by its name, not its content. `wiki_lint` is not wing-scoped and exposes every page's name and metadata. See [Limitations](../README.md#limitations).
+This way: lose the work laptop, and an attacker who extracts the token still cannot reach `personal` palace content or `personal` wiki pages. Wiki pages are scoped by name, since page names map to wings (`project:atlas` → `project-atlas`), so a page named generically but compiled from `personal` drawers is scoped by its name, not its content. See [Limitations](../README.md#limitations).
 
 ### Auditing what each device did
 
@@ -1117,6 +1117,8 @@ The token's wing restrictions exclude the wing you're trying to read or write. E
 - Re-authorize with broader wing access
 - Or have the agent stay within the granted wings
 
+A drawer or wiki page that lives in a wing the token cannot reach is reported as **not found** rather than refused, so an id or page name cannot be used to probe other wings. If an agent reports "Drawer not found" or "Wiki page not found" for something you can see in the admin panel, check the token's wing restrictions; the refusal is recorded as `denied` in the audit log.
+
 ### `419 CSRF mismatch` on `/oauth/authorize`
 
 The consent form's CSRF token expired (sessions are short). Restart the OAuth flow from the `claude mcp add` step. If it persists, check that cookies are being preserved across the redirect.
@@ -1215,7 +1217,7 @@ If your organization has compliance requirements that prevent personal data from
 
 Drawers can be soft-deleted (default) or force-deleted. Wiki pages that cite a force-deleted drawer have a dangling reference in their `sources` JSON. The wiki page itself isn't broken — the citation just points to a non-existent ID.
 
-No lint detector checks drawer citations. The detectors are stale, orphan, empty and low-confidence; the auto-fixer prunes broken page-to-page `related` references, queues orphans for review and archives empty pages, and it runs only through the `wiki_lint` MCP tool — never from `mnemon:auto-lint`.
+No lint detector checks drawer citations. The detectors are stale, orphan, empty and low-confidence; the auto-fixer prunes broken page-to-page `related` references, queues orphans for review and archives empty pages, and it runs only through the `wiki_lint` MCP tool, for a token without wing restrictions — never from `mnemon:auto-lint`.
 
 Soft delete is preferred for this reason — it's reversible.
 

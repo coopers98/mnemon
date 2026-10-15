@@ -215,14 +215,14 @@ All tools require scope `mcp:use`. Wing restrictions on the token's OAuth client
 | `context_get` | Read a wiki page by name (includes structured metadata, confidence, sources) |
 | `context_set` | Upsert a wiki page (auto-updates index/log; stamps `last_compiled_at`) |
 | `context_list` | List wiki pages, optionally filtered by type |
-| `wiki_lint` | Detect stale, orphan, empty, and low-confidence wiki pages; auto-fix mode with audit trail |
+| `wiki_lint` | Detect stale, orphan, empty, and low-confidence wiki pages; auto-fix mode with audit trail (unrestricted tokens only) |
 | `wiki_compile` | Gather related drawers for wiki page compilation; supports consolidation tiers |
 | `wiki_graph` | Query the knowledge graph — entities, typed relationships, graph traversal |
 | `wiki_history` | Supersession and revision history for wiki pages; track how knowledge evolved |
 | `recall` | Hybrid recall of wiki excerpts and drawer snippets for a prompt, packed into a token budget; powers the Claude Code `mnemon-recall.sh` hook |
 | `session_digest` | Digest a sanitized transcript slice into drawer proposals; persists high-confidence ones, filing project-specific drawers under the session's project wing; powers the Claude Code `mnemon-capture.sh` hook |
 
-Wing restrictions on a token's OAuth client short-circuit before the tool even runs — a client restricted to `project:atlas` can never see a drawer in `personal`.
+Wing restrictions on a token's OAuth client apply to every tool, resource and prompt — a client restricted to `project-atlas` never reads, writes or counts anything in `personal`, and a drawer or wiki page in a wing it cannot reach answers exactly like one that does not exist.
 
 ---
 
@@ -350,8 +350,8 @@ convenience wrapper, not a scheduled task — run it yourself when you want it.
 
 This is a working personal tool, not a finished product. Honest constraints today:
 
-- **A wiki page's wing is derived from its name, not from its sources.** Wing restrictions now cover the wiki: `context_get`, `context_list`, `palace_wake_up`, `brain_status`, `recall`, `wiki_history`, `wiki_graph` and the `mnemon://wiki/{slug}` resource all filter pages a token may not read, and a page whose name maps to no permitted wing is treated as non-existent rather than public. The association uses the same mapping `wiki_compile` enforces (`project:atlas` → wing `project-atlas`), so it needs no column and no backfill — on a real instance 28 of 32 pages mapped by name. The residual gap is that the wing follows the **name**: a page named generically but compiled from drawers in a restricted wing would be scoped by its name rather than by its content. Name your pages after the wing they synthesise, and the isolation holds. Index pages (`wiki:index`, `wiki:log`) map to no wing and are therefore invisible to restricted tokens by design — they enumerate other pages.
-- **`wiki_lint` is not wing-scoped.** It scans every wiki page whatever the token's restrictions, so a restricted token sees the names, ids, pending-drawer counts, compile dates and confidence and quality scores of pages outside its wings. With `auto_fix: true` it also acts on them: it soft-deletes stub pages, queues orphans for review, and prunes broken `related` entries on every page, reporting each page's kept and removed `related` names. Give `wiki_lint` only to agents you would trust with every wing.
+- **A wiki page's wing is derived from its name, not from its sources.** Wing restrictions cover the wiki on every surface: `context_get`, `context_list`, `palace_wake_up`, `brain_status`, `recall`, `wiki_lint`, `wiki_history`, `wiki_graph` and the `mnemon://wiki/{slug}` resource all filter pages a token may not read, `context_set` and `wiki_compile` refuse pages outside its wings, and a page whose name maps to no permitted wing is treated as non-existent rather than public. The association uses the same mapping `wiki_compile` enforces (`project:atlas` → wing `project-atlas`), so it needs no column and no backfill — on a real instance 28 of 32 pages mapped by name. The residual gap is that the wing follows the **name**: a page named generically but compiled from drawers in a restricted wing would be scoped by its name rather than by its content. Name your pages after the wing they synthesise, and the isolation holds. Index pages (`wiki:index`, `wiki:log`) map to no wing and are therefore invisible to restricted tokens by design — they enumerate other pages.
+- **`wiki_lint` auto-fix needs an unrestricted token.** A restricted token's lint report lists only pages it can read, but `auto_fix: true` is refused for it: the fixer soft-deletes stubs and prunes `related` arrays across the whole wiki, which no single wing's view can do safely.
 - **The wiki does not maintain itself.** Wiki pages are compiled when an agent is asked to compile them. `mnemon:auto-compile-stale` reports which pages have pending drawers; it does not rewrite them, and nothing is scheduled to. Each recompile is a model call, so the trigger is deliberately yours.
 - **Single-tenant.** The Filament panel authenticates any registered user as an admin (`canAccessPanel()` returns `true`). OAuth tokens provide agent-level isolation via the single `mcp:use` scope and per-client wing restrictions.
 - **OAuth tokens expire.** Access tokens are valid for 1 hour; refresh tokens for 90 days. Revoke tokens via the Filament panel under OAuth Access Tokens. Compromised tokens are invalidated immediately on revocation.

@@ -180,7 +180,7 @@ Content is hashed with SHA-256 and stored in `metadata.content_hash`. On re-impo
 
 ## MCP Tool Reference
 
-All fourteen tools require the single OAuth scope `mcp:use`. Wing restrictions on the token provide per-agent isolation for palace content and wiki pages. The wiki is scoped by page name: a page's wing is derived from its name (`project:atlas` → wing `project-atlas`), and a page outside the token's wings is treated as not found. `wiki_lint` is the exception — it is not wing-scoped. See the README's Limitations.
+All fourteen tools require the single OAuth scope `mcp:use`. Wing restrictions on the token provide per-agent isolation for palace content and wiki pages. The wiki is scoped by page name: a page's wing is derived from its name (`project:atlas` → wing `project-atlas`), and a page outside the token's wings is treated as not found. Every tool honours the restriction: `wiki_lint` reports only readable pages, and its `auto_fix` mode needs an unrestricted token. See the README's Limitations.
 
 | Tool | Description |
 |------|-------------|

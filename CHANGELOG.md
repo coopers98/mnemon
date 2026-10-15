@@ -149,7 +149,7 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   A page's wing is derived from its name using the mapping `wiki_compile`
   already enforces (`project:atlas` → `project-atlas`), so the fix needs no
   column and no backfill. Pages that map to no permitted wing — including the
-  `wiki/index` and `wiki/log` pages that enumerate other pages — are treated as
+  `wiki:index` and `wiki:log` pages that enumerate other pages — are treated as
   non-existent for a restricted token rather than public. `context_get` returns
   the same "not found" for a forbidden page as for a missing one, so the error
   is not an existence oracle across wings.
@@ -171,6 +171,32 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   (revision hashes, agent ids) and `wiki_graph` (page names and edges) were open
   the same way and are now filtered too: the graph neither returns a forbidden
   page nor traverses through one.
+- **A wing-restriction audit of every MCP surface** (14 tools, 3 resources,
+  3 prompts) closed the remaining gaps, now pinned by one table-driven test,
+  `tests/Feature/Mcp/WingIsolationTest.php`:
+  - `palace_wake_up` listed every page with pending drawers by name.
+  - `context_set` let a restricted token overwrite, or restore from the
+    trash, any wing's page, and its `created_or_updated`, `revision_count` and
+    conflict error said which hidden pages existed. The page name is now
+    checked against the token's wings before the page is looked up.
+  - `wiki_lint` reported every page's name, id and scores, and `auto_fix`
+    soft-deleted stubs and pruned `related` arrays across all wings. Findings
+    are now filtered to readable pages after detection, with the summary
+    counted after filtering; `auto_fix` is refused for a restricted token.
+  - `brain_status` totals (wiki pages, wings, rooms, drawers, drawers by tier,
+    last write, embedding counts) spanned every wing; they now count only the
+    token's wings.
+  - `drawer_get` and `mnemon://drawer/{id}` answered a hidden drawer with
+    "Token does not have access to wing: personal" and a missing one with
+    "Drawer not found", so ids could be enumerated to map drawers to wings.
+    A hidden drawer now answers exactly like a missing one.
+  - `context_get` on a readable page returned `related` names of hidden pages
+    and `source_details` previews of hidden drawers; both are now narrowed.
+  - `session_digest` filed drawers into whatever wing the model named,
+    unchecked against the token, and could queue new-wing proposals for any
+    wing. Proposals outside the token's wings are now dropped, recent drawer
+    ids from hidden wings no longer reach the model, and a replayed slice
+    reports only drawers the token can read.
 
 ---
 

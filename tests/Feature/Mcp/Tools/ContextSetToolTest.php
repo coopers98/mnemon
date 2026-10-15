@@ -233,14 +233,21 @@ class ContextSetToolTest extends TestCase
     {
         $theirs = $this->drawerInWing('personal', 'private note');
 
-        $r = $this->mcpCall('context_set', [
+        $hidden = $this->mcpCall('context_set', [
             'name' => 'work',
             'content' => 'A page.',
             'sources' => [$theirs->id],
         ], ['mcp:use'], ['work']);
 
+        $missing = $this->mcpCall('context_set', [
+            'name' => 'work',
+            'content' => 'A page.',
+            'sources' => [999999],
+        ], ['mcp:use'], ['work']);
+
         // A drawer the token cannot see must be indistinguishable from one that
         // does not exist, or the error reveals which IDs are real.
-        $this->assertTrue($r->json('result.isError') ?? false);
+        $this->assertTrue($hidden->json('result.isError') ?? false);
+        $this->assertSame($missing->json('result'), $hidden->json('result'));
     }
 }

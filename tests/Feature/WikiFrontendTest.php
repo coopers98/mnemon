@@ -320,4 +320,17 @@ class WikiFrontendTest extends TestCase
             ->assertOk()
             ->assertSee('<b>Backlinks</b> 0', false);
     }
+
+    public function test_backlinks_tolerate_a_scalar_related_value(): void
+    {
+        WikiPage::factory()->create(['name' => 'project:alpha', 'related' => []]);
+        // The array cast round-trips a bare string as a string, which
+        // in_array() rejects with a TypeError.
+        WikiPage::factory()->create(['name' => 'person:ada', 'related' => 'project:alpha']);
+        WikiPage::factory()->create(['name' => 'concept:x', 'related' => ['project:alpha']]);
+
+        $this->actingAs($this->user)->get(route('wiki.show', 'project:alpha'))
+            ->assertOk()
+            ->assertSee('<b>Backlinks</b> 1', false);
+    }
 }

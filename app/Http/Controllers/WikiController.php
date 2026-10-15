@@ -49,7 +49,7 @@ class WikiController extends Controller
         // between SQLite and Postgres; a LIKE would also match name prefixes.
         $backlinkCount = WikiPage::where('name', '!=', $page->name)
             ->get(['related'])
-            ->filter(fn (WikiPage $other) => in_array($page->name, $other->related ?? [], true))
+            ->filter(fn (WikiPage $other) => is_array($other->related) && in_array($page->name, $other->related, true))
             ->count();
 
         // Get source drawers

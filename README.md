@@ -95,14 +95,18 @@ blank (so Caddy serves plain HTTP on port 80 inside the container), point the
 proxy at the published HTTP port, and set `TRUSTED_PROXIES` in `.env` to the
 proxy's address or CIDR range, comma-separated if there are several. The app
 then honours that proxy's `X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and
-`-Prefix` headers, so client IPs and `https://` URLs come out right. Set
-`APP_URL` to the public `https://` address as well. Caveats: `TRUSTED_PROXIES`
-takes addresses and CIDRs only, not `*`, and it must match the address the
-app sees the proxy connecting from (for a proxy on the same host, that is the
-Docker network gateway, not `127.0.0.1`). Unset, no proxy is trusted and the
-app advertises `http://` URLs. The test suite covers the `X-Forwarded-For`
-handling; the `X-Forwarded-Proto` path comes from Laravel's own proxy
-middleware and has not been exercised against a real proxy in this repo.
+`-Prefix` headers, so client IPs and `https://` URLs should come out right.
+`TRUSTED_PROXIES` takes addresses and CIDRs, and it must match the address the
+app sees the proxy connecting from. Check what that is (for example in the
+access log) rather than assuming: on a typical Docker bridge network it is the
+network gateway, not `127.0.0.1`, but it depends on how the port is published
+and whether the proxy runs in a container. Unset, no proxy is trusted (except
+on Laravel Cloud and `*.on-forge.com` / `*.on-vapor.com` hosts, where the
+framework default trusts all), and the app advertises `http://` URLs. Setting
+`APP_URL` to the public `https://` address is also sensible. Not tested end to
+end: the test suite covers `X-Forwarded-For`; the `X-Forwarded-Proto` path comes
+from Laravel's own proxy middleware, and neither it nor the `APP_URL` and
+gateway-address advice has been exercised against a real proxy in this repo.
 
 See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#native-install-the-alternative-to-docker) for the native
 (non-Docker) install, and [`CONTRIBUTING.md`](CONTRIBUTING.md) for running the

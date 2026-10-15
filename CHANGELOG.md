@@ -1,7 +1,7 @@
 # Changelog
 
 Notable changes to Mnemon. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); releases are tagged
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Releases are tagged
 from v1.0.0; earlier entries are grouped by the date the work landed on `main`.
 Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 

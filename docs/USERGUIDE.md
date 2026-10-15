@@ -961,14 +961,18 @@ OAuth 2.1 requires `https://` for non-localhost redirect URIs. If `APP_URL` is `
 **Running behind a TLS-terminating reverse proxy.** Leave `DOMAIN` blank, point the proxy
 at the stack's published HTTP port, and set `TRUSTED_PROXIES` in `.env` to the proxy's
 address or CIDR range (comma-separated for several). Mnemon then honours that proxy's
-`X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and `-Prefix` headers, and you should set
-`APP_URL` to the public `https://` address. `TRUSTED_PROXIES` takes addresses and CIDRs
-only, not `*`, and the value must match the address Mnemon sees the proxy connecting from
-(for a proxy on the same Docker host, the network gateway rather than `127.0.0.1`). Unset,
-no proxy is trusted and OAuth discovery and asset URLs are advertised as `http://`, which a
-browser blocks as mixed content on the consent screen. The test suite covers
-`X-Forwarded-For`; `X-Forwarded-Proto` is Laravel's own behaviour and has not been
-exercised against a real proxy in this repo.
+`X-Forwarded-For`, `-Host`, `-Port`, `-Proto` and `-Prefix` headers. `TRUSTED_PROXIES` takes
+addresses and CIDRs, and the value must match the address Mnemon sees the proxy
+connecting from. Check what that is (for example in the access log) rather than assuming:
+on a typical Docker bridge network it is the network gateway, not `127.0.0.1`, but it
+depends on how the port is published and whether the proxy runs in a container. Unset, no
+proxy is trusted (except on Laravel Cloud and `*.on-forge.com` / `*.on-vapor.com` hosts,
+where the framework default trusts all), and OAuth discovery and asset URLs are advertised
+as `http://`, which a browser blocks as mixed content on the consent screen. Setting
+`APP_URL` to the public `https://` address is also sensible. Not tested end to end: the
+test suite covers `X-Forwarded-For`; `X-Forwarded-Proto` is Laravel's own behaviour, and
+neither it nor the `APP_URL` and gateway-address advice has been exercised against a real
+proxy in this repo.
 
 #### Migrations on deploy
 
@@ -1024,8 +1028,8 @@ overwritten.
 
 For a real hostname with automatic HTTPS, see the [Quickstart](../README.md#quickstart)
 in the README — set `DOMAIN`, and set `HTTP_BIND=0.0.0.0:80` / `HTTPS_BIND=0.0.0.0:443`
-so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. To run behind your own TLS-terminating reverse proxy
-instead, see
+so ACME's HTTP-01 challenge and the HTTPS listener are actually reachable. To run behind your own TLS-terminating reverse
+proxy instead, see
 [HTTPS and OAuth redirect_uri](#https-and-oauth-redirect_uri): leave `DOMAIN` blank and set
 `TRUSTED_PROXIES` to the proxy's address or CIDR.
 

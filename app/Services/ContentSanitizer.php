@@ -18,11 +18,17 @@ class ContentSanitizer
         // leaves alone -- a token prefix named in prose, a comparison, a
         // host:port -- is not mangled here either.
         //
-        // PEM private keys, through the END line or, cut off, to the end.
-        // A header alone (a note that mentions one) is left alone: there has
-        // to be a base64 body, a run of 40+ characters first, then any
-        // further lines, then the END line if it is there.
-        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\s*[A-Za-z0-9+\/=]{40,}(?:\s+[A-Za-z0-9+\/=]+)*+(?:\s*-----END [A-Z0-9 ]*PRIVATE KEY-----)?/', '[REDACTED:PRIVATE_KEY]'],
+        // PEM private keys. With an END line, everything from BEGIN to it,
+        // whatever lies between -- Proc-Type/DEK-Info headers of an encrypted
+        // key, line breaks escaped as a literal \n. Non-greedy and bounded,
+        // so a stray BEGIN cannot run away.
+        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----/', '[REDACTED:PRIVATE_KEY]'],
+        // Without one (a key cut off), from BEGIN on when a body follows: a
+        // 20+ character base64 run, after any header lines, with real or
+        // escaped (\n, \r\n) line breaks. A header named in prose has no body
+        // and is left alone. It ends where the text does -- or where the
+        // enclosing JSON string does, so a transcript stays parseable.
+        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\s|\\\\[rn])*+(?:Proc-Type|DEK-Info):[^\r\n\\\\]*+)*+(?:\s|\\\\[rn])*+[A-Za-z0-9+\/=]{20,}(?:[^"\\\\]++|\\\\.)*+/', '[REDACTED:PRIVATE_KEY]'],
         // AWS access key ids.
         ['/AKIA[0-9A-Z]{16}/', '[REDACTED:AWS_KEY]'],
         // JWTs.

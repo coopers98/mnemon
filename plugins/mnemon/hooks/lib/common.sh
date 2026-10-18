@@ -981,25 +981,35 @@ mnemon_clean_transcript() {
             | if $head then sub("\\A\\s*Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "") else . end
             | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
+        # A regex that fails (Oniguruma has a retry limit) keeps the text it
+        # was given; it never empties it or drops the turn.
+        def keep(f): . as $in | try f catch $in;
+
         def redact:
-            # A header alone -- a note that mentions one -- is left alone: a
-            # base64 body (a 40+ character run, then any further lines) has to
-            # follow, then the END line if it is there.
-            gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\\s*[A-Za-z0-9+/=]{40,}(?:\\s+[A-Za-z0-9+/=]+)*(?:\\s*-----END [A-Z0-9 ]*PRIVATE KEY-----)?"; "[REDACTED-PRIVATE-KEY]")
-            | gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]")
-            | gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]")
-            | gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]")
-            | gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]")
-            | gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]")
-            | gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]")
-            | gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]")
-            | gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]")
+            # PEM private keys. With an END line, everything from BEGIN to it,
+            # whatever lies between -- Proc-Type/DEK-Info headers of an
+            # encrypted key, line breaks escaped as a literal \n. Non-greedy
+            # and bounded, so a stray BEGIN cannot run away.
+            keep(gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))
+            # Without one (a key cut off), from BEGIN to the end of the text
+            # when a body follows: a 20+ character base64 run, after any
+            # header lines, with real or escaped (\n, \r\n) line breaks. A
+            # header named in prose has no body and is left alone.
+            | keep(sub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\\s|\\\\[rn])*(?:Proc-Type|DEK-Info):[^\\r\\n\\\\]*)*(?:\\s|\\\\[rn])*[A-Za-z0-9+/=]{20,}[\\s\\S]*\\z"; "[REDACTED-PRIVATE-KEY]"))
+            | keep(gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]"))
+            | keep(gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]"))
+            | keep(gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]"))
+            | keep(gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]"))
+            | keep(gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]"))
+            | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"))
+            | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"))
+            | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"))
             # The name starts a word or follows a prefix ending in "_"
             # (DB_PASSWORD); NOSECRET= is not a secret.
-            | gsub("(?<![A-Za-z0-9])(?<p>(?:[A-Za-z0-9]+_)*)(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.p)\(.k)=[REDACTED]")
+            | keep(gsub("(?<![A-Za-z0-9])(?<p>(?:[A-Za-z0-9]+_)*)(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.p)\(.k)=[REDACTED]"))
             # scheme://user:pass@ -- the scheme tells admin:123456@ (a
             # password) from a bare //host:8080@ or //TODO:fix@.
-            | gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@");
+            | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"));
 
         def turn:
             if .type == "attachment" then
@@ -1022,7 +1032,9 @@ mnemon_clean_transcript() {
             | ($p.t != "") as $cut
             | ($p.h | if $user then unwrap_harness(true; $cut) else . end | redact) as $h
             | ($p.t | if $user then unwrap_harness(false; true) else . end | redact
-                    | sub("\\A[A-Za-z0-9+/=]*(?:\\s+[A-Za-z0-9+/=]{40,})+(?:\\s+[A-Za-z0-9+/=]+)*\\s*-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]")) as $t
+                    # The end of a key the cut split: body characters, header
+                    # lines and (escaped) line breaks up to its END line.
+                    | keep(sub("\\A[A-Za-z0-9+/=\\s\\\\:,-]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))) as $t
             | (if $user then $usermax else $scan end) as $max
             | ($max * 0.6 | floor) as $hn
             | (if $cut then {h: $h, t: $t}

@@ -110,7 +110,8 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   prose, comparisons such as `PASSWORD==x`, names such as `NOSECRET=`, a bare
   `//host:8080@` and a PEM header mentioned without a key are no longer
   redacted; AWS key ids, JWTs, GitHub fine-grained and Slack tokens, PEM
-  private keys with their body, and `scheme://user:password@` (digits-only
+  private keys (plain, encrypted with Proc-Type/DEK-Info headers, JSON-escaped with a
+  literal `\n`, or cut off with no END line), and `scheme://user:password@` (digits-only
   passwords included) are. A pattern that fails keeps the text rather than
   storing it empty. Drawers are de-duplicated by a hash of their redacted
   content, so text redacted differently now hashes differently: a drawer

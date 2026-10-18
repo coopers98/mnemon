@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Services\ContentSanitizer;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -168,5 +169,49 @@ class ContentSanitizerTest extends TestCase
         }
 
         $this->assertNotSame('', $out);
+    }
+
+    private const BODY_LINE = 'MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun';
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function privateKeys(): array
+    {
+        $line = self::BODY_LINE;
+
+        return [
+            'ordinary PEM' => ["-----BEGIN RSA PRIVATE KEY-----\n{$line}\n{$line}\nVGFpbA==\n-----END RSA PRIVATE KEY-----"],
+            'encrypted PEM with headers' => ["-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF\n\n{$line}\nVGFpbA==\n-----END RSA PRIVATE KEY-----"],
+            'JSON-escaped with literal \n' => ['-----BEGIN OPENSSH PRIVATE KEY-----\n'.$line.'\n'.$line.'\n-----END OPENSSH PRIVATE KEY-----'],
+            'JSON-escaped, no END' => ['-----BEGIN OPENSSH PRIVATE KEY-----\r\n'.$line.'\r\n'.$line],
+            'truncated, no END' => ["-----BEGIN EC PRIVATE KEY-----\n{$line}\n{$line}"],
+            'encrypted, truncated' => ["-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0123456789ABCDEF\n\n{$line}"],
+        ];
+    }
+
+    #[DataProvider('privateKeys')]
+    public function test_a_private_key_is_redacted_in_every_shape(string $key): void
+    {
+        $out = $this->sanitizer->sanitize("BEFORE-KEY {$key}".(str_contains($key, '-----END') ? ' AFTER-KEY' : ''));
+
+        $this->assertStringNotContainsString('MIIEowIBAAKCAQEA', $out);
+        $this->assertStringNotContainsString('VGFpbA', $out);
+        $this->assertStringNotContainsString('DEK-Info', $out);
+        $this->assertStringStartsWith('BEFORE-KEY ', $out);
+        if (str_contains($key, '-----END')) {
+            $this->assertStringEndsWith(' AFTER-KEY', $out);
+        }
+    }
+
+    public function test_a_megabyte_after_a_begin_line_finishes_quickly_and_is_kept(): void
+    {
+        $prose = '-----BEGIN RSA PRIVATE KEY----- '.str_repeat('just some words ', 65536);
+
+        $start = microtime(true);
+        $out = $this->sanitizer->sanitize($prose);
+
+        $this->assertLessThan(2.0, microtime(true) - $start);
+        $this->assertSame($prose, $out);
     }
 }

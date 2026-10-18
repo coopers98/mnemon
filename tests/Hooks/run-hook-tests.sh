@@ -860,6 +860,51 @@ done
 assert_eq "$(printf '%s' "$cap_out" | jq '[.[] | select(.role == "assistant") | .text | test("characters cut")] | any')" "false" \
     "cleaner cap: a 20k assistant reply is not cut"
 
+# Private keys in every shape a transcript carries them: plain, encrypted
+# (Proc-Type/DEK-Info headers before the body), JSON-escaped (a literal \n for
+# each line break), and cut off with no END line. A header named in prose
+# stays. Narrowing the pattern to "40 base64 characters right after BEGIN" let
+# the encrypted and escaped shapes through.
+pem_in="$MNEMON_DIR/transcript-pem.jsonl"
+python3 -c '
+import json
+line = "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun"
+cases = {
+    "PEM-PLAIN": "-----BEGIN RSA PRIVATE KEY-----\n%s\n%s\nVGFpbA==\n-----END RSA PRIVATE KEY----- AFTER-PEM-PLAIN" % (line, line),
+    "PEM-ENCRYPTED": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0123456789ABCDEF\n\n%s\nVGFpbA==\n-----END RSA PRIVATE KEY----- AFTER-PEM-ENCRYPTED" % line,
+    "PEM-ESCAPED": "-----BEGIN OPENSSH PRIVATE KEY-----\\n%s\\n%s\\n-----END OPENSSH PRIVATE KEY----- AFTER-PEM-ESCAPED" % (line, line),
+    "PEM-ESCAPED-CUT": "-----BEGIN OPENSSH PRIVATE KEY-----\\r\\n%s\\r\\n%s" % (line, line),
+    "PEM-TRUNCATED": "-----BEGIN EC PRIVATE KEY-----\n%s\n%s" % (line, line),
+    "PEM-PROSE": "the -----BEGIN RSA PRIVATE KEY----- header goes first, then the body PROSE-KEPT",
+}
+for name, text in cases.items():
+    for role, body in (("user", name + " " + text), ("assistant", "ok")):
+        content = body if role == "user" else [{"type": "text", "text": body}]
+        print(json.dumps({"type": role, "message": {"role": role, "content": content}}))
+' > "$pem_in"
+pem_out=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$pem_in")
+pem_leaks=$(printf '%s' "$pem_out" | jq -r '.[] | select(.role == "user") | .text' | grep -cE 'MIIEowIBAAKCAQEA|VGFpbA|DEK-Info')
+assert_eq "$pem_leaks" "0" "cleaner: no private key body survives, in any shape"
+for kept in PEM-PLAIN AFTER-PEM-PLAIN PEM-ENCRYPTED AFTER-PEM-ENCRYPTED PEM-ESCAPED AFTER-PEM-ESCAPED \
+    PEM-ESCAPED-CUT PEM-TRUNCATED 'the -----BEGIN RSA PRIVATE KEY----- header goes first, then the body PROSE-KEPT'; do
+    case "$pem_out" in
+        *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner pem: keeps %s\n' "$kept";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: lost %s\n' "$kept";;
+    esac
+done
+# A megabyte after a BEGIN line finishes quickly and comes back, not empty.
+python3 -c '
+import json
+print(json.dumps({"type": "user", "message": {"role": "user", "content": "MB-HEAD -----BEGIN RSA PRIVATE KEY----- " + "just some words " * 65536}}))' > "$pem_in"
+pem_start=$(date +%s)
+pem_big=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$pem_in")
+pem_secs=$(( $(date +%s) - pem_start ))
+case "$pem_big" in
+    *MB-HEAD*) [ "$pem_secs" -le 3 ] && { PASS=$((PASS+1)); printf '  ok: cleaner pem: a megabyte after BEGIN is kept, in %ss\n' "$pem_secs"; } \
+        || { FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: a megabyte after BEGIN took %ss\n' "$pem_secs"; };;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: a megabyte after BEGIN came back empty\n';;
+esac
+
 # End to end: what capture actually sends.
 CL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 CL_LOG="$MNEMON_DIR/requests-cl.log"

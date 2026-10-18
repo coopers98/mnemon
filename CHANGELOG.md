@@ -19,6 +19,15 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   exits 0 iff nothing failed; never prints a token or secret. Runs on Linux,
   macOS and Git Bash on Windows. The "not connected" and "authorization is
   dead" session-start banners now point at it. Plugin 0.3.10.
+- **Plugin auto-update is turned on by the setup script.** Claude Code leaves
+  auto-update off for third-party marketplaces, so a device stayed on the
+  version it installed until someone ran `claude plugin update`. `/install` now
+  merges `autoUpdate: true` into the marketplace's `extraKnownMarketplaces`
+  entry in `~/.claude/settings.json`. It backs the file up first, writes the new
+  one atomically, leaves a file that is not plain JSON untouched, and can be
+  skipped with `MNEMON_NO_AUTOUPDATE=1`. `/mnemon:doctor` reports the effective
+  setting and where it comes from, along with any environment variable that
+  disables it. Plugin 0.3.10.
 - **A public, read-only demo** (`MNEMON_DEMO=true`). The app serves only GET
   and HEAD requests for the landing page, `/how-it-works`, `/wiki*`, `/palace*`
   and `/up`; everything else, including `/admin`, `/mcp` and `/oauth`, gets a

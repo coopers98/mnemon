@@ -525,8 +525,9 @@ itself:
 curl -fsSL https://<your-instance>/install | bash
 ```
 
-It checks dependencies, installs the plugin, and prints the one command left to
-run. It deliberately stops short of enrolling the device: that needs a client id
+It checks dependencies, installs the plugin, turns on plugin auto-update (see
+[Staying current](#staying-current); opt out with `MNEMON_NO_AUTOUPDATE=1`),
+and prints the one command left to run. It deliberately stops short of enrolling the device: that needs a client id
 and secret only you can mint, and it replaces whatever credential the device
 already has.
 
@@ -615,6 +616,7 @@ secret. It exits 0 when nothing failed:
 Mnemon doctor
 ok    tools: bash 5.2.21, curl, jq 1.7
 ok    plugin: version 0.3.10
+ok    plugin auto-update: on (/home/me/.claude/settings.json)
 ok    config: endpoint https://mnemon.example.com/mcp, credentials from /home/me/.mnemon/config.json; can self-renew
 ok    token: access token valid for 49 minute(s)
 ok    reach: https://mnemon.example.com answered HTTP 200
@@ -638,6 +640,71 @@ Nothing is said when they match, or when the server is too old to report a
 version. The device also reports its own version on every wake, so a stale
 machine is visible in Brain Sessions without anyone noticing on the machine
 itself.
+
+That nudge only tells you about an update. **Plugin auto-update** applies it.
+Claude Code leaves auto-update **off** for third-party marketplaces, which
+includes this one, and a marketplace cannot switch it on for you. With it off, a
+device keeps the version it installed until someone runs
+`claude plugin update mnemon@mnemon`.
+
+**The setup script turns it on.** After installing the plugin, `/install` sets
+`"autoUpdate": true` on the `mnemon` entry under `extraKnownMarketplaces` in
+`~/.claude/settings.json`. It merges the key into the existing entry, so the
+entry keeps its `source`. It backs the file up first and writes the new one
+atomically. If the file is not plain JSON (it has comments, say), the script
+leaves it untouched and prints how to turn auto-update on by hand. To skip this
+step, run the script with `MNEMON_NO_AUTOUPDATE=1`:
+
+```bash
+curl -fsSL https://<your-instance>/install | MNEMON_NO_AUTOUPDATE=1 bash
+```
+
+**To turn it on by hand**, either:
+
+- in Claude Code, run `/plugin`, open **Marketplaces**, select **mnemon** and
+  choose **Enable auto-update**; or
+- set it in `~/.claude/settings.json`:
+
+  ```json
+  {
+    "extraKnownMarketplaces": {
+      "mnemon": {
+        "source": { "source": "github", "repo": "coopers98/mnemon" },
+        "autoUpdate": true
+      }
+    }
+  }
+  ```
+
+  Add `autoUpdate` to the `mnemon` entry that is already there. Do not add a
+  second entry. Entries with the same name in different settings files replace
+  each other whole, so an entry without `source` breaks the marketplace.
+
+If both places set it, the settings-file entry wins over the `/plugin` choice.
+`/mnemon:doctor` shows which one is in effect.
+
+**When an update takes effect.** In an interactive session, after your first
+message, Claude Code waits a random delay of up to ten minutes. It then
+refreshes the marketplace and updates the plugin on disk. The running session
+keeps the version it loaded ("Plugin updated: mnemon · Run /reload-plugins to
+apply"). The new one loads after `/reload-plugins` or on the next launch.
+Non-interactive `claude -p` runs never update. An update is picked up only when
+the plugin's `version` changes, and every release changes it.
+
+**What turns it off anyway:** `DISABLE_UPDATES=1`, `DISABLE_AUTOUPDATER=1` or
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in Claude Code's environment turn
+plugin auto-update off entirely. `FORCE_AUTOUPDATE_PLUGINS=1` turns it back on
+for plugins. The doctor names whichever of these is set.
+
+**To update right now**, whatever the setting:
+
+```bash
+claude plugin update mnemon@mnemon
+```
+
+See Claude Code's docs:
+[keeping plugins updated](https://code.claude.com/docs/en/plugins/install#keep-plugins-updated)
+and [when auto-update runs](https://code.claude.com/docs/en/plugins/loading#when-auto-update-runs).
 
 #### If you installed the hooks before the plugin existed
 

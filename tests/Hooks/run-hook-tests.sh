@@ -754,6 +754,98 @@ assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
 kill $WK_PID 2>/dev/null
 mv "$MNEMON_DIR/config.wk.json" "$MNEMON_DIR/config.json"
 
+# Test 10j: capture sends the conversation and nothing else. The old filter
+# dropped records whose .type was tool_use|tool_result|thinking -- which no
+# top-level record has -- so 93% of transcript bytes survived it: system-prompt
+# snapshots, hook output (Mnemon's own recall and wake text, which was digested
+# back into new drawers), CLAUDE.md, attached files, toolUseResult. The fixture
+# copies the shapes of real records; the content is invented.
+SHAPES="$THIS_DIR/fixtures/transcript-shapes.jsonl"
+cleaned=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$SHAPES")
+if printf '%s' "$cleaned" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    PASS=$((PASS+1)); printf '  ok: cleaner: emits a JSON array\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: cleaner: output is not a non-empty JSON array: %s\n' "$(printf '%s' "$cleaned" | head -c 200)"
+fi
+leaks=$(printf '%s' "$cleaned" | grep -oE '[A-Z]+(-[A-Z]+)*-LEAK' | sort -u | tr '\n' ' ')
+assert_eq "$leaks" "" "cleaner: no tool output, attachment, hook output, meta, compact, sidechain or harness text survives"
+for kept in USER-WORDS-ONE USER-WORDS-TWO ASSISTANT-WORDS-ONE ASSISTANT-WORDS-TWO COMMAND-ARGS-KEEP USER-WORDS-AFTER-KEYS; do
+    case "$cleaned" in
+        *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner: keeps %s\n' "$kept";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: lost %s\n' "$kept";;
+    esac
+done
+case "$cleaned" in
+    *"Mnemon recall"*|*"Mnemon palace state"*|*"system-reminder"*)
+        FAIL=$((FAIL+1)); printf '  FAIL: cleaner: Mnemon recall/wake text reaches the digest\n';;
+    *) PASS=$((PASS+1)); printf '  ok: cleaner: Mnemon recall/wake text never reaches the digest\n';;
+esac
+secrets=$(printf '%s' "$cleaned" | grep -oE 'SECRET[A-Za-z0-9_]*|AKIAABCDEFGHIJKLMNOP|eyJhbGciOiJIUzI1NiJ9|abcdefghijklmnopqrstuvwxyz0123' | sort -u | tr '\n' ' ')
+assert_eq "$secrets" "" "cleaner: every secret family is redacted"
+for family in AWS-KEY JWT 'Bearer \[REDACTED\]' OPENAI-KEY GITHUB-TOKEN SLACK-TOKEN API-KEY 'PASSWORD=\[REDACTED\]' CREDENTIALS PRIVATE-KEY; do
+    if printf '%s' "$cleaned" | grep -qE "$family"; then
+        PASS=$((PASS+1)); printf '  ok: cleaner: redaction marker %s present\n' "$family"
+    else
+        FAIL=$((FAIL+1)); printf '  FAIL: cleaner: no redaction marker %s\n' "$family"
+    fi
+done
+assert_eq "$(printf '%s' "$cleaned" | jq -c '[.[] | keys] | add | unique' 2>/dev/null)" '["role","text","ts"]' \
+    "cleaner: each entry carries only role, ts and text"
+assert_eq "$(printf '%s' "$cleaned" | jq -c '[.[] | .role]' 2>/dev/null)" \
+    '["user","assistant","user"]' \
+    "cleaner: consecutive turns of one role are merged; empty ones dropped"
+
+# Stdin works too, and a line cut off mid-record (a transcript still being
+# written) is skipped rather than failing the whole slice.
+partial=$( { cat "$SHAPES"; printf '{"type":"user","message":{"role":"us'; } \
+    | bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript' _ "$HOOKS_DIR")
+assert_eq "$partial" "$cleaned" "cleaner: reads stdin and skips a truncated last line"
+
+# End to end: what capture actually sends.
+CL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+CL_LOG="$MNEMON_DIR/requests-cl.log"
+: > "$CL_LOG"
+FAKE_PORT="$CL_PORT" FAKE_REQUEST_LOG="$CL_LOG" "$THIS_DIR/fixtures/server.sh" &
+CL_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.cl.json"
+jq --arg e "http://127.0.0.1:$CL_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+rm -f "$MNEMON_DIR/sessions/s25.json"
+printf '{"session_id":"s25","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$SHAPES" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do
+    grep -q 'session_digest' "$CL_LOG" 2>/dev/null && break
+    sleep 0.25
+done
+sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.transcript // ""' "$CL_LOG" 2>/dev/null)
+assert_eq "$sent" "$cleaned" "capture: sends exactly the cleaned transcript"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s25.json")" "$(wc -l < "$SHAPES" | tr -d ' ')" \
+    "capture: the pointer still counts raw transcript lines"
+kill $CL_PID 2>/dev/null
+mv "$MNEMON_DIR/config.cl.json" "$MNEMON_DIR/config.json"
+
+# A slice with nothing left after cleaning -- only tool calls and hook output --
+# sends nothing. The pointer stays: jumping it past would also jump past any
+# earlier range whose digest is still in flight and might fail.
+: > "$CL_LOG"
+FAKE_PORT="$CL_PORT" FAKE_REQUEST_LOG="$CL_LOG" "$THIS_DIR/fixtures/server.sh" &
+CL_PID=$!
+sleep 0.5
+jq --arg e "http://127.0.0.1:$CL_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+tp_empty="$MNEMON_DIR/transcript-noconv.jsonl"
+grep -E '"type":"(attachment|queue-operation|last-prompt)"' "$SHAPES" > "$tp_empty"
+rm -f "$MNEMON_DIR/sessions/s26.json"
+printf '{"session_id":"s26","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_empty" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+sleep 1.5
+assert_eq "$(grep -c 'session_digest' "$CL_LOG" 2>/dev/null)" "0" "capture: a slice with no conversation sends no digest"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s26.json" 2>/dev/null)" "0" \
+    "capture: ...and leaves the pointer where it was"
+kill $CL_PID 2>/dev/null
+mv "$MNEMON_DIR/config.cl.json" "$MNEMON_DIR/config.json" 2>/dev/null
+
 # --- Refresh tests -----------------------------------------------------------
 # A device enrolled through the device grant holds a one-hour access token and a
 # 90-day refresh token. Nothing renews it interactively -- there is no browser on

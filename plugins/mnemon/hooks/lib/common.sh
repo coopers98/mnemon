@@ -614,6 +614,87 @@ mnemon_project_name() {
     printf '%s' "$name"
 }
 
+# Reduce a Claude Code transcript to the conversation. Args: [<file>]; reads
+# stdin without one. Input is JSONL -- one record per line -- and a line may
+# also hold an array of records (the inline `.transcript` a Stop payload can
+# carry). Echoes a compact JSON array of {"role","ts","text"}.
+#
+# A whitelist, not a blacklist. Most of a transcript is not conversation: the
+# old filter dropped records whose .type was tool_use|tool_result|thinking --
+# which no top-level record has -- and 93% of transcript bytes got through it:
+# system-prompt and environment snapshots, CLAUDE.md, attached and edited
+# files, toolUseResult, and hook output, including Mnemon's own recall and wake
+# text, which the digest then filed back into the palace as new drawers.
+#
+# Kept: user and assistant records that are not meta, compact summaries,
+# sidechains or synthetic API errors; of those, only the text of `text` blocks
+# (string content counts as one). Harness-injected wrappers are cut from the
+# text, secrets are redacted, empty turns are dropped, and consecutive turns of
+# one role are merged -- an assistant reply split around tool calls reads as
+# one reply. The result is still JSON, so the server's "Read a Claude Code
+# transcript" prompt and its string-level sanitizer keep working.
+#
+# One jq process for the whole slice: a fork costs 20-60ms on Git Bash, so
+# per-record work outside jq would scale with the transcript. A line that does
+# not parse -- the record being written as the hook runs -- is skipped.
+#
+# The redaction set is the union of the earlier client set and the server's
+# ContentSanitizer, plus GitHub fine-grained and app tokens, Slack tokens and
+# PEM private keys. The server still sanitizes what arrives.
+mnemon_clean_transcript() {
+    jq -nRc '
+        def unwrap_harness:
+            # Context the harness or a hook injected, not anything typed.
+            gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
+            | gsub("<(command-name|command-message|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr|task-notification|user-prompt-submit-hook)>[\\s\\S]*?</\\1>"; "")
+            # Mnemon recall/wake blocks that arrive without a wrapper: the
+            # header line and the indented lines under it.
+            | gsub("(^|\\n)Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "")
+            # What the user typed for a slash command or a ! shell line stays.
+            | gsub("</?(command-args|bash-input)>"; "")
+            | gsub("\\[Request interrupted by user[^\\]]*\\]"; "")
+            | gsub("\\n{3,}"; "\n\n")
+            | sub("^\\s+"; "") | sub("\\s+$"; "");
+
+        def redact:
+            gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|\\z)"; "[REDACTED-PRIVATE-KEY]")
+            | gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]")
+            | gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]")
+            | gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]")
+            | gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]")
+            | gsub("\\bgithub_pat_[A-Za-z0-9_]+"; "[REDACTED-GITHUB-TOKEN]")
+            | gsub("\\bgh[pousr]_[A-Za-z0-9]+"; "[REDACTED-GITHUB-TOKEN]")
+            | gsub("\\bxox[abprs]-[A-Za-z0-9-]+"; "[REDACTED-SLACK-TOKEN]")
+            | gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]")
+            | gsub("(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*\\S+"; "\(.k)=[REDACTED]")
+            | gsub("//[^\\s/@:]+:[^\\s/@]+@"; "//[REDACTED-CREDENTIALS]@");
+
+        def text_of:
+            if type == "string" then .
+            elif type == "array" then [.[] | select(type == "object" and .type == "text") | .text | strings] | join("\n\n")
+            else "" end;
+
+        [ inputs
+          | fromjson?
+          | if type == "array" then .[] else . end
+          | select(type == "object")
+          | ((.type // .message.role // .role) as $role
+             | select($role == "user" or $role == "assistant")
+             | select((.isMeta != true) and (.isCompactSummary != true)
+                      and (.isSidechain != true) and (.isApiErrorMessage != true))
+             | {role: $role,
+                ts: ((.timestamp // null) | if type == "string" then sub("\\.[0-9]+Z$"; "Z") else null end),
+                text: ((.message.content // .content) | text_of | unwrap_harness | redact)})
+          | select(.text != "")
+        ]
+        | reduce .[] as $r ([];
+            if length > 0 and .[-1].role == $r.role
+            then .[-1].text += "\n\n" + $r.text
+            else . + [$r] end)
+        | map(if .ts == null then del(.ts) else . end)
+    ' ${1:+"$1"}
+}
+
 # Append an error message to the capture-errors log.
 mnemon_log_error() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$MNEMON_ERROR_LOG"

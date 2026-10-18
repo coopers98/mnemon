@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mnemon Stop hook: sanitize, slice, dispatch detached digest worker.
+# Mnemon Stop hook: slice, clean, dispatch detached digest worker.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,50 +50,39 @@ if [ -n "$transcript_path" ]; then
     slice_file="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
     tail -n +"$((last_turn + 1))" "$transcript_path" > "$slice_file" 2>/dev/null || exit 0
 
-    # Even one digest can exceed the limit on a long first run, so cap it.
-    # Trim whole records from the front: tail -c can land mid-line, and the
-    # leading partial is dropped so the slice stays valid JSONL.
-    max_bytes=$(mnemon_config_value 'max_digest_bytes' 262144)
+    # Bound the work on a long first run. Trim whole records from the front:
+    # tail -c can land mid-line, and the leading partial is dropped so the
+    # slice stays valid JSONL. Cleaning keeps a few percent of a raw slice, so
+    # this cap is sized for the work, not for the server's limit -- that is
+    # max_digest_chars, below. At the old 256KiB a long slice cleaned down to a
+    # few KB and most of its conversation was never digested.
+    max_bytes=$(mnemon_config_value 'max_digest_bytes' 2097152)
     if [ "$(wc -c < "$slice_file")" -gt "$max_bytes" ]; then
         tail -c "$max_bytes" "$slice_file" | tail -n +2 > "$slice_file.cap" \
             && mv "$slice_file.cap" "$slice_file"
     fi
 
-    transcript=$(jq -s -c '.' "$slice_file" 2>/dev/null)
+    text=$(mnemon_clean_transcript "$slice_file" 2>/dev/null)
     rm -f "$slice_file"
-    [ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
+else
+    text=$(printf '%s' "$transcript" | mnemon_clean_transcript 2>/dev/null)
 fi
 
-# Structural sanitize: drop tool_use, tool_result, thinking blocks.
-# Tool I/O and thinking appear at two levels: as whole records, and -- in real
-# Claude Code transcripts -- as blocks nested under .message.content. Filtering
-# only the top level lets tool output through.
-cleaned=$(printf '%s' "$transcript" | jq -c '
-    def strip_blocks: map(select((.type // "") | test("tool_use|tool_result|thinking") | not));
-    if type == "array" then
-        strip_blocks
-        | map(
-            if (.message? | type) == "object" and (.message.content? | type) == "array"
-            then .message.content |= strip_blocks
-            else . end
-          )
-    else . end
-')
+# Only the conversation goes to the digest: user and assistant text, with tool
+# I/O, thinking, attachments, hook output (Mnemon's own recall and wake text
+# among it) and harness wrappers removed and secrets redacted. See
+# mnemon_clean_transcript. A slice with no conversation in it -- tool calls and
+# hook output only -- sends nothing and leaves the pointer alone, so its turns
+# are looked at again next time rather than skipped past a digest still in
+# flight for an earlier range.
+[ -z "$text" ] || [ "$text" = "[]" ] && exit 0
 
-# Regex sanitize: redact obvious secret patterns.
-text=$(printf '%s' "$cleaned" | sed -E \
-    -e 's/AKIA[0-9A-Z]{16}/[REDACTED-AWS-KEY]/g' \
-    -e 's/(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/[REDACTED-JWT]/g' \
-    -e 's/Bearer [A-Za-z0-9_.-]{20,}/Bearer [REDACTED]/g' \
-    -e 's/sk-[A-Za-z0-9]{20,}/[REDACTED-OPENAI-KEY]/g')
-
-# The raw cap above bounds the work; this one bounds what the server is asked
-# to accept. `session_digest` validates the payload it receives
-# (`transcript` => `required|string|max:200000`), and the cap above is measured
-# on the slice *before* sanitization, which only strips about a fifth: a
-# 262144-byte raw slice measured 207,613 characters on the wire. The whole
-# digest was then rejected, so last_digest_turn never advanced and the next
-# Stop re-sent the same oversized tail -- failing identically, forever.
+# The final guard: what the server accepts. `session_digest` validates the
+# payload it receives (`transcript` => `required|string|max:200000`), and a
+# rejected digest never advances last_digest_turn, so the next Stop would
+# re-send the same oversized slice and fail identically, forever. Measured on
+# the cleaned text, because that is what arrives. With cleaning this rarely
+# triggers.
 max_chars=$(mnemon_config_value 'max_digest_chars' 190000)
 if [ "$(printf '%s' "$text" | wc -c)" -gt "$max_chars" ]; then
     # Drop whole leading records first, so what is sent stays parseable and the

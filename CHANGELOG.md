@@ -86,16 +86,22 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
   Aiven, `PASSWORD=`-style assignments, credentials in URLs and PEM private
   keys. Plugin 0.3.11.
-- **Secret assignments are redacted in the forms they actually take**, on the
-  plugin and the server alike: any case (`password=`), a flag
-  (`--password=`), a suffix after the name (`AWS_SECRET_ACCESS_KEY=`,
-  `SECRET_KEY_BASE=`), a prefix glued to it (`PGPASSWORD=`), the names
-  `TOKEN`, `ACCESS_KEY`, `PWD` and `PASSWD` (`GITHUB_TOKEN=`, `MYSQL_PWD=`),
-  and JSON or YAML keys (`"password": "…"`, `api_key: …`, `token: …`).
-  `NOSECRET=`, a bare `PWD=` (the working directory) and `PASSWORD==x` are
-  left alone. On the server, a redacted value no longer runs on past the end
-  of its JSON string and swallows the rest of the transcript up to the next
-  space. Plugin 0.3.11.
+- **Secret assignments are redacted in the forms they actually take, and
+  prose that only names a secret is left alone**, on the plugin and the
+  server alike. Redacted: an assignment in any case (`password=`), a flag
+  (`--password=`), a name ending in the keyword or `_KEY`/`_KEY_BASE` after
+  it (`AWS_SECRET_ACCESS_KEY=`, `SECRET_KEY_BASE=`), a glued prefix
+  (`PGPASSWORD=`), the names `TOKEN`, `ACCESS_KEY`, `PWD` and `PASSWD`
+  (`GITHUB_TOKEN=`, `MYSQL_PWD=`), and a quoted JSON key (`"password": "…"`,
+  `"db_password": "…"`). An unquoted YAML or prose key (`token:`, `Secret:`)
+  is redacted only when its value is one opaque token of 8+ characters mixing
+  letters and digits. Left alone: values that are references (`$TOKEN`,
+  `${GITHUB_TOKEN}`), booleans, `none`/`null`, numbers or under four
+  characters; names such as `TOKEN_LIMIT=`, `max_tokens=`, `NOSECRET=` and a
+  bare `PWD=`; `PASSWORD==x`; and prose such as "token: the refresh flow
+  works like this" or "**Token:** rotated hourly". On the server, a redacted
+  value -- or an assignment with no value at all -- no longer runs on past
+  the end of its JSON string, so a transcript stays valid JSON. Plugin 0.3.11.
 - **Long stretches are digested in chunks, oldest first, and none of them is
   dropped.** Each digest sends the oldest part of what is undigested, up to
   `digest_chunk_chars` (60,000), and advances only to the transcript line that

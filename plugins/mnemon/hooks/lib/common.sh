@@ -1080,18 +1080,18 @@ mnemon_clean_transcript() {
             | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"); "github")
             | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"); "slack")
             | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"); "aiven")
-            # Assignments, in any case: DB_PASSWORD=, password=, --password=,
-            # PGPASSWORD=, MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=,
-            # SECRET_KEY_BASE=, GITHUB_TOKEN=. The name starts a word or
-            # follows a prefix ending in "_" or the glued PG, and may carry
-            # suffixes: NOSECRET= is not a secret, and a bare PWD= is the
-            # working directory. PASSWORD==x is a comparison. An opening
-            # quote is kept; the value stops at a quote or a backslash.
+            # Secret assignments and keys: the same three rules as the
+            # server ContentSanitizer, which documents them. They redact a
+            # value that looks like a secret, not every mention of one -- a
+            # broader rule hit prose ("token: the refresh flow", "**Token:**
+            # rotated hourly", TOKEN_LIMIT=4096) in 24 of the 26 texts it
+            # touched in a real corpus.
+            # A. env/flag assignment, B. quoted JSON key, C. unquoted key
+            # with an opaque value (8+ characters, letters and digits).
             # (\x27 is a single quote.)
-            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)\\s*=)(?<p>(?:[A-Za-z0-9]+_)*(?:PG)?)(?<k>(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\\s*=\\s*(?<q>\\\\?[\"\\x27]?)(?!\\[REDACTED)[^=\\s\"\\x27\\\\][^\\s\"\\x27\\\\]*"; "\(.p)\(.k)=\(.q)[REDACTED]"); "assign")
-            # The same names as JSON or YAML keys: "password": "...",
-            # api_key: ...
-            | keep(gsub("(?<![A-Za-z0-9])(?<k>\\\\?\"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?\"?\\s*[:=]\\s*)(?<q>\\\\?\"?)(?!\\[REDACTED)[^=\"\\s,}\\\\][^\"\\s,}\\\\]*"; "\(.k)\(.q)[REDACTED]"); "keyvalue")
+            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)=)(?<n>(?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \\t]*=[ \\t]*(?=\\\\?[\"\\x27]))(?<q>(?:\\\\?[\"\\x27])?)(?![$<%{=]|\\[REDACTED|(?i:true|false|null|none)\\b|\\d+\\b)[^\\s\"\\x27\\\\,}\\]]{4,}"; "\(.n)=\(.q)[REDACTED]"); "assign")
+            | keep(gsub("(?<k>(?<![A-Za-z0-9])\\\\?\"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?\"[ \\t]*:[ \\t]*\\\\?\")(?![$<%{]|\\[REDACTED)[^\"\\\\]+"; "\(.k)[REDACTED]"); "jsonkey")
+            | keep(gsub("(?<k>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \\t]*:[ \\t]*)(?=[^\\s\"\\x27,}\\]\\\\]*\\d)(?=[^\\s\"\\x27,}\\]\\\\]*[A-Za-z])(?![$<%{]|\\[REDACTED)[A-Za-z0-9+/=._~!@#%^&*-]{8,}(?=[\\s\"\\x27,}\\]\\\\]|$)"; "\(.k)[REDACTED]"); "keyvalue")
             # scheme://user:pass@ -- the scheme tells admin:123456@ (a
             # password) from a bare //host:8080@ or //TODO:fix@.
             | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"); "url");

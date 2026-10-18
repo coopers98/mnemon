@@ -203,6 +203,57 @@ class ContentSanitizerTest extends TestCase
         $this->assertStringContainsString('NEXT-TURN kept', $out);
     }
 
+    /**
+     * The key-value rule redacted prose on every write path: 24 of 26 texts it
+     * hit in a real corpus held no secret. Assignments now need an opaque
+     * value, and an unquoted "token:" needs one that mixes letters and digits.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function proseThatIsNotASecret(): array
+    {
+        $cases = [
+            'token: the refresh flow works like this', 'Secret: keep it out of git', '**Token:** rotated hourly',
+            'Password: must be 12 chars', 'the api_key: is required', 'sort by token: asc',
+            'next_page_token: none', 'TOKEN_LIMIT=4096', 'secret=true', 'access_token=$ACCESS_TOKEN',
+            'token=${GITHUB_TOKEN}', 'Token = refresh.token', 'MNEMON_TOKEN= (unset)', 'max_tokens=4096',
+            'MAX_TOKENS=8000', 'tokens: 1234 used', 'NOTAPASSWORD=visible',
+        ];
+
+        return array_combine($cases, array_map(fn ($c) => [$c], $cases));
+    }
+
+    #[DataProvider('proseThatIsNotASecret')]
+    public function test_prose_that_names_a_secret_is_left_alone(string $text): void
+    {
+        $this->assertSame($text, $this->sanitizer->sanitize($text));
+    }
+
+    /**
+     * An assignment with no value used to take the JSON around it as its
+     * value: the closing quote and brackets, or an escaped line break.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function valuelessAssignmentsInJson(): array
+    {
+        return [
+            'at the end of the transcript' => ['[{"text":"set DB_PASSWORD="}]'],
+            'at the end of a turn' => ['[{"role":"user","text":"export GITHUB_TOKEN="},{"role":"assistant","text":"ok"}]'],
+            'before an escaped line break' => ['[{"text":"put DB_PASSWORD=\\nthen"}]'],
+            'a key before an escaped line break' => ['[{"text":"Secret:\\nnext"}]'],
+            'an empty quoted value' => ['[{"text":"DB_PASSWORD=\\"\\""}]'],
+        ];
+    }
+
+    #[DataProvider('valuelessAssignmentsInJson')]
+    public function test_a_valueless_assignment_leaves_a_json_transcript_intact(string $json): void
+    {
+        $this->assertNotNull(json_decode($json), 'fixture is JSON');
+
+        $this->assertSame($json, $this->sanitizer->sanitize($json));
+    }
+
     public function test_more_lookalikes_are_left_alone(): void
     {
         foreach ([

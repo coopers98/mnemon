@@ -857,6 +857,13 @@ texts = [
     "auth:\n  token: yamlTokS3cret\n",
     "Secret: yamlS3cret",
     "KEEP-LOOKALIKES NOSECRET=visible PWD=/root/projects/mnemon OLDPWD=/tmp max_tokens: 4096 \"token_type\": \"Bearer\"",
+    # Prose that names a secret without holding one: 24 of the 26 texts the
+    # broad rule hit in a real corpus. Each stays exactly as written.
+    "token: the refresh flow works like this", "Secret: keep it out of git", "**Token:** rotated hourly",
+    "Password: must be 12 chars", "the api_key: is required", "sort by token: asc",
+    "next_page_token: none", "TOKEN_LIMIT=4096", "secret=true", "access_token=$ACCESS_TOKEN",
+    "token=${GITHUB_TOKEN}", "Token = refresh.token", "MNEMON_TOKEN= (unset)", "max_tokens=4096",
+    "MAX_TOKENS=8000", "tokens: 1234 used", "assert PASSWORD==expected",
 ]
 for t in texts:
     print(json.dumps({"type": "user", "message": {"role": "user", "content": "SA-BEFORE " + t}}))
@@ -867,7 +874,11 @@ assert_eq "$sa_left" "" "cleaner: suffixed, glued, lowercase, --flag, JSON and Y
 assert_eq "$(printf '%s' "$sa_out" | jq '[.[] | select(.role == "user") | .text | test("^SA-BEFORE ")] | all')" "true" \
     "cleaner: redacting an assignment keeps the text around it"
 for kept in AWS_SECRET_ACCESS_KEY= PGPASSWORD= MYSQL_PWD= SECRET_KEY_BASE= GITHUB_TOKEN= '--password=' '"password": "' \
-    'NOSECRET=visible' 'PWD=/root/projects/mnemon' 'OLDPWD=/tmp' 'max_tokens: 4096' '"token_type": "Bearer"'; do
+    'NOSECRET=visible' 'PWD=/root/projects/mnemon' 'OLDPWD=/tmp' 'max_tokens: 4096' '"token_type": "Bearer"' \
+    'token: the refresh flow works like this' 'Secret: keep it out of git' '**Token:** rotated hourly' \
+    'Password: must be 12 chars' 'the api_key: is required' 'sort by token: asc' 'next_page_token: none' \
+    'TOKEN_LIMIT=4096' 'secret=true' 'access_token=$ACCESS_TOKEN' 'token=${GITHUB_TOKEN}' 'Token = refresh.token' \
+    'MNEMON_TOKEN= (unset)' 'max_tokens=4096' 'MAX_TOKENS=8000' 'tokens: 1234 used' 'assert PASSWORD==expected'; do
     case "$(printf '%s' "$sa_out" | jq -r '.[].text')" in
         *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner: keeps %s\n' "$kept";;
         *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: lost %s\n' "$kept";;

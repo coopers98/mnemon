@@ -51,20 +51,32 @@ class ContentSanitizer
         ['/\bxox[abprs]-[A-Za-z0-9-]{10,}/', '[REDACTED:SLACK_TOKEN]'],
         // Aiven-style tokens (AVNS_...)
         ['/\bAVNS_[a-zA-Z0-9]+/', '[REDACTED:API_KEY]'],
-        // Env-style password/secret assignments (redact the value only), in
-        // any case: DB_PASSWORD=, password=, --password=, PGPASSWORD=,
-        // MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=, SECRET_KEY_BASE=,
-        // GITHUB_TOKEN=. The name starts a word, or follows a prefix ending
-        // in "_" or the glued PG, and may carry suffixes (_ACCESS_KEY,
-        // _KEY_BASE): NOSECRET= is not a secret, and a bare PWD= is the
-        // working directory. A value is required: PASSWORD==expected is a
-        // comparison. An opening quote (or an escaped one, in a JSON
-        // transcript) is kept, and the value stops at a quote or a
-        // backslash, so a JSON string around it stays intact.
-        ['/(?<![A-Za-z0-9])(?!(?i:pwd)\s*=)((?:[A-Za-z0-9]+_)*(?:PG)?)((?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\s*=\s*(\\\\?["\']?)(?!\[REDACTED)[^=\s"\'\\\\][^\s"\'\\\\]*/', '$1$2=$3[REDACTED]'],
-        // The same names as JSON or YAML keys: "password": "...",
-        // api_key: ..., quoted or not, escaped or not.
-        ['/(?<![A-Za-z0-9])(\\\\?"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?"?\s*[:=]\s*)(\\\\?"?)(?!\[REDACTED)[^="\s,}\\\\][^"\s,}\\\\]*/', '$1$2[REDACTED]'],
+        // Secret assignments and keys -- three rules, the same as the
+        // plugin's cleaner. They redact a value that looks like a secret, not
+        // every mention of one: a broader rule hit prose on every write path
+        // ("token: the refresh flow", "**Token:** rotated hourly",
+        // TOKEN_LIMIT=4096), 24 of the 26 texts it touched in a real corpus.
+        //
+        // A. An env or flag assignment: DB_PASSWORD=, password=,
+        // --password=, PGPASSWORD=, MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=,
+        // SECRET_KEY_BASE=, GITHUB_TOKEN=. The name ends in the keyword (or
+        // keyword_KEY, keyword_KEY_BASE) and starts a word or follows "_" or
+        // the glued PG: NOSECRET=, TOKEN_LIMIT= and a bare PWD= are not
+        // secrets. "=" takes no spaces around it unless a quote follows. The
+        // value is 4+ characters and not a reference ($X, ${X}, <x>, %X%), a
+        // boolean, null/none, a number or another "=" (PASSWORD==x is a
+        // comparison). It stops at whitespace, a quote, a backslash or , } ]
+        // -- so in a JSON transcript it never takes the closing quote, the
+        // brackets after it or an escaped line break.
+        ['/(?<![A-Za-z0-9])(?!(?i:pwd)=)((?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \t]*=[ \t]*(?=\\\\?["\']))((?:\\\\?["\'])?)(?![$<%{=]|\[REDACTED|(?i:true|false|null|none)\b|\d+\b)[^\s"\'\\\\,}\]]{4,}/', '$1=$2[REDACTED]'],
+        // B. A quoted JSON key ending in the keyword ("password",
+        // "db_password", "api-key", escaped or not): any quoted value that is
+        // not a reference.
+        ['/((?<![A-Za-z0-9])\\\\?"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?"[ \t]*:[ \t]*\\\\?")(?![$<%{]|\[REDACTED)[^"\\\\]+/', '$1[REDACTED]'],
+        // C. An unquoted YAML or prose key ("token: ...", "Secret: ..."): only
+        // an opaque value -- one token of 8+ characters on the same line,
+        // mixing letters and digits.
+        ['/((?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \t]*:[ \t]*)(?=[^\s"\',}\]\\\\]*\d)(?=[^\s"\',}\]\\\\]*[A-Za-z])(?![$<%{]|\[REDACTED)[A-Za-z0-9+\/=._~!@#%^&*-]{8,}(?=[\s"\',}\]\\\\]|$)/', '$1[REDACTED]'],
         // Credentials in a URL: scheme://user:pass@. The scheme is what tells
         // admin:123456@ (a password, redacted) from a bare //host:8080@ or
         // //TODO:fix@ (not a URL credential, left alone).

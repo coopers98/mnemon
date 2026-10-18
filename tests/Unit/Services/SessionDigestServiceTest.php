@@ -4,8 +4,10 @@ namespace Tests\Unit\Services;
 
 use App\Models\Drawer;
 use App\Models\Room;
+use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use App\Services\Digest\DigestUnavailable;
 use App\Services\DrawerWriteService;
 use App\Services\SessionDigestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -430,6 +432,30 @@ class SessionDigestServiceTest extends TestCase
         $result = $service->run('s', 'claude-code', ['start' => 0, 'end' => 1], 't', [], ['project-*', 'unfiled']);
 
         $this->assertSame('unfiled', $result['persisted'][0]['wing']);
+    }
+
+    public function test_an_unavailable_model_records_nothing_so_the_range_can_be_retried(): void
+    {
+        $driver = new class
+        {
+            public function digest(string $transcript, array $context): array
+            {
+                throw new DigestUnavailable('the model call failed with HTTP 503', retryable: true);
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        try {
+            $service->run('sess-down', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+            $this->fail('a failed model call must not return as a successful digest');
+        } catch (DigestUnavailable) {
+        }
+
+        $this->assertSame(0, SessionDigest::count(), 'an unrecorded range is digested afresh on retry');
+
+        $retry = $this->makeServiceWithMockLlm([])
+            ->run('sess-down', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+        $this->assertArrayNotHasKey('replayed', $retry);
     }
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService

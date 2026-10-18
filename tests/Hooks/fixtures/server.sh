@@ -12,7 +12,8 @@
 #      FAKE_REQUEST_LOG (file to append request bodies to),
 #      FAKE_HEADER_LOG (file to append request headers to),
 #      FAKE_STATUS (answer every /mcp call with this status),
-#      FAKE_TOOL_ERROR (answer /mcp with a tool-level error),
+#      FAKE_TOOL_ERROR (answer /mcp with a tool-level error; any value other
+#                       than 1 is used as the error text),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
 #                           this many characters, the way the real tool's
 #                           `max:200000` validation does),
@@ -238,9 +239,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # FAKE_TOOL_ERROR serves what a wing denial actually looks like: HTTP 200
         # with isError on the *result*, not a JSON-RPC .error. That shape used to
         # read to the hooks as "found nothing".
-        if os.environ.get("FAKE_TOOL_ERROR"):
-            self._reply(200, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
-                             b'"text":"Token does not have access to wing: personal"}],"isError":true}}')
+        te = os.environ.get("FAKE_TOOL_ERROR", "")
+        if te:
+            text = "Token does not have access to wing: personal" if te == "1" else te
+            self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {
+                "content": [{"type": "text", "text": text}], "isError": True}}).encode())
             return
 
         if DELAY:

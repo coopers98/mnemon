@@ -5,10 +5,14 @@ namespace Tests\Feature\Mcp\Tools;
 use App\Models\BrainSession;
 use App\Models\Drawer;
 use App\Models\Room;
+use App\Models\SessionDigest;
 use App\Models\Wing;
 use App\Services\DrawerWriteService;
 use App\Services\SessionDigestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\MakesMcpRequests;
 use Tests\TestCase;
 
@@ -199,6 +203,101 @@ class SessionDigestToolTest extends TestCase
         $this->mockDigestService([$proposal]);
         $response = $this->mcpCall('session_digest', $args('sess-m') + ['project_filing' => 'model'], ['mcp:use']);
         $this->assertSame('project-ananke', $response->json('result.structuredContent.persisted.0.wing'));
+    }
+
+    /**
+     * A failed model call used to come back from the driver as zero proposals,
+     * so the tool recorded the slice as digested and answered success. The
+     * client then advanced past those turns, and a retry was served the empty
+     * replay: the turns were lost for good.
+     *
+     * @return array<string, array{0: callable}>
+     */
+    public static function failedModelCalls(): array
+    {
+        return [
+            'timeout' => [fn () => throw new ConnectionException('cURL error 28: Operation timed out')],
+            '429' => [fn () => Http::response(['error' => ['message' => 'rate limited']], 429)],
+            '500' => [fn () => Http::response('<html>oops</html>', 500)],
+        ];
+    }
+
+    #[DataProvider('failedModelCalls')]
+    public function test_a_failed_model_call_is_a_tool_error_and_persists_nothing(callable $reply): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        config(['services.openai.api_key' => 'sk-test', 'mnemon.digest.driver' => 'openai']);
+        Http::fake(['api.openai.com/*' => $reply]);
+
+        $response = $this->mcpCall('session_digest', $this->digestArgs('sess-fail'), ['mcp:use']);
+
+        $response->assertStatus(200);
+        $this->assertTrue($response->json('result.isError'), 'a failed digest must be a tool error');
+        $text = collect($response->json('result.content'))->pluck('text')->join(' ');
+        $this->assertStringContainsString('did not run', $text);
+        $this->assertStringContainsString('retryable', $text);
+        $this->assertSame(0, SessionDigest::count(), 'a failed digest must not be recorded as digested');
+        $this->assertSame(0, Drawer::count());
+    }
+
+    public function test_a_failure_that_will_not_clear_by_retrying_says_so(): void
+    {
+        config(['services.openai.api_key' => '', 'mnemon.digest.driver' => 'openai']);
+        Http::fake();
+
+        $response = $this->mcpCall('session_digest', $this->digestArgs('sess-nokey'), ['mcp:use']);
+
+        $this->assertTrue($response->json('result.isError'));
+        $text = collect($response->json('result.content'))->pluck('text')->join(' ');
+        $this->assertStringContainsString('not retryable', $text);
+        $this->assertSame(0, SessionDigest::count());
+    }
+
+    public function test_a_valid_empty_proposal_list_is_still_a_successful_digest(): void
+    {
+        config(['services.openai.api_key' => 'sk-test', 'mnemon.digest.driver' => 'openai']);
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+
+        $response = $this->mcpCall('session_digest', $this->digestArgs('sess-empty'), ['mcp:use']);
+
+        $this->assertNotTrue($response->json('result.isError'));
+        $this->assertSame([], $response->json('result.structuredContent.persisted'));
+        $this->assertSame(1, SessionDigest::count(), 'nothing worth keeping is a real result and is recorded');
+    }
+
+    public function test_a_retry_after_a_failure_digests_the_slice_normally(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        config(['services.openai.api_key' => 'sk-test', 'mnemon.digest.driver' => 'openai']);
+        Http::fakeSequence('api.openai.com/*')
+            ->push('<html>oops</html>', 503)
+            ->push(['choices' => [['message' => ['content' => json_encode(['proposals' => [
+                ['content' => 'the retry kept this', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                    'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+            ]])]]]]);
+
+        $first = $this->mcpCall('session_digest', $this->digestArgs('sess-retry'), ['mcp:use']);
+        $this->assertTrue($first->json('result.isError'));
+
+        $second = $this->mcpCall('session_digest', $this->digestArgs('sess-retry'), ['mcp:use']);
+
+        $this->assertNotTrue($second->json('result.isError'));
+        $this->assertArrayNotHasKey('replayed', $second->json('result.structuredContent'),
+            'the retry must reach the model, not replay a stale empty result');
+        $this->assertCount(1, $second->json('result.structuredContent.persisted'));
+        $this->assertSame(1, Drawer::count());
+    }
+
+    private function digestArgs(string $sessionId): array
+    {
+        return [
+            'session_id' => $sessionId,
+            'harness' => 'claude-code',
+            'turn_range' => ['start' => 0, 'end' => 4],
+            'transcript' => 'we discussed a real note today',
+        ];
     }
 
     private function mockDigestService(array $proposals): void

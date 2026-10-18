@@ -57,6 +57,31 @@ class BrainSessionLogger
     }
 
     /**
+     * Record an invocation that was allowed but could not do its work -- a
+     * digest whose model call failed. Written so the failure is visible in the
+     * audit trail rather than only in a server log.
+     */
+    public static function logFailure(Request $request, string $tool, array $input, string $reason): void
+    {
+        $user = $request->user();
+        $token = $user?->currentAccessToken();
+        $client = $token?->client;
+
+        BrainSession::create([
+            'tool_name' => $tool,
+            'oauth_client_id' => $client?->id,
+            'user_id' => $user?->id,
+            'access_token_id' => $token?->id,
+            'source' => self::renderSource($client, $user, $token),
+            'device' => self::renderDevice($client, $user, $token),
+            'input' => $input,
+            'result_count' => 0,
+            'outcome' => 'failed',
+            'error' => $reason,
+        ]);
+    }
+
+    /**
      * The bare device name, for grouping.
      *
      * renderSource() builds a display string that embeds the token id, and

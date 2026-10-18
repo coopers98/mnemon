@@ -6,6 +6,7 @@ use App\Mcp\Concerns\RequiresScope;
 use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Services\ContentSanitizer;
+use App\Services\Digest\DigestUnavailable;
 use App\Services\SessionDigestService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -48,24 +49,41 @@ class SessionDigestTool extends Tool
 
         $cleaned = $this->sanitizer->sanitize($params['transcript']);
 
-        $result = $this->digest->run(
-            sessionId: $params['session_id'],
-            harness: $params['harness'],
-            turnRange: $params['turn_range'],
-            transcript: $cleaned,
-            recentDrawerIds: $params['recent_drawer_ids'] ?? [],
-            allowedWingPatterns: $this->wingPatternsFor($request),
-            project: $params['project'] ?? null,
-            projectFiling: $params['project_filing'] ?? null,
-        );
-
-        BrainSessionLogger::log($request, 'session_digest', [
+        $audit = [
             'session_id' => $params['session_id'],
             'harness' => $params['harness'],
             'turn_range' => $params['turn_range'],
             'project' => $params['project'] ?? null,
             'project_filing' => $params['project_filing'] ?? null,
-        ], count($result['persisted']));
+        ];
+
+        try {
+            $result = $this->digest->run(
+                sessionId: $params['session_id'],
+                harness: $params['harness'],
+                turnRange: $params['turn_range'],
+                transcript: $cleaned,
+                recentDrawerIds: $params['recent_drawer_ids'] ?? [],
+                allowedWingPatterns: $this->wingPatternsFor($request),
+                project: $params['project'] ?? null,
+                projectFiling: $params['project_filing'] ?? null,
+            );
+        } catch (DigestUnavailable $e) {
+            // Nothing was persisted and the slice is not recorded, so the same
+            // range sent again is digested afresh rather than replayed empty.
+            // An error, not an empty success: the client keeps its place.
+            BrainSessionLogger::logFailure($request, 'session_digest', $audit, $e->getMessage());
+
+            return Response::error(sprintf(
+                'The digest did not run: %s. Nothing was stored. %s',
+                $e->getMessage(),
+                $e->retryable
+                    ? 'This is retryable: send the same turn range again.'
+                    : 'This is not retryable until the server is fixed.',
+            ));
+        }
+
+        BrainSessionLogger::log($request, 'session_digest', $audit, count($result['persisted']));
 
         return Response::structured($result);
     }

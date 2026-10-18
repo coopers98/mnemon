@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Digest;
 
+use App\Services\Digest\DigestUnavailable;
 use App\Services\Digest\OpenAiDigestDriver;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -77,33 +78,36 @@ class OpenAiDigestDriverTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request['messages'][0]['content'], 'project-mnemon'));
     }
 
-    public function test_returns_empty_array_on_malformed_response(): void
+    public function test_a_valid_empty_proposal_list_is_an_empty_result_not_a_failure(): void
     {
-        Http::fake([
-            'api.openai.com/*' => Http::response([
-                'choices' => [['message' => ['content' => 'not json']]],
-            ]),
-        ]);
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
         config(['services.openai.api_key' => 'sk-test']);
 
-        $driver = new OpenAiDigestDriver;
-        $result = $driver->digest('t', []);
-        $this->assertEquals([], $result);
+        $this->assertSame([], (new OpenAiDigestDriver)->digest('t', []));
     }
 
     /**
-     * A timeout does not come back as an unsuccessful response -- Laravel's
-     * HTTP client *throws* ConnectionException, so it sails straight past the
-     * `! $response->successful()` guard, escapes the tool, and reaches the
-     * client as a JSON-RPC 500 reading "Something went wrong while processing
-     * the request". Measured on the live instance: two digests lost this way
-     * to `cURL error 28` against api.openai.com.
-     *
-     * An upstream timeout is not a server fault and must degrade the same way
-     * an error status does -- no proposals, a log line, and a digest the next
-     * Stop can retry.
+     * Unparseable model output used to come back as [] -- indistinguishable
+     * from "nothing worth keeping", so the slice was recorded as digested and
+     * its turns were lost. The model may well answer properly next time.
      */
-    public function test_an_upstream_timeout_yields_no_proposals_rather_than_throwing(): void
+    public function test_unparseable_model_output_is_a_retryable_failure(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'not json']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertTrue($e->retryable);
+    }
+
+    /**
+     * A timeout throws ConnectionException rather than returning a response.
+     * It used to be swallowed into [] -- a "successful" empty digest, recorded
+     * as such, so the next Stop moved on and the turns were never digested.
+     * Measured on the live instance: digests lost to `cURL error 28`.
+     */
+    public function test_an_upstream_timeout_is_a_retryable_failure(): void
     {
         Http::fake(function () {
             throw new ConnectionException('cURL error 28: Operation timed out after 20002 milliseconds');
@@ -113,8 +117,64 @@ class OpenAiDigestDriverTest extends TestCase
         // one, so this must be set or the test passes without ever making a call.
         config(['services.openai.api_key' => 'sk-test-key-not-real-000000000000']);
 
-        $driver = new OpenAiDigestDriver;
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('a transcript', []));
 
-        $this->assertSame([], $driver->digest('a transcript', []));
+        $this->assertTrue($e->retryable);
+        $this->assertStringContainsString('timed out', $e->getMessage());
+    }
+
+    public function test_rate_limiting_is_a_retryable_failure(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'slow down']], 429)]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertTrue($e->retryable);
+        $this->assertStringContainsString('429', $e->getMessage());
+    }
+
+    public function test_an_upstream_server_error_is_a_retryable_failure(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response('<html>bad gateway</html>', 502)]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertTrue($e->retryable);
+        $this->assertStringContainsString('502', $e->getMessage());
+    }
+
+    public function test_a_client_error_other_than_429_is_not_retryable(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'bad key']], 401)]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertFalse($e->retryable);
+        $this->assertStringContainsString('401', $e->getMessage());
+    }
+
+    public function test_a_missing_api_key_is_a_failure_that_is_not_retryable(): void
+    {
+        Http::fake();
+        config(['services.openai.api_key' => '']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertFalse($e->retryable);
+        Http::assertNothingSent();
+    }
+
+    private function failureOf(callable $call): DigestUnavailable
+    {
+        try {
+            $call();
+        } catch (DigestUnavailable $e) {
+            return $e;
+        }
+
+        $this->fail('expected DigestUnavailable, the call returned normally');
     }
 }

@@ -608,6 +608,67 @@ printf '{"session_id":"s14","cwd":"/tmp","hook_event_name":"SessionStart"}' \
 kept=$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s14.json" 2>/dev/null)
 assert_eq "$kept" "5" "wake: does not rewind last_digest_turn on SessionStart"
 
+# Test 10g: a digest that did not run must not advance the pointer. The server
+# answers a failed model call (a timeout, a 429, a 5xx) with a tool error;
+# before 1.0.1 it answered with an empty success, the worker advanced
+# last_digest_turn, and those turns were never digested. The worker has to
+# treat the error as a failure and leave the pointer where it was, so the next
+# Stop sends the same range again.
+DE_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+DE_LOG="$MNEMON_DIR/requests-de.log"
+: > "$DE_LOG"
+FAKE_PORT="$DE_PORT" FAKE_REQUEST_LOG="$DE_LOG" \
+  FAKE_TOOL_ERROR="The digest did not run: the model call failed with HTTP 503. Nothing was stored. This is retryable: send the same turn range again." \
+  "$THIS_DIR/fixtures/server.sh" &
+DE_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.de.json"
+jq --arg e "http://127.0.0.1:$DE_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_DIR/capture-errors.log"
+
+tp_de="$MNEMON_DIR/transcript-digest-error.jsonl"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"already digested"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"already digested too"}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"a new question about retries"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"a new answer"}]}}'
+} > "$tp_de"
+printf '{"last_digest_turn":2,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' \
+  > "$MNEMON_DIR/sessions/s20.json"
+printf '{"session_id":"s20","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_de" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do
+    grep -q 'did not run' "$MNEMON_DIR/capture-errors.log" 2>/dev/null && break
+    sleep 0.25
+done
+sleep 0.5
+if ! grep -q 'session_digest' "$DE_LOG" 2>/dev/null; then
+    FAIL=$((FAIL+1)); printf '  FAIL: capture: the digest never reached the server\n'
+else
+    assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" "2" \
+        "capture: a digest that did not run leaves last_digest_turn where it was"
+fi
+kill $DE_PID 2>/dev/null
+
+# ...and the next Stop sends the same range again, to a server that is back.
+: > "$DE_LOG"
+FAKE_PORT="$DE_PORT" FAKE_REQUEST_LOG="$DE_LOG" "$THIS_DIR/fixtures/server.sh" &
+DE_PID=$!
+sleep 0.5
+printf '{"session_id":"s20","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_de" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do
+    [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" = "4" ] && break
+    sleep 0.25
+done
+retried=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.turn_range | "\(.start)-\(.end)"' "$DE_LOG" 2>/dev/null)
+assert_eq "$retried" "2-4" "capture: after a failed digest the next Stop re-sends the same range"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" "4" \
+    "capture: the retried digest advances last_digest_turn once it succeeds"
+kill $DE_PID 2>/dev/null
+mv "$MNEMON_DIR/config.de.json" "$MNEMON_DIR/config.json"
+
 # --- Refresh tests -----------------------------------------------------------
 # A device enrolled through the device grant holds a one-hour access token and a
 # 90-day refresh token. Nothing renews it interactively -- there is no browser on

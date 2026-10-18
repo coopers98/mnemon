@@ -8,13 +8,18 @@ use Illuminate\Support\Facades\Log;
 
 class OpenAiDigestDriver
 {
+    /**
+     * @return array<int, array<string, mixed>> The model's proposals; empty when it found nothing worth keeping.
+     *
+     * @throws DigestUnavailable When the model could not be asked or its answer could not be read.
+     */
     public function digest(string $transcript, array $context): array
     {
         $apiKey = config('services.openai.api_key') ?? env('OPENAI_API_KEY');
         if (empty($apiKey)) {
             Log::warning('mnemon: OPENAI_API_KEY missing for session_digest');
 
-            return [];
+            throw new DigestUnavailable('OPENAI_API_KEY is not set on the server', retryable: false);
         }
 
         $model = config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.6-luna');
@@ -34,15 +39,11 @@ class OpenAiDigestDriver
             $sessionWing;
 
         // A timeout does not come back as an unsuccessful response -- the HTTP
-        // client throws, so it would sail past the `successful()` check below,
-        // escape the tool, and reach the caller as a JSON-RPC 500 reading
-        // "Something went wrong while processing the request". Two live digests
-        // were lost that way to `cURL error 28` against api.openai.com.
-        //
-        // An upstream timeout is not a server fault. Degrade exactly as an
-        // error status does: no proposals, a log line, and a digest the next
-        // Stop retries. 20s was the old budget and proved too tight for a large
-        // transcript; it is configurable now so it can be tuned without a patch.
+        // client throws. Either way the model was never heard from, which is
+        // not the same as the model finding nothing: returning [] for both had
+        // the slice recorded as digested and its turns lost. 20s was the old
+        // budget and proved too tight for a large transcript; it is
+        // configurable so it can be tuned without a patch.
         try {
             $response = Http::withToken($apiKey)
                 ->timeout((int) config('mnemon.digest.timeout', 60))
@@ -59,20 +60,28 @@ class OpenAiDigestDriver
                 'reason' => $e->getMessage(),
             ]);
 
-            return [];
+            throw new DigestUnavailable('the model call could not complete: '.$e->getMessage(), retryable: true);
         }
 
         if (! $response->successful()) {
-            Log::warning('mnemon: openai digest call failed', ['status' => $response->status()]);
+            $status = $response->status();
+            Log::warning('mnemon: openai digest call failed', ['status' => $status]);
 
-            return [];
+            // 429 and 5xx clear on their own; any other 4xx (a bad key, a
+            // rejected request) fails the same way on every retry.
+            throw new DigestUnavailable(
+                "the model call failed with HTTP {$status}",
+                retryable: $status === 429 || $status >= 500,
+            );
         }
 
         $content = $response->json('choices.0.message.content');
         $parsed = json_decode($content ?? '', true);
 
         if (! is_array($parsed) || ! isset($parsed['proposals']) || ! is_array($parsed['proposals'])) {
-            return [];
+            Log::warning('mnemon: openai digest returned unparseable content');
+
+            throw new DigestUnavailable('the model answered with content that is not a proposals list', retryable: true);
         }
 
         return $parsed['proposals'];

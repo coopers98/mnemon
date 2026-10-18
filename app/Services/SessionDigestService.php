@@ -20,6 +20,9 @@ class SessionDigestService
 
     /**
      * @param  object  $llm  Anything with a `digest(string $transcript, array $context): array` method.
+     *                       It throws DigestUnavailable when the model could not be asked;
+     *                       that propagates out of run() before anything is persisted or the
+     *                       slice is recorded, so the same range can be retried.
      */
     public function __construct(
         protected object $llm,

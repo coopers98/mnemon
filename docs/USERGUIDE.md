@@ -527,8 +527,9 @@ curl -fsSL https://<your-instance>/install | bash
 
 It checks dependencies, installs the plugin, turns on plugin auto-update (see
 [Staying current](#staying-current); opt out with `MNEMON_NO_AUTOUPDATE=1`),
-and prints the one command left to run. It deliberately stops short of enrolling the device: that needs a client id
-and secret only you can mint, and it replaces whatever credential the device
+and prints the one command left to run. It deliberately stops short of
+enrolling the device: that needs a client id and secret only you can mint, and
+it replaces whatever credential the device
 already has.
 
 Piping a remote script into a shell is worth reading first, and it is short:
@@ -616,7 +617,7 @@ secret. It exits 0 when nothing failed:
 Mnemon doctor
 ok    tools: bash 5.2.21, curl, jq 1.7
 ok    plugin: version 0.3.10
-ok    plugin auto-update: on (/home/me/.claude/settings.json)
+ok    plugin auto-update: on (/home/me/.claude/settings.json; user settings only, project or local settings can override)
 ok    config: endpoint https://mnemon.example.com/mcp, credentials from /home/me/.mnemon/config.json; can self-renew
 ok    token: access token valid for 49 minute(s)
 ok    reach: https://mnemon.example.com answered HTTP 200
@@ -652,8 +653,11 @@ device keeps the version it installed until someone runs
 `~/.claude/settings.json`. It merges the key into the existing entry, so the
 entry keeps its `source`. It backs the file up first and writes the new one
 atomically. If the file is not plain JSON (it has comments, say), the script
-leaves it untouched and prints how to turn auto-update on by hand. To skip this
-step, run the script with `MNEMON_NO_AUTOUPDATE=1`:
+leaves it untouched and prints how to turn auto-update on by hand. It does the
+same for a `settings.json` that is a symlink (dotfiles), because writing it
+would replace the link. The backups are named `settings.json.mnemon-backup-*`
+and sit next to `settings.json`. You can delete them once you are happy with
+the change. To skip this step, run the script with `MNEMON_NO_AUTOUPDATE=1`:
 
 ```bash
 curl -fsSL https://<your-instance>/install | MNEMON_NO_AUTOUPDATE=1 bash
@@ -681,7 +685,10 @@ curl -fsSL https://<your-instance>/install | MNEMON_NO_AUTOUPDATE=1 bash
   each other whole, so an entry without `source` breaks the marketplace.
 
 If both places set it, the settings-file entry wins over the `/plugin` choice.
-`/mnemon:doctor` shows which one is in effect.
+`/mnemon:doctor` shows which one is in effect, from user settings only. A
+project's `.claude/settings.json` or `.claude/settings.local.json` can carry its
+own `mnemon` entry and override them inside that project, and the doctor does
+not see that.
 
 **When an update takes effect.** In an interactive session, after your first
 message, Claude Code waits a random delay of up to ten minutes. It then

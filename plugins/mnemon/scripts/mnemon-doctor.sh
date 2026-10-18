@@ -126,7 +126,10 @@ fi
 # Plugin auto-update. Off by default for third-party marketplaces, so a device
 # otherwise stays on the version it installed. Read with Claude Code's own
 # precedence: the extraKnownMarketplaces entry in settings.json, then what the
-# /plugin UI writes to known_marketplaces.json, then off. Read only.
+# /plugin UI writes to known_marketplaces.json, then off. Read only, and user
+# settings only: a project's .claude/settings(.local).json can override them, and
+# the doctor does not know which project it is being asked about.
+# CRs are stripped: a Windows jq ends its lines with CRLF.
 if [ -n "$local_version" ]; then
     claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
     known="${MNEMON_KNOWN_MARKETPLACES:-$claude_dir/plugins/known_marketplaces.json}"
@@ -139,10 +142,10 @@ if [ -n "$local_version" ]; then
             mp_name="${mp_name##*/}" ;;
     esac
     au_jq='(.extraKnownMarketplaces // {})[$n] // {} | if type == "object" and has("autoUpdate") then (.autoUpdate | tostring) else empty end'
-    au_val=$(jq -r --arg n "$mp_name" "$au_jq" "$MNEMON_CLAUDE_SETTINGS" 2>/dev/null)
+    au_val=$(jq -r --arg n "$mp_name" "$au_jq" "$MNEMON_CLAUDE_SETTINGS" 2>/dev/null | tr -d '\r')
     au_src="$MNEMON_CLAUDE_SETTINGS"
     if [ -z "$au_val" ]; then
-        au_val=$(jq -r --arg n "$mp_name" '.[$n] // {} | if type == "object" and has("autoUpdate") then (.autoUpdate | tostring) else empty end' "$known" 2>/dev/null)
+        au_val=$(jq -r --arg n "$mp_name" '.[$n] // {} | if type == "object" and has("autoUpdate") then (.autoUpdate | tostring) else empty end' "$known" 2>/dev/null | tr -d '\r')
         au_src="$known"
     fi
     au_off_by=""
@@ -153,15 +156,15 @@ if [ -n "$local_version" ]; then
     case "${FORCE_AUTOUPDATE_PLUGINS:-}" in ''|0|false) ;; *) au_forced=1 ;; esac
     au_manual="new releases need \"claude plugin update mnemon@$mp_name\""
     if [ "$au_val" != "true" ]; then
-        warn "plugin auto-update: off -- $au_manual" \
+        warn "plugin auto-update: off in user settings -- $au_manual" \
             "in Claude Code: /plugin > Marketplaces > $mp_name > Enable auto-update, or re-run the setup script: curl -fsSL $(mnemon_instance_url)/install | bash"
     elif [ -n "$au_off_by" ] && [ "$au_forced" = 0 ]; then
         warn "plugin auto-update: on in $au_src, but disabled in this environment by $au_off_by -- $au_manual" \
             "unset $(printf '%s' "$au_off_by" | sed 's/=[^,]*//g'), or set FORCE_AUTOUPDATE_PLUGINS=1 to keep plugin updates"
     elif [ -n "$au_off_by" ]; then
-        ok "plugin auto-update: on ($au_src; FORCE_AUTOUPDATE_PLUGINS overrides $au_off_by)"
+        ok "plugin auto-update: on ($au_src; FORCE_AUTOUPDATE_PLUGINS overrides $au_off_by; user settings only)"
     else
-        ok "plugin auto-update: on ($au_src)"
+        ok "plugin auto-update: on ($au_src; user settings only, project or local settings can override)"
     fi
 fi
 

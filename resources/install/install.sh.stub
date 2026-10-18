@@ -40,7 +40,7 @@ mnemon_enable_autoupdate() {
     local dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
     local settings="$dir/settings.json"
     local manual="To turn it on by hand: in Claude Code run /plugin, open Marketplaces, select ${MARKETPLACE_NAME}, and choose Enable auto-update."
-    local src backup tmp
+    local src backup tmp input
 
     case "${MNEMON_NO_AUTOUPDATE:-}" in
         ''|0|false|no) ;;
@@ -56,7 +56,21 @@ mnemon_enable_autoupdate() {
         src=$(jq -cn --arg r "$MARKETPLACE" '{source:"github", repo:$r}')
     fi
 
-    if [ -f "$settings" ]; then
+    # A symlink is someone's dotfiles. mv would replace the link with a regular
+    # file and leave the real one stale, so leave it to them.
+    if [ -L "$settings" ]; then
+        say "Did not turn on plugin auto-update: $settings is a symlink, so it was left untouched."
+        say "$manual"
+        return 0
+    fi
+
+    # An empty or whitespace-only file is an empty settings object.
+    local empty=0
+    if [ -f "$settings" ] && [ -z "$(tr -d ' \t\r\n' < "$settings" 2>/dev/null)" ]; then
+        empty=1
+    fi
+
+    if [ -f "$settings" ] && [ "$empty" = 0 ]; then
         if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
             say "Did not turn on plugin auto-update: $settings is not plain JSON (comments?), so it was left untouched."
             say "$manual"
@@ -78,6 +92,7 @@ mnemon_enable_autoupdate() {
     mkdir -p "$dir" 2>/dev/null || { say "$manual"; return 0; }
     tmp="$settings.mnemon-tmp.$$"
     backup=""
+    input="$settings"
     if [ -f "$settings" ]; then
         backup="$settings.mnemon-backup-$(date -u +%Y%m%dT%H%M%SZ)"
         if ! cp -p "$settings" "$backup" 2>/dev/null; then
@@ -86,10 +101,26 @@ mnemon_enable_autoupdate() {
             return 0
         fi
         # Copied first so the temp file carries the original's mode; the
-        # redirect below truncates it without changing that.
-        cp -p "$settings" "$tmp" 2>/dev/null || true
+        # redirect below truncates it without changing that. Without the copy
+        # the redirect would create it at the umask and the mv would widen a
+        # 0600 settings file, so a failed copy is a failed update.
+        if ! cp -p "$settings" "$tmp" 2>/dev/null; then
+            rm -f "$tmp" "$backup"
+            say "Did not turn on plugin auto-update: could not update $settings; it was left untouched."
+            say "$manual"
+            return 0
+        fi
     else
-        printf '{}' > "$tmp.in" 2>/dev/null
+        # A brand-new file is owner-only.
+        if ! ( umask 077 && : > "$tmp" ) 2>/dev/null; then
+            say "Did not turn on plugin auto-update: could not create $settings."
+            say "$manual"
+            return 0
+        fi
+    fi
+    if [ "$empty" = 1 ] || [ ! -f "$settings" ]; then
+        input="$tmp.in"
+        printf '{}' > "$input" 2>/dev/null
     fi
 
     if jq --arg n "$MARKETPLACE_NAME" --argjson src "$src" '
@@ -97,7 +128,7 @@ mnemon_enable_autoupdate() {
                 | .[$n] = ((.[$n] // {})
                     + (if (.[$n].source // null) == null then {source: $src} else {} end)
                     + {autoUpdate: true}))' \
-            "$( [ -n "$backup" ] && printf '%s' "$settings" || printf '%s' "$tmp.in" )" > "$tmp" 2>/dev/null \
+            "$input" > "$tmp" 2>/dev/null \
         && jq -e . "$tmp" >/dev/null 2>&1 \
         && mv -f "$tmp" "$settings"; then
         rm -f "$tmp.in"
@@ -113,9 +144,9 @@ mnemon_enable_autoupdate() {
 }
 
 # The hook tests source this file for the function above, without running the
-# setup. Nothing a real run sets.
+# setup. Nothing a real run sets; executed rather than sourced, it just exits.
 if [ "${MNEMON_INSTALL_LIB_ONLY:-}" = 1 ]; then
-    return 0
+    return 0 2>/dev/null || exit 0
 fi
 
 say "Mnemon setup for ${INSTANCE}"

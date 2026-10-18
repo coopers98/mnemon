@@ -3,6 +3,9 @@
 # assert on stdout/exit code. Uses a netcat-based fake MCP server.
 
 set -uo pipefail
+# Claude Code's relocation of ~/.claude. Inherited, it would point the setup
+# script and the doctor at a real config directory instead of the sandboxes.
+unset CLAUDE_CONFIG_DIR
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOKS_DIR="$(cd "$THIS_DIR/../../plugins/mnemon/hooks" && pwd)"
 # Pick a free port rather than hardcoding one: a collision makes the hooks talk
@@ -1670,6 +1673,25 @@ doc_has "/plugin" "doctor: the auto-update fix names the /plugin UI path"
 doc_has "/install" "doctor: the auto-update fix names the setup script"
 doc_no_line "FAIL" "auto-update" "doctor: auto-update off is never a FAIL"
 
+# AU4b: the line says what it can see -- user settings only. Project and local
+# settings can override them, and the doctor does not know which project.
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$AU/settings.json"
+doc_run "$AU"
+case "$(au_line)" in
+    *"user settings"*) PASS=$((PASS+1)); printf '  ok: doctor: the auto-update line says it reads user settings only\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: auto-update scope unstated, got: %s\n' "$(au_line)";;
+esac
+
+# AU4c: a Windows jq ends its lines with CRLF; "true\r" must still read as on.
+AU_CRLF=$(mktemp -d); DOC_DIRS="$DOC_DIRS $AU_CRLF"
+printf '#!/usr/bin/env bash\n%s "$@" | sed "s/$/\\r/"\nexit "${PIPESTATUS[0]}"\n' "$(command -v jq)" > "$AU_CRLF/jq"
+chmod +x "$AU_CRLF/jq"
+doc_run "$AU" PATH="$AU_CRLF:$PATH"
+case "$(au_line)" in
+    "ok "*"auto-update"*": on"*) PASS=$((PASS+1)); printf '  ok: doctor: a CRLF jq still reads auto-update as on\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: CRLF jq broke the auto-update read, got: %s\n' "$(au_line)";;
+esac
+
 # AU5: on, but switched off by the environment.
 printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$AU/settings.json"
 doc_run "$AU" DISABLE_AUTOUPDATER=1
@@ -1779,6 +1801,36 @@ i5_orig=$(cksum < "$I5/claude/settings.json")
 in_enable "$I5"
 assert_eq "$(cksum < "$I5/claude/settings.json")" "$i5_orig" "install: an entry already on is not rewritten"
 in_has "already on" "install: says auto-update was already on"
+
+# I1b: a brand-new settings file is created owner-only.
+assert_eq "$(stat -c '%a' "$I1/claude/settings.json")" "600" "install: a new settings file is created 0600"
+
+# I7: a symlinked settings.json (stow-style dotfiles) is left alone: mv would
+# replace the link with a regular file and leave the real one stale.
+I7="$IN_DIR/i7"; mkdir -p "$I7/claude" "$I7/dotfiles"
+printf '{"theme":"dark"}' > "$I7/dotfiles/settings.json"
+ln -s "$I7/dotfiles/settings.json" "$I7/claude/settings.json"
+in_enable "$I7"
+assert_eq "$([ -L "$I7/claude/settings.json" ] && echo link || echo file)" "link" "install: a symlinked settings.json stays a symlink"
+assert_eq "$(cat "$I7/dotfiles/settings.json")" '{"theme":"dark"}' "install: the symlink's target is unchanged"
+in_has "symlink" "install: says the settings file is a symlink"
+in_has "/plugin" "install: a symlinked settings.json gets the manual /plugin instruction"
+
+# I8: an empty settings.json is treated as {} -- and still backed up.
+I8="$IN_DIR/i8"; mkdir -p "$I8/claude"
+printf '  \n' > "$I8/claude/settings.json"
+in_enable "$I8"
+assert_eq "$(jq -r '.extraKnownMarketplaces.mnemon.autoUpdate' "$I8/claude/settings.json" 2>/dev/null)" "true" "install: an empty settings.json is treated as {}"
+assert_eq "$(ls "$I8/claude"/settings.json.mnemon-backup-* 2>/dev/null | wc -l | tr -d ' ')" "1" "install: an empty settings.json is still backed up"
+case "$IN_OUT" in
+    *"comments?"*) FAIL=$((FAIL+1)); printf '  FAIL: install: an empty file was blamed on comments\n';;
+    *) PASS=$((PASS+1)); printf '  ok: install: an empty file is not blamed on comments\n';;
+esac
+
+# I9: the library guard must not error when the script is executed, not sourced.
+I9="$IN_DIR/i9"; mkdir -p "$I9/home" "$I9/claude"
+i9_out=$(PATH="$IN_DIR/nobin:$PATH" HOME="$I9/home" CLAUDE_CONFIG_DIR="$I9/claude" MNEMON_INSTALL_LIB_ONLY=1 bash "$IN_SH" 2>&1); i9_rc=$?
+assert_eq "$i9_rc:$i9_out" "0:" "install: executed with the library guard, it exits 0 quietly"
 
 # I6: the whole script, against a fake `claude` that records what it was asked.
 I6="$IN_DIR/i6"; mkdir -p "$I6/bin" "$I6/home" "$I6/claude"

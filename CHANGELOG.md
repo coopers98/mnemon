@@ -61,8 +61,9 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   93.5% of transcript bytes through; measured on 1,319 real transcripts, what
   is sent is now 2.5% of the raw size. Each turn goes as
   `{"role","ts","text"}`, consecutive turns of one role merged, a slash
-  command as `/name args`; a single text over 16,000 characters is cut and
-  marked as cut. Facts that
+  command as `/name args`. A long message keeps its start and its end, marked
+  where it was cut: 16,000 characters for the user's (after injected context is
+  removed), 32,000 for the assistant's. Facts that
   appeared only in tool output (a command's result, a file's contents) are no
   longer seen by the digest. Secret redaction on the client now also covers
   GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
@@ -73,12 +74,32 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   default left a long slice with only a few KB of conversation to digest.
   `max_digest_chars` (190000) still caps what is sent. Trimming to either cap
   is now logged. Plugin 0.3.11.
-- **Repeated digest failures back off.** After three failures in a row a
-  session's digest is retried at most every 30 minutes (`digest_max_failures`,
-  `digest_backoff_seconds`), and a failure the server reports as not
-  retryable (a missing API key) starts the backoff at once. A success resets
-  it. The client waits 90 seconds for a digest, above the server's 60.
-  Plugin 0.3.11.
+- **Repeated digest failures back off, and a session that ends while backing
+  off is still digested.** One failure is retried on the next Stop; after that
+  the wait starts at 60 seconds and doubles to 30 minutes
+  (`digest_backoff_base_seconds`, `digest_backoff_seconds`). A failure the
+  server reports as not retryable (a missing API key) waits the full 30
+  minutes at once. A timeout or an unreadable model answer also halves the
+  next slice, so a slice that times out every time still makes progress from
+  its oldest turns. A Stop inside the wait records its range, and
+  SessionStart says how many sessions have turns undigested after failures
+  and retries those whose wait is over (up to three at a time);
+  `/mnemon:doctor` reports the same count. A success resets all of it. The
+  client waits 90 seconds for a digest, above the server's 60. Plugin 0.3.11.
+- **Turns are no longer digested twice when two digests overlap.** A digest
+  that starts after another has finished now sends from where that one left
+  off, rather than from where its own Stop read the pointer. Plugin 0.3.11.
+- **A digest's embeddings are computed after it commits.** They were an HTTP
+  call per drawer inside the digest's transaction, holding its locks; a slow
+  embedding API could keep a digest open past the client's timeout. Embedding
+  calls now time out after 10 seconds (`MNEMON_EMBEDDING_TIMEOUT`). Any server
+  failure while storing a digest is audited and answered as a retryable tool
+  error, and a digest that loses a race to another for the same range leaves
+  nothing behind.
+- **The server's secret redaction matches the plugin's.** Token prefixes in
+  prose, comparisons such as `PASSWORD==x` and `host:port@` are no longer
+  redacted; AWS key ids, JWTs, GitHub fine-grained and Slack tokens and PEM
+  private keys now are.
 
 ## [1.0.0] — 2026-10-18
 

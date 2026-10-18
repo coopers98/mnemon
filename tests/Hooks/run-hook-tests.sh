@@ -737,6 +737,7 @@ rm -rf "$MNEMON_DIR/sessions/s24.digest.lock.d" "$MNEMON_DIR/sessions/s24.digest
 mkdir -p "$MNEMON_DIR/sessions/s22.digest.lock.d"
 sh -c 'exit 0' & dead_pid=$!; wait "$dead_pid"
 echo "$dead_pid" > "$MNEMON_DIR/sessions/s22.digest.lock.d/pid"
+touch -d '5 seconds ago' "$MNEMON_DIR/sessions/s22.digest.lock.d"
 printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s22.in"
 "$HOOKS_DIR/lib/digest-worker.sh" s22 0 4 "$MNEMON_DIR/sessions/s22.in" "" "" >/dev/null 2>&1
 assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
@@ -834,6 +835,29 @@ case "$huge_out" in
     *HUGE-HEAD-KEEP*"characters cut"*) PASS=$((PASS+1)); printf '  ok: cleaner: a capped text keeps its head and says it was cut\n';;
     *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: capped text lost its head or the cut marker: %s\n' "$(printf '%s' "$huge_out" | head -c 120)";;
 esac
+
+# A long text keeps its end as well as its start: the decision is usually at
+# the end of a long reply. User text is capped after the harness wrappers are
+# cut, so a long injected block does not push the user's own words out; and
+# assistant text, which is only redacted, has a higher cap.
+cap_in="$MNEMON_DIR/transcript-caps.jsonl"
+python3 -c '
+import json
+recs = [
+    {"type": "user", "message": {"role": "user", "content": "<system-reminder>" + "r" * 30000 + "</system-reminder>USER-AFTER-INJECTED-BLOCK"}},
+    {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ASSISTANT-START " + "a" * 20000 + " ASSISTANT-UNCUT-END"}]}},
+    {"type": "user", "message": {"role": "user", "content": "USER-LONG-START " + "u" * 40000 + " USER-LONG-DECISION-AT-END"}},
+]
+for r in recs: print(json.dumps(r))' > "$cap_in"
+cap_out=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$cap_in")
+for kept in USER-AFTER-INJECTED-BLOCK ASSISTANT-UNCUT-END USER-LONG-START USER-LONG-DECISION-AT-END; do
+    case "$cap_out" in
+        *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner cap: keeps %s\n' "$kept";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner cap: lost %s\n' "$kept";;
+    esac
+done
+assert_eq "$(printf '%s' "$cap_out" | jq '[.[] | select(.role == "assistant") | .text | test("characters cut")] | any')" "false" \
+    "cleaner cap: a 20k assistant reply is not cut"
 
 # End to end: what capture actually sends.
 CL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
@@ -1006,13 +1030,14 @@ else
     FAIL=$((FAIL+1)); printf '  FAIL: capture: a cleaning failure was silent\n'
 fi
 
-# Test 10n: repeated failures back off. Every Stop used to retry a digest that
-# kept failing -- paying for the model call each time when it was billed.
+# Test 10n: repeated failures back off, exponentially. Every Stop used to retry
+# a digest that kept failing; then a fixed 30 minutes after three failures lost
+# the end of any session that finished inside the window.
 BO_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 BO_LOG="$MNEMON_DIR/requests-bo.log"
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
-  FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call failed with HTTP 503). Nothing was stored." \
+  FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call failed with HTTP 429). Nothing was stored." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
 sleep 0.5
@@ -1023,31 +1048,55 @@ tp_bo="$MNEMON_DIR/transcript-backoff.jsonl"
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"a turn that will not digest"}}' > "$tp_bo"
 rm -rf "$MNEMON_DIR/sessions/s32".*
 : > "$MNEMON_DIR/capture-errors.log"
-bo_stop() {
-    printf '{"session_id":"s32","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_bo" \
+bo_stop() {  # $1 = session, $2 = transcript
+    printf '{"session_id":"%s","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$1" "$2" \
       | "$HOOKS_DIR/mnemon-capture.sh" || true
-    for _ in $(seq 1 40); do
-        [ -d "$MNEMON_DIR/sessions/s32.digest.lock.d" ] || [ "$(grep -c session_digest "$BO_LOG")" -ge "$1" ] && break
-        sleep 0.1
-    done
-    for _ in $(seq 1 40); do [ -d "$MNEMON_DIR/sessions/s32.digest.lock.d" ] || break; sleep 0.1; done
+    sleep 0.3
+    for _ in $(seq 1 60); do [ -d "$MNEMON_DIR/sessions/$1.digest.lock.d" ] || break; sleep 0.1; done
 }
-bo_stop 1; bo_stop 2; bo_stop 3
-assert_eq "$(grep -c session_digest "$BO_LOG")" "3" "backoff: the first three failures are each retried"
-bo_stop 4
-assert_eq "$(grep -c session_digest "$BO_LOG")" "3" "backoff: after three failures in a row the next Stop does not retry"
-if grep -q 'failed 3 times in a row' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
-    PASS=$((PASS+1)); printf '  ok: backoff: backing off is logged\n'
+bo_wait_retry() {  # seconds the session waits before its next attempt
+    jq -r '((.digest_retry_after // 0) - now) | round' "$MNEMON_DIR/sessions/$1.json"
+}
+bo_stop s32 "$tp_bo"
+assert_eq "$(grep -c session_digest "$BO_LOG")" "1" "backoff: the first attempt is sent"
+bo_stop s32 "$tp_bo"
+assert_eq "$(grep -c session_digest "$BO_LOG")" "2" "backoff: one failure is retried on the next Stop"
+w=$(bo_wait_retry s32)
+if [ "$w" -ge 55 ] && [ "$w" -le 60 ]; then
+    PASS=$((PASS+1)); printf '  ok: backoff: a second failure waits about a minute (%ss)\n' "$w"
 else
-    FAIL=$((FAIL+1)); printf '  FAIL: backoff: backing off was silent\n'
+    FAIL=$((FAIL+1)); printf '  FAIL: backoff: a second failure should wait about 60s, waits %s\n' "$w"
 fi
-# Once the backoff has passed it tries again.
-jq '.digest_failed_at = 0' "$MNEMON_DIR/sessions/s32.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s32.json"
-bo_stop 4
-assert_eq "$(grep -c session_digest "$BO_LOG")" "4" "backoff: after the backoff it retries"
+bo_stop s32 "$tp_bo"
+assert_eq "$(grep -c session_digest "$BO_LOG")" "2" "backoff: a Stop inside the wait does not retry"
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s32.digest.pending" 2>/dev/null)" "1" \
+    "backoff: ...but records its range, so the end of the session is not lost"
+if grep -q 'retrying in 60s' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: backoff: the wait is logged\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: backoff: the wait was silent\n'
+fi
+jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s32.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s32.json"
+bo_stop s32 "$tp_bo"
+assert_eq "$(grep -c session_digest "$BO_LOG")" "3" "backoff: after the wait it retries"
+w=$(bo_wait_retry s32)
+if [ "$w" -ge 115 ] && [ "$w" -le 120 ]; then
+    PASS=$((PASS+1)); printf '  ok: backoff: the wait doubles (%ss)\n' "$w"
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: backoff: the third failure should wait about 120s, waits %s\n' "$w"
+fi
+jq '.digest_failures = 12' "$MNEMON_DIR/sessions/s32.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s32.json"
+jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s32.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s32.json"
+bo_stop s32 "$tp_bo"
+w=$(bo_wait_retry s32)
+if [ "$w" -ge 1795 ] && [ "$w" -le 1800 ]; then
+    PASS=$((PASS+1)); printf '  ok: backoff: the wait is capped at 30 minutes\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: backoff: the wait should cap at 1800s, waits %s\n' "$w"
+fi
 kill $BO_PID 2>/dev/null
 
-# A failure that will not clear by retrying backs off at once.
+# A failure that will not clear by retrying waits the full 30 minutes at once.
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Not retryable: the digest did not run (OPENAI_API_KEY is not set on the server). Nothing was stored." \
@@ -1055,10 +1104,121 @@ FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
 BO_PID=$!
 sleep 0.5
 rm -rf "$MNEMON_DIR/sessions/s32".*
-bo_stop 1; bo_stop 2
+bo_stop s32 "$tp_bo"; bo_stop s32 "$tp_bo"
 assert_eq "$(grep -c session_digest "$BO_LOG")" "1" "backoff: a not-retryable failure is not retried on the next Stop"
+w=$(bo_wait_retry s32)
+[ "$w" -ge 1795 ] && PASS=$((PASS+1)) && printf '  ok: backoff: a not-retryable failure waits 30 minutes\n' \
+    || { FAIL=$((FAIL+1)); printf '  FAIL: backoff: a not-retryable failure waits %s\n' "$w"; }
+kill $BO_PID 2>/dev/null
+
+# A slice that times out every time never shrinks on its own, so it never
+# recovers. Each timeout or unreadable answer halves the next attempt, and
+# progress is made from the oldest half.
+: > "$BO_LOG"
+FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
+  FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call timed out or could not connect). Nothing was stored." \
+  "$THIS_DIR/fixtures/server.sh" &
+BO_PID=$!
+sleep 0.5
+tp_sh="$MNEMON_DIR/transcript-shrink.jsonl"
+: > "$tp_sh"
+for i in 1 2 3 4 5 6 7 8; do
+    printf '{"type":"user","message":{"role":"user","content":"shrink turn %s"}}\n' "$i" >> "$tp_sh"
+done
+rm -rf "$MNEMON_DIR/sessions/s34".*
+bo_stop s34 "$tp_sh"
+bo_stop s34 "$tp_sh"
+kill $BO_PID 2>/dev/null
+FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
+BO_PID=$!
+sleep 0.5
+jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s34.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s34.json"
+bo_stop s34 "$tp_sh"
+bo_stop s34 "$tp_sh"
+sh_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.turn_range | "\(.start)-\(.end)"] | join(",")' "$BO_LOG" 2>/dev/null)
+assert_eq "$sh_ranges" "0-8,0-4,0-2,2-8" "backoff: each timeout halves the next attempt; success resets it"
 kill $BO_PID 2>/dev/null
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
+
+# Test 10p: a worker that takes the lock after another finished sends from the
+# pointer, not from where its own Stop read it. W1 digests 0-2; a Stop at 4
+# read the pointer as 0 while W1 ran; W2, starting after W1, used to send 0-4,
+# digesting 0-2 twice -- and the server's replay check keys on the exact range.
+ST_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+ST_LOG="$MNEMON_DIR/requests-st.log"
+: > "$ST_LOG"
+FAKE_PORT="$ST_PORT" FAKE_REQUEST_LOG="$ST_LOG" "$THIS_DIR/fixtures/server.sh" &
+ST_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.st.json"
+jq --arg e "http://127.0.0.1:$ST_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+tp_st="$MNEMON_DIR/transcript-stale.jsonl"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"ALREADY-DIGESTED-BY-W1"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ALREADY-DIGESTED-BY-W1 too"}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"NEW-FOR-W2"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"NEW-FOR-W2 too"}]}}'
+} > "$tp_st"
+rm -rf "$MNEMON_DIR/sessions/s41".*
+printf '{"last_digest_turn":2,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' > "$MNEMON_DIR/sessions/s41.json"
+bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$tp_st" > "$MNEMON_DIR/sessions/s41.in"
+"$HOOKS_DIR/lib/digest-worker.sh" s41 0 4 "$MNEMON_DIR/sessions/s41.in" "" "" "$tp_st" >/dev/null 2>&1
+st_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")] | map("\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end) \(.params.arguments.transcript)") | join("|")' "$ST_LOG" 2>/dev/null)
+case "$st_sent" in
+    "2-4 "*NEW-FOR-W2*) case "$st_sent" in
+        *ALREADY-DIGESTED*) FAIL=$((FAIL+1)); printf '  FAIL: worker: re-sent turns another worker digested\n';;
+        *) PASS=$((PASS+1)); printf '  ok: worker: a stale start is re-sliced from the pointer\n';;
+        esac;;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: worker: a stale start was sent as-is: %s\n' "$(printf '%s' "$st_sent" | head -c 80)";;
+esac
+kill $ST_PID 2>/dev/null
+mv "$MNEMON_DIR/config.st.json" "$MNEMON_DIR/config.json"
+
+# Test 10q: the digest lock is released only by its owner, and the pending
+# marker and the session state survive concurrent writers.
+mkdir -p "$MNEMON_DIR/sessions/s42.digest.lock.d"; echo "$$" > "$MNEMON_DIR/sessions/s42.digest.lock.d/pid"
+bash -c '. "$1/lib/common.sh"; mnemon_digest_unlock s42' _ "$HOOKS_DIR"
+assert_eq "$([ -d "$MNEMON_DIR/sessions/s42.digest.lock.d" ] && echo held || echo gone)" "held" \
+    "lock: another process's lock is not released"
+rm -rf "$MNEMON_DIR/sessions/s42".*
+pids=""
+for e in 3 17 9 30 12 5 28 1 22 14 8 26; do
+    bash -c '. "$1/lib/common.sh"; mnemon_digest_pending_add s42 /x "$2"' _ "$HOOKS_DIR" "$e" & pids="$pids $!"
+done
+for p in $pids; do wait "$p"; done
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s42.digest.pending")" "30" "pending: concurrent Stops keep the furthest end"
+printf '{"last_digest_turn":0,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":true,"disabled":false}' > "$MNEMON_DIR/sessions/s43.json"
+pids=""
+for i in $(seq 1 12); do
+    bash -c '. "$1/lib/common.sh"; mnemon_session_state_update s43 ".recent_drawer_ids += [\$i]" --argjson i "$2"' _ "$HOOKS_DIR" "$i" & pids="$pids $!"
+done
+for p in $pids; do wait "$p"; done
+assert_eq "$(jq -c '[(.recent_drawer_ids | length), .nomemo]' "$MNEMON_DIR/sessions/s43.json")" "[12,true]" \
+    "state: concurrent updates all land, and @nomemo survives them"
+
+# Test 10r: a pending range whose transcript is gone is logged, not dropped
+# silently.
+PG_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+FAKE_PORT="$PG_PORT" "$THIS_DIR/fixtures/server.sh" &
+PG_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.pg.json"
+jq --arg e "http://127.0.0.1:$PG_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+: > "$MNEMON_DIR/capture-errors.log"
+rm -rf "$MNEMON_DIR/sessions/s44".*
+printf '{"path":"%s/gone.jsonl","end":9}' "$MNEMON_DIR" > "$MNEMON_DIR/sessions/s44.digest.pending"
+printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s44.in"
+"$HOOKS_DIR/lib/digest-worker.sh" s44 0 1 "$MNEMON_DIR/sessions/s44.in" "" "" >/dev/null 2>&1
+if grep -q 'pending range' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: worker: an unusable pending range is logged\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: worker: an unusable pending range was dropped silently\n'
+fi
+rm -rf "$MNEMON_DIR/sessions/s44".*
+kill $PG_PID 2>/dev/null
+mv "$MNEMON_DIR/config.pg.json" "$MNEMON_DIR/config.json"
 
 # Test 10o: the inline `.transcript` a Stop payload can carry is cleaned and
 # sent the same way as a transcript file.
@@ -1079,6 +1239,37 @@ il_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.ar
 assert_eq "$il_sent" "$cleaned" "capture: an inline transcript is cleaned and sent like a file"
 kill $IL_PID 2>/dev/null
 mv "$MNEMON_DIR/config.il.json" "$MNEMON_DIR/config.json"
+
+# Test 10s: SessionStart says when sessions were left with undigested turns
+# after failures, and retries them. A session that ends in backoff, or with a
+# range left for a digest that then failed, otherwise waits for a Stop that
+# never comes.
+SW_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+SW_DIR=$(mktemp -d)
+SW_LOG="$SW_DIR/requests.log"
+: > "$SW_LOG"
+FAKE_PORT="$SW_PORT" FAKE_REQUEST_LOG="$SW_LOG" "$THIS_DIR/fixtures/server.sh" &
+SW_PID=$!
+sleep 0.5
+mkdir -p "$SW_DIR/sessions"
+jq -n --arg e "http://127.0.0.1:$SW_PORT/mcp" '{endpoint:$e, bearer_token:"t"}' > "$SW_DIR/config.json"
+sw_tp="$SW_DIR/ended.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"SWEPT-LAST-WORDS of a session that ended"}}' > "$sw_tp"
+jq -n --arg p "$sw_tp" '{last_digest_turn:0,last_recall_at:0,recent_drawer_ids:[],nomemo:false,disabled:false,
+    digest_failures:3,digest_retry_after:0,transcript_path:$p,cwd:"/tmp"}' > "$SW_DIR/sessions/ended1.json"
+jq -n --arg p "$sw_tp" '{last_digest_turn:0,last_recall_at:0,recent_drawer_ids:[],nomemo:false,disabled:false,
+    digest_failures:1,digest_retry_after:9999999999,transcript_path:$p,cwd:"/tmp"}' > "$SW_DIR/sessions/waiting1.json"
+sw_out=$(printf '{"session_id":"new1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$SW_DIR" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$sw_out" in
+    *"Mnemon: 2 session(s) have undigested turns after failures"*) PASS=$((PASS+1)); printf '  ok: wake: says how many sessions have undigested turns\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: no undigested-turns banner, got: %s\n' "$(printf '%s' "$sw_out" | head -c 200)";;
+esac
+for _ in $(seq 1 40); do grep -q 'SWEPT-LAST-WORDS' "$SW_LOG" 2>/dev/null && break; sleep 0.25; done
+assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.session_id] | join(",")' "$SW_LOG" 2>/dev/null)" "ended1" \
+    "wake: retries a failed session whose wait is over, and only that one"
+kill $SW_PID 2>/dev/null
+rm -rf "$SW_DIR"
 
 # --- Refresh tests -----------------------------------------------------------
 # A device enrolled through the device grant holds a one-hour access token and a
@@ -1844,6 +2035,12 @@ case "$DOC_OUT" in
     *) PASS=$((PASS+1)); printf '  ok: doctor: output is plain text\n';;
 esac
 assert_eq "$(jq -r .bearer_token "$DR1/config.json")" "$DOC_JWT1" "doctor: a healthy run does not touch the config"
+# Sessions left with undigested turns after failures are part of "recent errors".
+mkdir -p "$DR1/sessions"
+printf '{"last_digest_turn":0,"digest_failures":2,"digest_retry_after":0}' > "$DR1/sessions/failed.json"
+doc_run "$DR1"
+doc_line "warn" "1 session.*undigested" "doctor: reports sessions with undigested turns after failures"
+rm -f "$DR1/sessions/failed.json"
 rf_stop_all
 
 # DR2: no configuration at all. FAIL with the enrolment command, exit 1.

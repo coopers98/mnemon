@@ -400,5 +400,12 @@ else
     warn "recent errors: from $MNEMON_ERROR_LOG in the last 24h (latest 3):"
     while IFS= read -r line; do note "$line"; done <<< "$recent"
 fi
+# Sessions whose digests failed and have not caught up yet. They retry on
+# their own (the next Stop, or SessionStart for a session that has ended).
+undigested=$(mnemon_undigested_sessions)
+if [ "${undigested:-0}" -gt 0 ]; then
+    warn "recent errors: $undigested session(s) have undigested turns after failures; they will retry on their own" \
+        "see $MNEMON_ERROR_LOG for why the digests failed"
+fi
 
 finish

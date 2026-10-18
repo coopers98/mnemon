@@ -41,16 +41,27 @@ state=$(mnemon_session_state "$session_id")
 last_turn=$(printf '%s' "$state" | jq -r '.last_digest_turn')
 [ "$turn_index" -le "$last_turn" ] && exit 0
 
-# Back off after repeated failures. Every Stop used to retry a digest that kept
-# failing -- a model that is down, a key that is missing -- paying for the
-# attempt each time. After digest_max_failures in a row (3), retry at most once
-# per digest_backoff_seconds (1800). A not-retryable failure starts the backoff
-# at once. The worker logs when a session enters it.
-failures=$(printf '%s' "$state" | jq -r '.digest_failures // 0')
-if [ "$failures" -ge "$(mnemon_config_value 'digest_max_failures' 3)" ]; then
-    failed_at=$(printf '%s' "$state" | jq -r '.digest_failed_at // 0')
-    [ $(( $(date +%s) - failed_at )) -lt "$(mnemon_config_value 'digest_backoff_seconds' 1800)" ] && exit 0
+# Where this session's transcript is, so SessionStart can retry a session that
+# ended with turns undigested (see mnemon-wake.sh).
+if [ -n "$transcript_path" ]; then
+    mnemon_session_state_update "$session_id" '.transcript_path = $p | .cwd = $c' \
+        --arg p "$transcript_path" --arg c "$cwd"
 fi
+
+# Back off after failures (the worker sets digest_retry_after: the next Stop
+# after one failure, then 60s doubling to 30 minutes; 30 minutes at once for a
+# failure the server says retrying cannot fix). A Stop inside the wait still
+# records its range, so the end of a session that finishes while backing off
+# is retried -- by a later Stop, or by the next SessionStart.
+retry_after=$(printf '%s' "$state" | jq -r '.digest_retry_after // 0 | floor')
+if [ "$(date +%s)" -lt "$retry_after" ]; then
+    [ -n "$transcript_path" ] && mnemon_digest_pending_add "$session_id" "$transcript_path" "$turn_index"
+    exit 0
+fi
+
+# After a timeout, a smaller slice (see mnemon_digest_end). Only a transcript
+# file can be sliced; an inline transcript goes whole.
+[ -n "$transcript_path" ] && turn_index=$(mnemon_digest_end "$state" "$last_turn" "$turn_index")
 
 worker="$SCRIPT_DIR/lib/digest-worker.sh"
 if [ ! -r "$worker" ]; then

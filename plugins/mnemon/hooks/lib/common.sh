@@ -407,6 +407,22 @@ mnemon_instance_url() {
     printf '%s' "${endpoint%/mcp}"
 }
 
+# A path's modification time in epoch seconds. Args: <path> [fallback]; the
+# fallback (default: now) when it cannot be read.
+#
+# GNU stat takes -c %Y and BSD stat -f %m, and the usual "try one, then the
+# other" goes wrong on Linux when the path vanishes in between: GNU stat reads
+# -f as "file system status" and prints a block of text, which then lands in
+# shell arithmetic and kills the hook. Only a number is accepted.
+mnemon_mtime() {
+    local m
+    m=$(stat -c %Y "$1" 2>/dev/null) || m=$(stat -f %m "$1" 2>/dev/null) || m=""
+    case "$m" in
+        ''|*[!0-9]*) printf '%s' "${2:-$(date +%s)}" ;;
+        *) printf '%s' "$m" ;;
+    esac
+}
+
 # Deliver an event once. Args: <session_id> <event> [ttl_seconds].
 # Returns 0 to the first caller inside the window and 1 to every other.
 #
@@ -431,7 +447,7 @@ mnemon_claim_once() {
     # compaction, and a hook killed mid-run must not silence its session for
     # good -- silence is the failure mode this whole file exists to avoid.
     local mtime now
-    mtime=$(stat -c %Y "$claim" 2>/dev/null || stat -f %m "$claim" 2>/dev/null || echo 0)
+    mtime=$(mnemon_mtime "$claim" 0)
     now=$(date +%s)
     if [ $(( now - mtime )) -ge "$ttl" ]; then
         rm -rf "$claim" 2>/dev/null
@@ -502,14 +518,54 @@ mnemon_session_state_write() {
     mv -f "$tmp" "$f"
 }
 
+# Run a command holding a short mkdir lock. Args: <lockdir> <command...>.
+#
+# For read-modify-write of small files several hooks touch at once (session
+# state, the pending marker). Waits up to ~5s; a lock 10s old is taken over. If the lock cannot be had the command runs
+# anyway, logged: losing an update is better than a hook that hangs.
+mnemon_with_lock() {
+    local lock="$1" waited=0 mtime age rc
+    shift
+    while ! mkdir "$lock" 2>/dev/null; do
+        mtime=$(mnemon_mtime "$lock")
+        age=$(( $(date +%s) - mtime ))
+        # Taken over by age alone. Owners hold these locks for milliseconds,
+        # so one 10s old was left by a process that died. Checking the
+        # owner's pid instead lost updates under load: the pid read can be an
+        # owner that just released normally, and by the time it is found dead
+        # the lock at this path is a new owner's.
+        if [ "$age" -ge 10 ]; then
+            rm -rf "$lock"
+            continue
+        fi
+        if [ "$waited" -ge 100 ]; then
+            mnemon_log_error "lock $lock busy for 5s; going ahead without it"
+            "$@"
+            return $?
+        fi
+        sleep 0.05
+        waited=$((waited + 1))
+    done
+    echo "$$" > "$lock/pid"
+    "$@"
+    rc=$?
+    rm -rf "$lock"
+    return $rc
+}
+
 # Apply a jq filter to a session's stored state and write the result.
 # Args: <session_id> <filter> [jq args...], e.g.
 #   mnemon_session_state_update "$sid" '.last_recall_at = $n' --argjson n 5
 #
-# The change is applied to the state on disk at write time. Writing back a copy
-# read earlier -- before a server call that takes seconds -- undid whatever
-# another hook changed meanwhile: an @nomemo set, drawer ids a digest recorded.
+# The change is applied to the state on disk at write time, under a lock.
+# Writing back a copy read earlier -- before a server call that takes seconds --
+# undid whatever another hook changed meanwhile: an @nomemo set (a privacy
+# flag), drawer ids a digest recorded.
 mnemon_session_state_update() {
+    mnemon_with_lock "$MNEMON_SESSIONS_DIR/${1}.state.lock.d" _mnemon_session_state_update "$@"
+}
+
+_mnemon_session_state_update() {
     local sid="$1" filter="$2" cur new
     shift 2
     cur=$(mnemon_session_state "$sid")
@@ -540,9 +596,12 @@ mnemon_digest_lock() {
         pid=$(cat "$lock/pid" 2>/dev/null)
         # A lock whose age cannot be read counts as new: reading it as 1970
         # made any such lock stale at once, and a live worker's was taken.
-        mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || date +%s)
+        mtime=$(mnemon_mtime "$lock")
+        # A dead owner counts only once its lock is 2s old: the pid read
+        # above may be a worker that just released, and the lock now at this
+        # path a new worker's (see mnemon_with_lock).
         if [ $(( $(date +%s) - mtime )) -ge "$MNEMON_DIGEST_LOCK_STALE_SECONDS" ] \
-            || { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; }; then
+            || { [ -n "$pid" ] && [ $(( $(date +%s) - mtime )) -ge 2 ] && ! kill -0 "$pid" 2>/dev/null; }; then
             rm -rf "$lock"
             continue
         fi
@@ -552,9 +611,19 @@ mnemon_digest_lock() {
     return 0
 }
 
-# Release a lock taken by mnemon_digest_lock. Args: <session_id>.
+# Release a lock taken by mnemon_digest_lock. Args: <session_id>. Only a lock
+# this process holds: one that went stale and was taken over belongs to the
+# worker that took it.
 mnemon_digest_unlock() {
-    rm -rf "$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
+    local lock="$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
+    [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
+    return 0
+}
+
+# Mark a held digest lock as fresh. Args: <session_id>. A worker running several
+# 90s passes would otherwise approach the stale limit and be taken over.
+mnemon_digest_lock_touch() {
+    touch "$MNEMON_SESSIONS_DIR/${1}.digest.lock.d" 2>/dev/null || true
 }
 
 # Hand a range to the digest that is running for this session.
@@ -565,12 +634,65 @@ mnemon_digest_unlock() {
 # user quits after that reply. The running worker digests this range when it
 # finishes. Several Stops in a row keep the furthest end.
 mnemon_digest_pending_add() {
+    mnemon_with_lock "$MNEMON_SESSIONS_DIR/${1}.pending.lock.d" _mnemon_digest_pending_add "$@"
+}
+
+_mnemon_digest_pending_add() {
     local f="$MNEMON_SESSIONS_DIR/${1}.digest.pending" path="$2" end="$3" old
     old=$(jq -r '.end // 0' "$f" 2>/dev/null)
     case "$old" in ''|*[!0-9]*) old=0 ;; esac
     [ "$old" -gt "$end" ] && end="$old"
-    jq -cn --arg p "$path" --argjson e "$end" '{path: $p, end: $e}' > "$f.tmp.$$" 2>/dev/null \
-        && mv -f "$f.tmp.$$" "$f"
+    if ! { jq -cn --arg p "$path" --argjson e "$end" '{path: $p, end: $e}' > "$f.tmp.$$" 2>/dev/null \
+            && mv -f "$f.tmp.$$" "$f"; }; then
+        rm -f "$f.tmp.$$"
+        mnemon_log_error "could not record pending digest range for session=$1 (end $end); the next Stop covers it"
+        return 1
+    fi
+}
+
+# Read the pending marker and remove it, under its lock. Args: <session_id>.
+# Echoes the marker JSON (empty when there is none).
+mnemon_digest_pending_take() {
+    mnemon_with_lock "$MNEMON_SESSIONS_DIR/${1}.pending.lock.d" _mnemon_digest_pending_take "$1"
+}
+
+_mnemon_digest_pending_take() {
+    local f="$MNEMON_SESSIONS_DIR/${1}.digest.pending"
+    cat "$f" 2>/dev/null
+    rm -f "$f"
+}
+
+# The end to digest to, given the session's shrink level. Args: <state json>
+# <start> <end>. A slice that keeps timing out never gets smaller on its own,
+# so each timeout halves the next attempt (digest_shrink); progress is then
+# made from the oldest part, at least one line at a time.
+mnemon_digest_end() {
+    local shrink span
+    shrink=$(printf '%s' "$1" | jq -r '.digest_shrink // 0' 2>/dev/null)
+    case "$shrink" in ''|*[!0-9]*) shrink=0 ;; esac
+    span=$(( $3 - $2 ))
+    if [ "$shrink" -gt 0 ] && [ "$span" -gt 1 ]; then
+        [ "$shrink" -gt 30 ] && shrink=30
+        span=$(( span >> shrink ))
+        [ "$span" -lt 1 ] && span=1
+    fi
+    printf '%s' "$(( $2 + span ))"
+}
+
+# How many sessions have turns left undigested after failures: digests that
+# failed and have not yet succeeded, and ranges handed to a digest that is no
+# longer running. Echoes the count.
+mnemon_undigested_sessions() {
+    local n=0 f sid
+    n=$(grep -lE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
+    for f in "$MNEMON_SESSIONS_DIR"/*.digest.pending; do
+        [ -e "$f" ] || continue
+        sid="${f##*/}"; sid="${sid%.digest.pending}"
+        [ -d "$MNEMON_SESSIONS_DIR/${sid}.digest.lock.d" ] && continue
+        grep -qE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR/${sid}.json" 2>/dev/null && continue
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
 }
 
 # Copy transcript lines (from, to] into a file, keeping at most
@@ -758,10 +880,19 @@ mnemon_project_name() {
 # calls reads as one reply. The result is still JSON, so the server's "Read a
 # Claude Code transcript" prompt and its string-level sanitizer keep working.
 #
-# Each text is capped at MNEMON_CLEAN_TEXT_MAX characters (16000) before any
-# regex runs: jq's gsub is quadratic in the number of matches, and one hostile
-# text of 50,000 closed tags took minutes -- longer than the Stop hook may
-# run, which would wedge that slice for good. A cut text says so.
+# Long texts keep their start and their end -- the decision is usually at the
+# end of a long reply -- with "[... N characters cut]" between. Two limits:
+#   - before any regex, each text is cut to MNEMON_CLEAN_SCAN_MAX (32000):
+#     jq's gsub is quadratic in the number of matches, and one hostile text of
+#     50,000 closed tags took minutes, longer than the Stop hook may run;
+#   - after the harness wrappers are cut, user text is held to
+#     MNEMON_CLEAN_TEXT_MAX (16000), so a long injected block does not push
+#     the user's own words out. Assistant text is only redacted and keeps the
+#     scan limit (3 of 12,179 real assistant texts exceed it).
+# A wrapper or a private key that a cut splits is removed from both sides.
+#
+# A queued message is de-duplicated by exact text within one slice. One
+# delivered again in a later slice is kept twice.
 #
 # One jq process for the whole slice: a fork costs 20-60ms on Git Bash, so
 # per-record work outside jq would scale with the transcript. A line that does
@@ -773,28 +904,39 @@ mnemon_project_name() {
 # ContentSanitizer, plus GitHub fine-grained and app tokens, Slack tokens and
 # PEM private keys, with minimum lengths so a prefix mentioned in prose stays.
 # The server still sanitizes what arrives.
+MNEMON_CLEAN_SCAN_MAX="${MNEMON_CLEAN_SCAN_MAX:-32000}"
 MNEMON_CLEAN_TEXT_MAX="${MNEMON_CLEAN_TEXT_MAX:-16000}"
 mnemon_clean_transcript() {
-    jq -nRc --argjson max "$MNEMON_CLEAN_TEXT_MAX" '
+    jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" '
         def text_of:
             if type == "string" then .
             elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join("\n\n")
             else "" end;
 
-        def capped:
-            if length > $max then {t: .[0:$max], cut: (length - $max)} else {t: ., cut: 0} end;
+        # A text as {h, t, len}: its start and end around a cut, t empty when
+        # it fits. 60% of the budget goes to the start.
+        def split_at($n):
+            length as $l
+            | if $l <= $n then {h: ., t: "", len: $l}
+              else ($n * 0.6 | floor) as $hn
+                   | {h: .[0:$hn], t: .[($l - ($n - $hn)):], len: $l} end;
 
         # Context the harness or a hook injected into a user turn, not typed.
-        def unwrap_harness($cut):
-            gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
-            | if $cut > 0 then gsub("<system-reminder>[\\s\\S]*\\z"; "") else . end
+        # $head: this is the start of the text. $cut: the text was cut here, so
+        # a span may be open at the end of the start or closed at the beginning
+        # of the end.
+        def unwrap_harness($head; $cut):
+            (if $cut and ($head | not)
+             then sub("\\A(?:(?!<system-reminder>)[\\s\\S])*?</system-reminder>"; "") else . end)
+            | gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
+            | if $cut and $head then gsub("<system-reminder>[\\s\\S]*\\z"; "") else . end
             | gsub("<(command-message|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr|task-notification|user-prompt-submit-hook)>[\\s\\S]*?</\\1>"; "")
             | gsub("<command-name>(?<n>[^<]*)</command-name>\\s*<command-args>(?<a>[\\s\\S]*?)</command-args>"; "\(.n) \(.a)")
             | gsub("<command-args>(?<a>[\\s\\S]*?)</command-args>\\s*<command-name>(?<n>[^<]*)</command-name>"; "\(.n) \(.a)")
             | gsub("</?(command-name|command-args|bash-input)>"; "")
             # A Mnemon recall/wake block that arrives without a wrapper opens
             # the text: its header and the indented lines under it.
-            | sub("\\A\\s*Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "")
+            | if $head then sub("\\A\\s*Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "") else . end
             | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
         def redact:
@@ -827,13 +969,23 @@ mnemon_clean_transcript() {
                 | {role: $role, ts: .timestamp,
                    raw: ((if (.message | type) == "object" then .message.content else .content end) | text_of)}
             end
-            | (.raw | capped) as $c
-            | .role as $role
-            | .text = ($c.t
-                | if $role == "user" then unwrap_harness($c.cut) else . end
-                | redact
-                | gsub("\\n{3,}"; "\n\n") | sub("^\\s+"; "") | sub("\\s+$"; "")
-                | if $c.cut > 0 and . != "" then . + "\n[... \($c.cut) characters cut]" else . end)
+            | (.role == "user") as $user
+            | (.raw | split_at($scan)) as $p
+            | ($p.t != "") as $cut
+            | ($p.h | if $user then unwrap_harness(true; $cut) else . end | redact) as $h
+            | ($p.t | if $user then unwrap_harness(false; true) else . end | redact
+                    | sub("\\A(?:(?!-----BEGIN)[\\s\\S])*?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]")) as $t
+            | (if $user then $usermax else $scan end) as $max
+            | ($max * 0.6 | floor) as $hn
+            | (if $cut then {h: $h, t: $t}
+               elif ($h | length) > $max then ($h | split_at($max) | {h, t})
+               else {h: $h, t: ""} end) as $k
+            | ($k.h | if $k.t != "" and length > $hn then .[0:$hn] else . end) as $kh
+            | ($k.t | if length > ($max - $hn) then .[(length - ($max - $hn)):] else . end) as $kt
+            | .text = (if ($kh + $kt | test("\\S") | not) then ""
+                       elif ($cut | not) and $k.t == "" then $kh
+                       else $kh + "\n[... \($p.len - ($kh | length) - ($kt | length)) characters cut]\n" + $kt end
+                | gsub("\\n{3,}"; "\n\n") | sub("^\\s+"; "") | sub("\\s+$"; ""))
             | del(.raw)
             | .ts |= (if type == "string" then sub("\\.[0-9]+Z$"; "Z") else null end)
             | select(.text != "");

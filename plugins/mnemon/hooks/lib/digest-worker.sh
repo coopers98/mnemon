@@ -27,27 +27,44 @@ if ! mnemon_digest_lock "$session_id"; then
 fi
 trap 'mnemon_digest_unlock "$session_id"' EXIT
 
-# Count a failed digest, and say so when the session starts backing off
-# (mnemon-capture.sh skips Stops while it does). Args: <tool error text or "">.
+# Count a failed digest and set when the next attempt may run. Args: <tool
+# error text, or "" when the call itself failed>.
+#
+# One failure is retried on the next Stop; after that the wait starts at
+# digest_backoff_base_seconds (60) and doubles to digest_backoff_seconds (1800).
+# A failure the server leads with "Not retryable:" waits the full 1800 at once.
+# A timeout, an unreadable answer or a failed call also halves the next slice
+# (digest_shrink): one that times out every time would otherwise never recover.
 record_failure() {
-    local err="$1" max nr=false n
-    max=$(mnemon_config_value 'digest_max_failures' 3)
-    # The server leads a failure that retrying cannot fix with "Not retryable:";
-    # it backs off at once.
-    case "$err" in "Not retryable:"*) nr=true ;; esac
+    local err="$1" base cap nr=false shrink=false n wait
+    base=$(mnemon_config_value 'digest_backoff_base_seconds' 60)
+    cap=$(mnemon_config_value 'digest_backoff_seconds' 1800)
+    case "$err" in
+        "Not retryable:"*) nr=true ;;
+        ""|*"timed out"*|*"not a proposals list"*) shrink=true ;;
+    esac
     mnemon_session_state_update "$session_id" \
-        '.digest_failures = (((.digest_failures // 0) + 1) | if $nr then ([., $max] | max) else . end)
-         | .digest_failed_at = (now | floor)' \
-        --argjson nr "$nr" --argjson max "$max"
-    n=$(mnemon_session_state "$session_id" | jq -r '.digest_failures // 0')
-    if [ "$n" -ge "$max" ]; then
-        mnemon_log_error "digest for session=$session_id failed $n times in a row; retrying at most every $(mnemon_config_value 'digest_backoff_seconds' 1800)s"
+        '.digest_failures = ((.digest_failures // 0) + 1)
+         | .digest_failed_at = (now | floor)
+         | (if $nr then $cap
+            elif .digest_failures < 2 then 0
+            else ([$base * pow(2; ([.digest_failures - 2, 20] | min)), $cap] | min) end) as $wait
+         | .digest_retry_after = ((now | floor) + $wait)
+         | .digest_wait = $wait
+         | (if $shrink then .digest_shrink = ([(.digest_shrink // 0) + 1, 30] | min) else . end)' \
+        --argjson nr "$nr" --argjson shrink "$shrink" --argjson base "$base" --argjson cap "$cap"
+    read -r n wait < <(mnemon_session_state "$session_id" | jq -r '"\(.digest_failures // 0) \(.digest_wait // 0)"')
+    if [ "${wait:-0}" -gt 0 ]; then
+        mnemon_log_error "digest for session=$session_id failed $n time(s) in a row; retrying in ${wait}s"
+    else
+        mnemon_log_error "digest for session=$session_id failed; retrying on the next Stop"
     fi
 }
 
 # Send one slice. Args: <start> <end> <text_file>. Returns 0 when the digest ran.
 run_once() {
     local sstart="$1" send="$2" tfile="$3" pair recent_ids params result persisted_ids errf err
+    mnemon_digest_lock_touch "$session_id"
     pair=$(mnemon_token) || { rm -f "$tfile"; return 1; }
     recent_ids=$(mnemon_session_state "$session_id" | jq -c '.recent_drawer_ids // []' 2>/dev/null)
     [ -n "$recent_ids" ] || recent_ids='[]'
@@ -93,28 +110,35 @@ run_once() {
     # (mnemon_session_state_write).
     mnemon_session_state_update "$session_id" \
         '.last_digest_turn = $t
-         | .digest_failures = 0 | del(.digest_failed_at)
+         | .digest_failures = 0
+         | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_shrink)
          | .recent_drawer_ids = (((.recent_drawer_ids // []) + $ids) | unique | .[-50:])' \
         --argjson t "$send" --argjson ids "$persisted_ids"
     return 0
 }
 
-# Digest the range a Stop left while this worker ran: from wherever the pointer
-# is now to the end that Stop saw, cleaned the same way capture cleans.
-run_pending() {
-    local marker path end start slice out rc
-    marker=$(cat "$PENDING" 2>/dev/null)
-    rm -f "$PENDING"
-    path=$(printf '%s' "$marker" | jq -r '.path // empty' 2>/dev/null)
-    end=$(printf '%s' "$marker" | jq -r '.end // 0' 2>/dev/null)
-    case "$end" in ''|*[!0-9]*) return 0 ;; esac
-    [ -n "$path" ] && [ -r "$path" ] || return 0
-    start=$(mnemon_session_state "$session_id" | jq -r '.last_digest_turn // 0')
+# Digest transcript lines from wherever the pointer is now to <end>, cleaned
+# the same way capture cleans. Args: <path> <end> <what, for the log>.
+# Returns 0 when the range is done (digested, or nothing to digest), 1 when it
+# failed.
+digest_from_pointer() {
+    local path="$1" end="$2" what="$3" state start slice out rc
+    if [ -z "$path" ] || [ ! -r "$path" ]; then
+        mnemon_log_error "$what for session=$session_id up to line $end: transcript ${path:-(none)} is not readable; skipped"
+        return 0
+    fi
+    state=$(mnemon_session_state "$session_id")
+    start=$(printf '%s' "$state" | jq -r '.last_digest_turn // 0')
     [ "$end" -gt "$start" ] || return 0
+    end=$(mnemon_digest_end "$state" "$start" "$end")
 
     slice="$MNEMON_SESSIONS_DIR/${session_id}.pending-slice.$$.jsonl"
     out="$MNEMON_SESSIONS_DIR/${session_id}.pending-input.$$.txt"
-    mnemon_slice_transcript "$path" "$start" "$end" "$slice" || { rm -f "$slice"; return 0; }
+    if ! mnemon_slice_transcript "$path" "$start" "$end" "$slice"; then
+        rm -f "$slice"
+        mnemon_log_error "$what for session=$session_id: lines $start-$end of the transcript are gone; skipped"
+        return 0
+    fi
     mnemon_digest_text "$slice" "$out"
     rc=$?
     rm -f "$slice"
@@ -126,8 +150,32 @@ run_pending() {
     esac
 }
 
+run_pending() {
+    local marker path end
+    marker=$(mnemon_digest_pending_take "$session_id")
+    path=$(printf '%s' "$marker" | jq -r '.path // empty' 2>/dev/null)
+    end=$(printf '%s' "$marker" | jq -r '.end // 0' 2>/dev/null)
+    case "$end" in ''|*[!0-9]*) mnemon_log_error "pending range for session=$session_id is unreadable; skipped"; return 0 ;; esac
+    digest_from_pointer "$path" "$end" "pending range"
+}
+
 ok=1
-run_once "$turn_start" "$turn_end" "$text_file" || ok=0
+# The pointer may have moved since capture read it: another worker digested
+# while this one's Stop was slicing. Sending the staged text as-is would digest
+# those turns again under a range the server's replay check does not know.
+pointer=$(mnemon_session_state "$session_id" | jq -r '.last_digest_turn // 0')
+if [ "$pointer" -gt "$turn_start" ]; then
+    rm -f "$text_file"
+    if [ "$turn_end" -gt "$pointer" ]; then
+        if [ -n "$transcript_path" ]; then
+            digest_from_pointer "$transcript_path" "$turn_end" "re-slice" || ok=0
+        else
+            mnemon_log_error "digest for session=$session_id: range $turn_start-$turn_end overlaps turns already digested and has no transcript file to re-slice; skipped"
+        fi
+    fi
+else
+    run_once "$turn_start" "$turn_end" "$text_file" || ok=0
+fi
 
 passes=0
 while :; do
@@ -139,13 +187,14 @@ while :; do
     trap - EXIT
     # A worker that lost the lock after the check above and before the release
     # left its range in the marker. Take the lock back for it; if another
-    # worker got there first, that one handles it.
+    # worker got there first, that one handles it. A marker left after this
+    # point is picked up by the next Stop or the next SessionStart.
     [ "$ok" = 1 ] && [ -f "$PENDING" ] && [ "$passes" -lt "$MAX_PASSES" ] || break
     mnemon_digest_lock "$session_id" || break
     trap 'mnemon_digest_unlock "$session_id"' EXIT
 done
 
-# After a failure the pointer has not moved, so the next Stop resends from the
-# same start through its own, later end -- which covers any pending range.
-[ "$ok" = 1 ] || rm -f "$PENDING"
+# After a failure the pointer has not moved and the marker is kept: the next
+# Stop resends from the same start through its own, later end, and SessionStart
+# retries a session that has ended.
 exit 0

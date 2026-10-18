@@ -51,6 +51,36 @@ fi
 # session_id and so gets fresh defaults anyway.
 mnemon_session_state "$session_id" > /dev/null
 
+# Sessions left with turns undigested after failures. A session that ended
+# while its digest was backing off, or with a range handed to a digest that
+# then failed, has no further Stop to retry it -- so say so here, and retry the
+# ones whose wait is over by running capture for them in the background. At
+# most three per SessionStart; capture applies its own backoff and checks.
+undigested=$(mnemon_undigested_sessions)
+if [ "${undigested:-0}" -gt 0 ]; then
+    printf 'Mnemon: %s session(s) have undigested turns after failures; they will retry. See %s\n' \
+        "$undigested" "$MNEMON_ERROR_LOG"
+    swept=0
+    now=$(date +%s)
+    for f in "$MNEMON_SESSIONS_DIR"/*.json; do
+        [ "$swept" -ge 3 ] && break
+        [ -e "$f" ] || continue
+        sid="${f##*/}"; sid="${sid%.json}"
+        [ -d "$MNEMON_SESSIONS_DIR/${sid}.digest.lock.d" ] && continue
+        if ! grep -qE '"digest_failures": *[1-9]' "$f" 2>/dev/null \
+            && [ ! -e "$MNEMON_SESSIONS_DIR/${sid}.digest.pending" ]; then
+            continue
+        fi
+        payload=$(jq -c --arg sid "$sid" --argjson now "$now" '
+            select((.digest_retry_after // 0) <= $now and (.transcript_path // "") != "")
+            | {session_id: $sid, transcript_path, cwd: (.cwd // ""), hook_event_name: "Stop"}' "$f" 2>/dev/null)
+        [ -n "$payload" ] || continue
+        [ -r "$(printf '%s' "$payload" | jq -r '.transcript_path')" ] || continue
+        ( printf '%s' "$payload" | "$SCRIPT_DIR/mnemon-capture.sh" ) >/dev/null 2>&1 < /dev/null &
+        swept=$((swept + 1))
+    done
+fi
+
 if mnemon_refresh_available; then
     # Session start is the one place a ~1s refresh is invisible, so spend it
     # here rather than inside the tight per-prompt recall budget. Ten minutes

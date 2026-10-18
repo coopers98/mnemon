@@ -521,35 +521,41 @@ mnemon_session_state_write() {
 # Run a command holding a short mkdir lock. Args: <lockdir> <command...>.
 #
 # For read-modify-write of small files several hooks touch at once (session
-# state, the pending marker). Waits up to ~5s; a lock 10s old is taken over. If the lock cannot be had the command runs
-# anyway, logged: losing an update is better than a hook that hangs.
+# state, the pending marker). The wait is wall-clock: MNEMON_LOCK_WAIT seconds
+# (default 5). When it runs out, MNEMON_LOCK_BUSY says what to do: "run" (the
+# default) runs the command anyway, logged -- losing an update is better than
+# a hook that hangs -- and "skip" does not run it and returns 1, for a write
+# that does not matter enough to wait for (recall's timestamp).
+#
+# A lock 10s old was left by a process that died (owners hold these for
+# milliseconds) and is taken over: renamed aside first, so of several waiters
+# only the one whose rename succeeds removes it. Checking the owner's pid
+# instead lost updates under load: the pid read can be an owner that just
+# released normally, and by the time it is found dead the lock at this path is
+# a new owner's. Released only by the process whose pid it holds.
 mnemon_with_lock() {
-    local lock="$1" waited=0 mtime age rc
+    local lock="$1" wait="${MNEMON_LOCK_WAIT:-5}" busy="${MNEMON_LOCK_BUSY:-run}" since=$SECONDS rc
     shift
     while ! mkdir "$lock" 2>/dev/null; do
-        mtime=$(mnemon_mtime "$lock")
-        age=$(( $(date +%s) - mtime ))
-        # Taken over by age alone. Owners hold these locks for milliseconds,
-        # so one 10s old was left by a process that died. Checking the
-        # owner's pid instead lost updates under load: the pid read can be an
-        # owner that just released normally, and by the time it is found dead
-        # the lock at this path is a new owner's.
-        if [ "$age" -ge 10 ]; then
-            rm -rf "$lock"
+        if [ $(( $(date +%s) - $(mnemon_mtime "$lock") )) -ge 10 ]; then
+            mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
             continue
         fi
-        if [ "$waited" -ge 100 ]; then
-            mnemon_log_error "lock $lock busy for 5s; going ahead without it"
+        if [ $(( SECONDS - since )) -ge "$wait" ]; then
+            if [ "$busy" = "skip" ]; then
+                mnemon_log_error "lock $lock busy for ${wait}s; skipped: $*"
+                return 1
+            fi
+            mnemon_log_error "lock $lock busy for ${wait}s; going ahead without it"
             "$@"
             return $?
         fi
         sleep 0.05
-        waited=$((waited + 1))
     done
     echo "$$" > "$lock/pid"
     "$@"
     rc=$?
-    rm -rf "$lock"
+    [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
     return $rc
 }
 
@@ -662,70 +668,98 @@ _mnemon_digest_pending_take() {
     rm -f "$f"
 }
 
-# The end to digest to, given the session's shrink level. Args: <state json>
-# <start> <end>. A slice that keeps timing out never gets smaller on its own,
-# so each timeout halves the next attempt (digest_shrink); progress is then
-# made from the oldest part, at least one line at a time.
-mnemon_digest_end() {
-    local shrink span
-    shrink=$(printf '%s' "$1" | jq -r '.digest_shrink // 0' 2>/dev/null)
-    case "$shrink" in ''|*[!0-9]*) shrink=0 ;; esac
-    span=$(( $3 - $2 ))
-    if [ "$shrink" -gt 0 ] && [ "$span" -gt 1 ]; then
-        [ "$shrink" -gt 30 ] && shrink=30
-        span=$(( span >> shrink ))
-        [ "$span" -lt 1 ] && span=1
-    fi
-    printf '%s' "$(( $2 + span ))"
-}
-
-# How many sessions have turns left undigested after failures: digests that
-# failed and have not yet succeeded, and ranges handed to a digest that is no
-# longer running. Echoes the count.
+# How many sessions have turns left undigested after failures. Args:
+# [--tidy]. Echoes the count.
+#
+# A session counts only when it has real work: a pending range ending past its
+# pointer, or failed digests with transcript lines past its pointer -- and a
+# transcript that still exists, and no @nomemo. Candidates come from one grep
+# over the state directory and the pending markers, never a fork per state
+# file, and the scan stops after one to two seconds.
+#
+# --tidy (SessionStart) also clears what can never be retried: a marker at or
+# below the pointer is removed, and a session whose transcript is gone is
+# logged once and its failure state cleared. Without that the banner said
+# "undigested" for ever.
 mnemon_undigested_sessions() {
-    local n=0 f sid
-    n=$(grep -lE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
+    local tidy=false n=0 since=$SECONDS sid f fields nomemo ptr fails tp pend marker
+    [ "${1:-}" = "--tidy" ] && tidy=true
+    local candidates=""
+    for f in $(grep -lE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR"/*.json 2>/dev/null); do
+        sid="${f##*/}"; candidates="$candidates ${sid%.json}"
+    done
     for f in "$MNEMON_SESSIONS_DIR"/*.digest.pending; do
         [ -e "$f" ] || continue
         sid="${f##*/}"; sid="${sid%.digest.pending}"
+        case " $candidates " in *" $sid "*) ;; *) candidates="$candidates $sid" ;; esac
+    done
+    for sid in $candidates; do
+        # $SECONDS ticks on whole seconds: ">= 2" is a budget of 1-2s, where
+        # ">= 1" could end the scan a few milliseconds in.
+        [ $(( SECONDS - since )) -ge 2 ] && break
+        f="$MNEMON_SESSIONS_DIR/${sid}.json"
+        marker="$MNEMON_SESSIONS_DIR/${sid}.digest.pending"
         [ -d "$MNEMON_SESSIONS_DIR/${sid}.digest.lock.d" ] && continue
-        grep -qE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR/${sid}.json" 2>/dev/null && continue
-        n=$((n + 1))
+        fields=$(jq -r '[(.nomemo // false), (.last_digest_turn // 0), (.digest_failures // 0), (.transcript_path // "")] | @tsv' "$f" 2>/dev/null) || continue
+        IFS=$'\t' read -r nomemo ptr fails tp <<< "$fields"
+        [ "$nomemo" = "true" ] && continue
+        pend=$(jq -r '.end // 0' "$marker" 2>/dev/null); pend=${pend:-0}
+        if [ "$tidy" = true ] && [ -e "$marker" ] && [ "$pend" -le "$ptr" ]; then
+            rm -f "$marker"; pend=0
+        fi
+        [ -n "$tp" ] || tp=$(jq -r '.path // empty' "$marker" 2>/dev/null)
+        if [ -z "$tp" ] || [ ! -r "$tp" ]; then
+            if [ "$tidy" = true ] && { [ "$fails" -gt 0 ] || [ -e "$marker" ]; }; then
+                mnemon_log_error "session=$sid has undigested turns but its transcript ${tp:-(unknown)} is gone; giving up on them"
+                rm -f "$marker"
+                mnemon_session_state_update "$sid" '.digest_failures = 0 | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_failed_start)'
+            fi
+            continue
+        fi
+        if [ "$pend" -gt "$ptr" ] \
+            || { [ "$fails" -gt 0 ] && [ "$(wc -l < "$tp" | tr -d ' ')" -gt "$ptr" ]; }; then
+            n=$((n + 1))
+        fi
     done
     printf '%s' "$n"
 }
 
-# Copy transcript lines (from, to] into a file, keeping at most
-# max_digest_bytes of the newest whole records. Args: <path> <from> <to> <out>.
+# Copy transcript lines (from, to] into a file, at most max_digest_bytes of
+# them, oldest first. Args: <path> <from> <to> <out>. Echoes the last line
+# copied; returns 1 when there is nothing to copy.
 #
-# The cap bounds the work on a long first run. Cleaning keeps a few percent of
-# a raw slice, so it is sized for the work, not for the server's limit (that is
-# max_digest_chars, in mnemon_digest_text). Records it drops are never
-# digested, so dropping them is logged.
+# The cap bounds the work per pass. It keeps the oldest lines, so what is left
+# over is carried forward from the pointer rather than lost: the old cap kept
+# the newest lines and the oldest were never digested. At least one line is
+# always copied, so a single huge line still makes progress.
 mnemon_slice_transcript() {
-    local path="$1" from="$2" to="$3" out="$4" max_bytes size
-    tail -n +"$((from + 1))" "$path" 2>/dev/null | head -n "$((to - from))" > "$out"
-    [ -s "$out" ] || return 1
+    local path="$1" from="$2" to="$3" out="$4" max_bytes got
     max_bytes=$(mnemon_config_value 'max_digest_bytes' 2097152)
-    size=$(wc -c < "$out" | tr -d ' ')
-    if [ "$size" -gt "$max_bytes" ]; then
-        # Trim whole records from the front: tail -c can land mid-line, and the
-        # leading partial is dropped so the slice stays valid JSONL.
-        tail -c "$max_bytes" "$out" | tail -n +2 > "$out.cap" && mv -f "$out.cap" "$out"
-        mnemon_log_error "digest slice $from-$to is $size bytes, over max_digest_bytes=$max_bytes; its oldest records were not digested"
-    fi
-    return 0
+    tail -n +"$((from + 1))" "$path" 2>/dev/null | head -n "$((to - from))" \
+        | LC_ALL=C awk -v max="$max_bytes" '{ b += length($0) + 1; if (NR > 1 && b > max) exit; print }' > "$out"
+    [ -s "$out" ] || return 1
+    got=$(wc -l < "$out" | tr -d ' ')
+    printf '%s' "$((from + got))"
 }
 
-# Clean a transcript slice into the payload a digest sends.
-# Args: <in.jsonl> <out>. Returns 0 with the payload in <out>, 1 when the slice
-# holds no conversation, 2 when cleaning failed (logged).
+# Clean a transcript slice into the payload a digest sends, oldest turns first.
+# Args: <in.jsonl> <out> [<from>].
 #
-# A cleaning failure used to be indistinguishable from "no conversation": the
-# slice was dropped silently and its turns were never sent.
+# With <from> (the line the slice starts after), the payload is the oldest
+# chunk of the cleaned slice that fits digest_chunk_chars (60000, and never
+# more than max_digest_chars), and the line its last turn ends on is echoed --
+# the caller advances only that far and carries the rest. Chunk boundaries are
+# a function of the file, the pointer and the constant alone, so a retry after
+# any failure sends exactly the same range, and the server's replay check
+# recognises it. "all" is echoed when the whole slice fit. Without <from> (an
+# inline transcript, which cannot be resumed part-way) the whole slice is sent.
+#
+# Returns 0 with the payload in <out>, 1 when the slice holds no conversation,
+# 2 when cleaning failed (logged). A cleaning failure used to be
+# indistinguishable from "no conversation": the slice was dropped silently.
 mnemon_digest_text() {
-    local in="$1" out="$2" err="$2.err" text rc max_chars size trimmed
-    text=$(mnemon_clean_transcript "$in" 2>"$err")
+    local in="$1" out="$2" from="${3:-}" err="$2.err" cleaned rc max_chars chunk size result end
+    cleaned=$(mnemon_clean_transcript --lines "$in" 2>"$err")
     rc=$?
     if [ "$rc" -ne 0 ]; then
         mnemon_log_error "transcript cleaning failed (jq exit $rc): $(head -c 160 "$err" 2>/dev/null | tr -d '\r\n')"
@@ -733,36 +767,40 @@ mnemon_digest_text() {
         return 2
     fi
     rm -f "$err"
-    { [ -z "$text" ] || [ "$text" = "[]" ]; } && return 1
+    { [ -z "$cleaned" ] || [ "$cleaned" = "[]" ]; } && return 1
 
-    # The final guard: what the server accepts. `session_digest` validates the
-    # payload it receives (`transcript` => `required|string|max:200000`), and a
-    # rejected digest never advances last_digest_turn, so the next Stop would
-    # re-send the same oversized slice and fail identically, forever. With
-    # cleaning this rarely triggers.
     max_chars=$(mnemon_config_value 'max_digest_chars' 190000)
-    size=$(printf '%s' "$text" | wc -c | tr -d ' ')
-    if [ "$size" -gt "$max_chars" ]; then
-        # Drop whole leading turns first, so what is sent stays parseable and
-        # the turns that survive are the most recent ones.
-        trimmed=$(printf '%s' "$text" | jq -c --argjson max "$max_chars" '
-            if type == "array"
-            then until((tojson | length) <= $max or length <= 1; .[1:])
-            else . end
-        ' 2>/dev/null)
-        [ -n "$trimmed" ] && text="$trimmed"
+    chunk=$(mnemon_config_value 'digest_chunk_chars' 60000)
+    [ "$chunk" -gt "$max_chars" ] && chunk="$max_chars"
+    [ -z "$from" ] && chunk="$max_chars"
 
-        # One turn can still exceed the budget alone. The tool takes
-        # `transcript` as a string and sanitizes it as text rather than parsing
-        # it as JSON, so a character truncation is safe here and strictly
-        # better than the whole digest being refused.
-        if [ "$(printf '%s' "$text" | wc -c)" -gt "$max_chars" ]; then
-            text=$(printf '%s' "$text" | head -c "$max_chars")
-        fi
-        mnemon_log_error "digest payload of $size characters is over max_digest_chars=$max_chars; its oldest turns were not digested"
+    # Take turns while they fit; always at least one.
+    result=$(printf '%s' "$cleaned" | jq -c --argjson max "$chunk" '
+        reduce .[] as $t ({n: 0, size: 2, done: false, out: []};
+            if .done then .
+            elif (.n > 0) and (.size + ($t | del(.ln) | tojson | length) + 1 > $max) then .done = true
+            else .out += [$t] | .n += 1 | .size += ($t | del(.ln) | tojson | length) + 1 end)
+        | {end: (if .done then .out[-1].ln else "all" end), payload: (.out | map(del(.ln)))}')
+    end=$(printf '%s' "$result" | jq -r '.end')
+    printf '%s' "$result" | jq -c '.payload' > "$out"
+
+    # The final guard: what the server accepts (`transcript` =>
+    # `required|string|max:200000`). A rejected digest never advances, so an
+    # oversized payload would fail identically for ever. One turn alone is
+    # capped well below this, so it only triggers for an inline transcript or
+    # a lowered max_digest_chars.
+    size=$(wc -c < "$out" | tr -d ' ')
+    if [ "$size" -gt "$max_chars" ]; then
+        head -c "$max_chars" "$out" > "$out.cap" && mv -f "$out.cap" "$out"
+        mnemon_log_error "digest payload of $size characters is over max_digest_chars=$max_chars; its end was cut"
     fi
 
-    printf '%s' "$text" > "$out"
+    if [ -n "$from" ] && [ "$end" != "all" ]; then
+        printf '%s' "$((from + end))"
+    else
+        printf 'all'
+    fi
+    return 0
 }
 
 # The directory a Claude Code scratchpad belongs to, or nothing for any other
@@ -907,7 +945,11 @@ mnemon_project_name() {
 MNEMON_CLEAN_SCAN_MAX="${MNEMON_CLEAN_SCAN_MAX:-32000}"
 MNEMON_CLEAN_TEXT_MAX="${MNEMON_CLEAN_TEXT_MAX:-16000}"
 mnemon_clean_transcript() {
-    jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" '
+    # --lines: each turn also carries "ln", the input line its text ends on
+    # (for chunking, see mnemon_digest_text).
+    local lines=false
+    [ "${1:-}" = "--lines" ] && { lines=true; shift; }
+    jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" --argjson lines "$lines" '
         def text_of:
             if type == "string" then .
             elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join("\n\n")
@@ -940,7 +982,10 @@ mnemon_clean_transcript() {
             | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
         def redact:
-            gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|\\z)"; "[REDACTED-PRIVATE-KEY]")
+            # A header alone -- a note that mentions one -- is left alone: a
+            # base64 body (a 40+ character run, then any further lines) has to
+            # follow, then the END line if it is there.
+            gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\\s*[A-Za-z0-9+/=]{40,}(?:\\s+[A-Za-z0-9+/=]+)*(?:\\s*-----END [A-Z0-9 ]*PRIVATE KEY-----)?"; "[REDACTED-PRIVATE-KEY]")
             | gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]")
             | gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]")
             | gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]")
@@ -949,9 +994,12 @@ mnemon_clean_transcript() {
             | gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]")
             | gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]")
             | gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]")
-            | gsub("(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.k)=[REDACTED]")
-            # user:password@ -- a password that is all digits is a port.
-            | gsub("//[^\\s/@:]+:(?=[^\\s/@]*[^\\s/@0-9])[^\\s/@]+@"; "//[REDACTED-CREDENTIALS]@");
+            # The name starts a word or follows a prefix ending in "_"
+            # (DB_PASSWORD); NOSECRET= is not a secret.
+            | gsub("(?<![A-Za-z0-9])(?<p>(?:[A-Za-z0-9]+_)*)(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.p)\(.k)=[REDACTED]")
+            # scheme://user:pass@ -- the scheme tells admin:123456@ (a
+            # password) from a bare //host:8080@ or //TODO:fix@.
+            | gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@");
 
         def turn:
             if .type == "attachment" then
@@ -974,7 +1022,7 @@ mnemon_clean_transcript() {
             | ($p.t != "") as $cut
             | ($p.h | if $user then unwrap_harness(true; $cut) else . end | redact) as $h
             | ($p.t | if $user then unwrap_harness(false; true) else . end | redact
-                    | sub("\\A(?:(?!-----BEGIN)[\\s\\S])*?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]")) as $t
+                    | sub("\\A[A-Za-z0-9+/=]*(?:\\s+[A-Za-z0-9+/=]{40,})+(?:\\s+[A-Za-z0-9+/=]+)*\\s*-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]")) as $t
             | (if $user then $usermax else $scan end) as $max
             | ($max * 0.6 | floor) as $hn
             | (if $cut then {h: $h, t: $t}
@@ -991,19 +1039,24 @@ mnemon_clean_transcript() {
             | select(.text != "");
 
         [ inputs
+          | input_line_number as $ln
           | fromjson?
           | if type == "array" then .[] else . end
           | objects
           | try turn catch empty
+          | .ln = $ln
         ]
         # A queued message is often delivered again as the user turn itself.
         | ([.[] | select(.role == "user" and .queued != true) | .text]) as $delivered
         | map(select(.queued != true or (.text as $t | $delivered | index([$t]) | not)))
         | reduce .[] as $r ([];
+            # Merged only up to the user cap, so no one turn outgrows a chunk.
             if length > 0 and .[-1].role == $r.role
-            then .[-1].text += "\n\n" + $r.text
+               and ((.[-1].text | length) + ($r.text | length) <= $usermax)
+            then .[-1].text += "\n\n" + $r.text | .[-1].ln = $r.ln
             else . + [$r | del(.queued)] end)
-        | map(if .ts == null then del(.ts) else . end)
+        | map(if .ts == null then del(.ts) else . end
+              | if $lines then . else del(.ln) end)
     ' ${1:+"$1"}
 }
 

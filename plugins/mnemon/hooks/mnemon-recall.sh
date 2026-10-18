@@ -53,8 +53,11 @@ fi
 
 # Update recall timestamp.
 # Applied to the state on disk rather than written back from the copy read
-# above, so a digest that finished in between keeps what it recorded.
-mnemon_session_state_update "$session_id" '.last_recall_at = $n' --argjson n "$now"
+# above, so a digest that finished in between keeps what it recorded. Recall
+# runs inside the prompt's budget, so it waits at most a second for the state
+# lock and skips this timestamp rather than wait longer.
+MNEMON_LOCK_WAIT=1 MNEMON_LOCK_BUSY=skip \
+    mnemon_session_state_update "$session_id" '.last_recall_at = $n' --argjson n "$now"
 
 # One recall per prompt, however many copies of the hook are registered. Claimed
 # here rather than at the top so every gate above behaves exactly as before; only

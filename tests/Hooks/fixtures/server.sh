@@ -14,6 +14,8 @@
 #      FAKE_STATUS (answer every /mcp call with this status),
 #      FAKE_TOOL_ERROR (answer /mcp with a tool-level error; any value other
 #                       than 1 is used as the error text),
+#      FAKE_REPLAY_END (answer a session_digest starting at 0 as a replay of a
+#                       slice the server already holds, ending at this turn),
 #      FAKE_NO_STRUCTURED (answer tools/call with a result that has no
 #                          structuredContent),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
@@ -250,6 +252,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if DELAY:
             time.sleep(DELAY)
+
+        replay_end = os.environ.get("FAKE_REPLAY_END", "")
+        if replay_end:
+            try:
+                tr = json.loads(body).get("params", {}).get("arguments", {}).get("turn_range", {})
+            except (ValueError, AttributeError):
+                tr = {}
+            if tr.get("start") == 0:
+                self._reply(200, ('{"jsonrpc":"2.0","id":1,"result":{"structuredContent":'
+                                  '{"persisted":[],"replayed":true,"turn_end":%d}}}' % int(replay_end)).encode())
+                return
 
         if os.environ.get("FAKE_NO_STRUCTURED"):
             self._reply(200, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}')

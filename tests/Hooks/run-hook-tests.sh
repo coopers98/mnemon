@@ -527,7 +527,7 @@ rm -f "$MNEMON_DIR/sessions/s12.json"
 printf '{"session_id":"s12","transcript_path":"%s","hook_event_name":"Stop"}' "$tp6" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
 for _ in $(seq 1 40); do
-    [ -s "$MNEMON_DIR/capture-errors.log" ] && break
+    grep -qiE 'non-JSON|HTTP [0-9]{3}|too large' "$MNEMON_DIR/capture-errors.log" 2>/dev/null && break
     sleep 0.25
 done
 if grep -qiE 'non-JSON|HTTP [0-9]{3}|too large' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
@@ -779,7 +779,8 @@ assert_eq "$leaks" "" "cleaner: no tool output, attachment, hook output, meta, c
 for kept in USER-WORDS-ONE USER-WORDS-TWO ASSISTANT-WORDS-ONE ASSISTANT-WORDS-TWO ASSISTANT-WORDS-THREE \
     USER-WORDS-AFTER-KEYS QUEUED-WORDS-KEEP QUEUED-BLOCK-WORDS-KEEP KEEP-MID-QUOTE \
     '<system-reminder>QUOTED-TAG-KEEP</system-reminder>' '/widget:deploy COMMAND-ARGS-KEEP to staging' \
-    'ghp_short' 'github_pat_short' 'xoxb-1,' 'PASSWORD==expected' '//host:8080@x'; do
+    'ghp_short' 'github_pat_short' 'xoxb-1,' 'PASSWORD==expected' '//host:8080@x' \
+    'NOTAPASSWORD=visible' '//TODO:fix@later' 'the -----BEGIN RSA PRIVATE KEY----- header'; do
     case "$cleaned" in
         *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner: keeps %s\n' "$kept";;
         *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: lost %s\n' "$kept";;
@@ -792,7 +793,7 @@ case "$(printf '%s' "$cleaned" | jq -r '[.[] | select(.role == "user") | .text] 
         FAIL=$((FAIL+1)); printf '  FAIL: cleaner: Mnemon recall/wake text reaches the digest\n';;
     *) PASS=$((PASS+1)); printf '  ok: cleaner: Mnemon recall/wake text never reaches the digest\n';;
 esac
-secrets=$(printf '%s' "$cleaned" | grep -oE 'SECRET[A-Za-z0-9_]*|AKIAABCDEFGHIJKLMNOP|eyJhbGciOiJIUzI1NiJ9|abcdefghijklmnopqrstuvwxyz0123' | sort -u | tr '\n' ' ')
+secrets=$(printf '%s' "$cleaned" | grep -oE 'SECRET[A-Za-z0-9_]*|AKIAABCDEFGHIJKLMNOP|eyJhbGciOiJIUzI1NiJ9|abcdefghijklmnopqrstuvwxyz0123|987654321|b3BlbnNzaC1rZXkt' | sort -u | tr '\n' ' ')
 assert_eq "$secrets" "" "cleaner: every secret family is redacted"
 for family in AWS-KEY JWT 'Bearer \[REDACTED\]' OPENAI-KEY GITHUB-TOKEN SLACK-TOKEN API-KEY 'PASSWORD=\[REDACTED\]' CREDENTIALS PRIVATE-KEY; do
     if printf '%s' "$cleaned" | grep -qE "$family"; then
@@ -909,6 +910,7 @@ rm -f "$MNEMON_DIR/sessions/s27.json" "$MNEMON_DIR/sessions/s27.digest.pending"
 mkdir -p "$MNEMON_DIR/sessions/s27.digest.lock.d"; echo "$$" > "$MNEMON_DIR/sessions/s27.digest.lock.d/pid"
 printf '{"session_id":"s27","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_empty" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do [ -e "$MNEMON_DIR/sessions/s27.digest.pending" ] && break; sleep 0.1; done
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s27.json" 2>/dev/null)" "0" \
     "capture: an empty slice does not move the pointer while a digest is in flight"
 assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s27.digest.pending" 2>/dev/null)" "$(wc -l < "$tp_empty" | tr -d ' ')" \
@@ -991,32 +993,42 @@ assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s30.json" 2>/dev/nu
 kill $PD_PID 2>/dev/null
 mv "$MNEMON_DIR/config.pd.json" "$MNEMON_DIR/config.json"
 
-# Test 10m: trimming is logged. Dropping conversation to fit a cap is the
-# right call, but doing it silently is how lost turns go unnoticed.
+# Test 10m: a slice too big for one digest goes in chunks, oldest first, with
+# no gap and nothing dropped. The old caps kept the newest records and dropped
+# the rest; then a failure-triggered "shrink" lost the tail of a session that
+# ended. Each chunk ends on a line, the next starts there, and the last ends at
+# the end of the transcript -- the same boundaries on every retry.
 TR_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-FAKE_PORT="$TR_PORT" "$THIS_DIR/fixtures/server.sh" &
+TR_LOG="$MNEMON_DIR/requests-tr.log"
+: > "$TR_LOG"
+FAKE_PORT="$TR_PORT" FAKE_REQUEST_LOG="$TR_LOG" "$THIS_DIR/fixtures/server.sh" &
 TR_PID=$!
 sleep 0.5
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.tr.json"
-jq --arg e "http://127.0.0.1:$TR_PORT/mcp" '.endpoint=$e | .max_digest_bytes=2000 | .max_digest_chars=600' \
+jq --arg e "http://127.0.0.1:$TR_PORT/mcp" '.endpoint=$e | .digest_chunk_chars=1000' \
   "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
-tp_tr="$MNEMON_DIR/transcript-trim.jsonl"
+tp_tr="$MNEMON_DIR/transcript-chunks.jsonl"
 : > "$tp_tr"
 for i in $(seq 1 20); do
-    printf '{"type":"user","message":{"role":"user","content":"turn %s %s"}}\n' "$i" "$(head -c 150 /dev/zero | tr '\0' 'z')" >> "$tp_tr"
+    printf '{"type":"user","message":{"role":"user","content":"CHUNK-TURN-%s %s"}}\n' "$i" "$(head -c 150 /dev/zero | tr '\0' 'z')" >> "$tp_tr"
+    printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reply %s"}]}}\n' "$i" >> "$tp_tr"
 done
-: > "$MNEMON_DIR/capture-errors.log"
-rm -rf "$MNEMON_DIR/sessions/s31".*
+rm -f "$MNEMON_DIR/sessions/s31".*
 printf '{"session_id":"s31","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_tr" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
-sleep 1
-for cap in max_digest_bytes max_digest_chars; do
-    if grep -q "$cap" "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
-        PASS=$((PASS+1)); printf '  ok: capture: trimming to %s is logged\n' "$cap"
-    else
-        FAIL=$((FAIL+1)); printf '  FAIL: capture: trimming to %s was silent\n' "$cap"
-    fi
+for _ in $(seq 1 80); do
+    [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s31.json" 2>/dev/null)" = "40" ] && break
+    sleep 0.25
 done
+tr_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.turn_range] | map("\(.start)-\(.end)") | join(",")' "$TR_LOG")
+tr_ok=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.turn_range]
+    | (length > 1) and (.[0].start == 0) and (.[-1].end == 40)
+      and ([range(1; length) as $i | .[$i].start == .[$i - 1].end] | all)' "$TR_LOG")
+assert_eq "$tr_ok" "true" "chunking: oldest first, contiguous, to the end ($tr_ranges)"
+tr_turns=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.transcript | fromjson | .[] | .text | scan("CHUNK-TURN-[0-9]+")] | unique | length' "$TR_LOG")
+assert_eq "$tr_turns" "20" "chunking: every turn is sent, none dropped"
+assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.transcript | length] | max <= 1000' "$TR_LOG")" "true" \
+    "chunking: no chunk is over digest_chunk_chars"
 kill $TR_PID 2>/dev/null
 mv "$MNEMON_DIR/config.tr.json" "$MNEMON_DIR/config.json"
 
@@ -1045,13 +1057,17 @@ cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.bo.json"
 jq --arg e "http://127.0.0.1:$BO_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 tp_bo="$MNEMON_DIR/transcript-backoff.jsonl"
-printf '%s\n' '{"type":"user","message":{"role":"user","content":"a turn that will not digest"}}' > "$tp_bo"
+# Two lines: a one-line chunk that keeps failing is skipped (see below).
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"a turn that will not digest"}}' \
+    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"nor this"}]}}' > "$tp_bo"
 rm -rf "$MNEMON_DIR/sessions/s32".*
 : > "$MNEMON_DIR/capture-errors.log"
 bo_stop() {  # $1 = session, $2 = transcript
     printf '{"session_id":"%s","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$1" "$2" \
       | "$HOOKS_DIR/mnemon-capture.sh" || true
-    sleep 0.3
+    # The worker is detached: wait for it to take the lock (up to 1.5s -- a
+    # Stop inside a backoff wait starts none), then for it to finish.
+    for _ in $(seq 1 15); do [ -d "$MNEMON_DIR/sessions/$1.digest.lock.d" ] && break; sleep 0.1; done
     for _ in $(seq 1 60); do [ -d "$MNEMON_DIR/sessions/$1.digest.lock.d" ] || break; sleep 0.1; done
 }
 bo_wait_retry() {  # seconds the session waits before its next attempt
@@ -1069,7 +1085,7 @@ else
 fi
 bo_stop s32 "$tp_bo"
 assert_eq "$(grep -c session_digest "$BO_LOG")" "2" "backoff: a Stop inside the wait does not retry"
-assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s32.digest.pending" 2>/dev/null)" "1" \
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s32.digest.pending" 2>/dev/null)" "2" \
     "backoff: ...but records its range, so the end of the session is not lost"
 if grep -q 'retrying in 60s' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
     PASS=$((PASS+1)); printf '  ok: backoff: the wait is logged\n'
@@ -1111,32 +1127,93 @@ w=$(bo_wait_retry s32)
     || { FAIL=$((FAIL+1)); printf '  FAIL: backoff: a not-retryable failure waits %s\n' "$w"; }
 kill $BO_PID 2>/dev/null
 
-# A slice that times out every time never shrinks on its own, so it never
-# recovers. Each timeout or unreadable answer halves the next attempt, and
-# progress is made from the oldest half.
+# A retry after a failure sends exactly the same range: chunk boundaries come
+# from the file, the pointer and the chunk size alone. (The server recognises a
+# range it already stored from its start, so a call that timed out here but
+# committed there is not digested twice.)
+kill $BO_PID 2>/dev/null
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call timed out or could not connect). Nothing was stored." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
 sleep 0.5
-tp_sh="$MNEMON_DIR/transcript-shrink.jsonl"
+jq '.digest_chunk_chars = 400' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+tp_sh="$MNEMON_DIR/transcript-retry.jsonl"
 : > "$tp_sh"
-for i in 1 2 3 4 5 6 7 8; do
-    printf '{"type":"user","message":{"role":"user","content":"shrink turn %s"}}\n' "$i" >> "$tp_sh"
+for i in 1 2 3 4; do
+    printf '{"type":"user","message":{"role":"user","content":"retry turn %s %s"}}\n' "$i" "$(head -c 120 /dev/zero | tr '\0' 'r')" >> "$tp_sh"
+    printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reply %s %s"}]}}\n' "$i" "$(head -c 120 /dev/zero | tr '\0' 'a')" >> "$tp_sh"
 done
-rm -rf "$MNEMON_DIR/sessions/s34".*
+rm -f "$MNEMON_DIR/sessions/s34".*
 bo_stop s34 "$tp_sh"
+jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s34.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s34.json"
 bo_stop s34 "$tp_sh"
+sh_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.turn_range | "\(.start)-\(.end)"] | join(",")' "$BO_LOG" 2>/dev/null)
+case "$sh_ranges" in
+    0-[0-9]*,0-[0-9]*) [ "${sh_ranges%%,*}" = "${sh_ranges##*,}" ] \
+        && { PASS=$((PASS+1)); printf '  ok: retry: a failed chunk is resent as exactly the same range (%s)\n' "$sh_ranges"; } \
+        || { FAIL=$((FAIL+1)); printf '  FAIL: retry: the retried range changed: %s\n' "$sh_ranges"; };;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: retry: expected two sends of one range, got %s\n' "$sh_ranges";;
+esac
+case "$sh_ranges" in
+    *-8,*|*-8) FAIL=$((FAIL+1)); printf '  FAIL: retry: the chunk should stop short of the end with chunk size 400\n';;
+    *) PASS=$((PASS+1)); printf '  ok: retry: the chunk is the oldest part only\n';;
+esac
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s34.digest.pending" 2>/dev/null)" "8" \
+    "retry: the rest of the range is carried in the pending marker"
+
+# One line that fails again and again is skipped after three tries, logged,
+# so the rest of the session is not held behind it for ever.
+: > "$MNEMON_DIR/capture-errors.log"
+tp_one="$MNEMON_DIR/transcript-one-bad-line.jsonl"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"BAD-LINE that always fails"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"GOOD-LINE after it"}]}}'
+} > "$tp_one"
+jq '.digest_chunk_chars = 10' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+rm -f "$MNEMON_DIR/sessions/s35".*
+for _ in 1 2 3; do
+    bo_stop s35 "$tp_one"
+    jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s35.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s35.json"
+done
 kill $BO_PID 2>/dev/null
+: > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
 sleep 0.5
-jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s34.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s34.json"
-bo_stop s34 "$tp_sh"
-bo_stop s34 "$tp_sh"
-sh_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.turn_range | "\(.start)-\(.end)"] | join(",")' "$BO_LOG" 2>/dev/null)
-assert_eq "$sh_ranges" "0-8,0-4,0-2,2-8" "backoff: each timeout halves the next attempt; success resets it"
+bo_stop s35 "$tp_one"
+for _ in $(seq 1 40); do [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s35.json")" = "2" ] && break; sleep 0.1; done
+skip_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
+assert_eq "$skip_sent" "1-2" "skip: after three failures the one-line chunk is skipped and the next is sent"
+if grep -q 'line 1 failed 3 times in a row; skipping it' "$MNEMON_DIR/capture-errors.log"; then
+    PASS=$((PASS+1)); printf '  ok: skip: the skipped line is logged\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: skip: the skipped line was not logged\n'
+fi
+kill $BO_PID 2>/dev/null
+
+# A replay says where the stored slice ended. The client advances there and
+# carries the rest: the server committed 0-2 while this client timed out, and
+# the retry asks for 0-4.
+: > "$BO_LOG"
+FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" FAKE_REPLAY_END=2 "$THIS_DIR/fixtures/server.sh" &
+BO_PID=$!
+sleep 0.5
+jq 'del(.digest_chunk_chars)' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+tp_rp="$MNEMON_DIR/transcript-replay.jsonl"
+for i in 1 2 3 4; do printf '{"type":"user","message":{"role":"user","content":"replay turn %s"}}\n' "$i"; done > "$tp_rp"
+rm -f "$MNEMON_DIR/sessions/s36".*
+printf '{"session_id":"s36","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_rp" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+for _ in $(seq 1 40); do [ "$(grep -c session_digest "$BO_LOG")" -ge 2 ] && break; sleep 0.1; done
+sleep 0.5
+rp_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
+assert_eq "${rp_ranges%%,*}" "0-4" "replay: the first send asks for the whole range"
+case "$rp_ranges" in
+    0-4,2-4*) PASS=$((PASS+1)); printf '  ok: replay: the client advances to the replayed end and sends the rest\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: replay: expected 0-4 then 2-4, got %s\n' "$rp_ranges";;
+esac
 kill $BO_PID 2>/dev/null
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
 
@@ -1240,36 +1317,76 @@ assert_eq "$il_sent" "$cleaned" "capture: an inline transcript is cleaned and se
 kill $IL_PID 2>/dev/null
 mv "$MNEMON_DIR/config.il.json" "$MNEMON_DIR/config.json"
 
-# Test 10s: SessionStart says when sessions were left with undigested turns
-# after failures, and retries them. A session that ends in backoff, or with a
-# range left for a digest that then failed, otherwise waits for a Stop that
-# never comes.
-SW_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+# Test 10s: SessionStart says when sessions have turns undigested after
+# failures -- only ones with real work left -- and clears what can never be
+# retried, so the banner does not repeat for ever. Each session is retried by
+# its own next Stop (for one that has ended, when it is resumed).
 SW_DIR=$(mktemp -d)
-SW_LOG="$SW_DIR/requests.log"
-: > "$SW_LOG"
-FAKE_PORT="$SW_PORT" FAKE_REQUEST_LOG="$SW_LOG" "$THIS_DIR/fixtures/server.sh" &
-SW_PID=$!
-sleep 0.5
 mkdir -p "$SW_DIR/sessions"
-jq -n --arg e "http://127.0.0.1:$SW_PORT/mcp" '{endpoint:$e, bearer_token:"t"}' > "$SW_DIR/config.json"
-sw_tp="$SW_DIR/ended.jsonl"
-printf '%s\n' '{"type":"user","message":{"role":"user","content":"SWEPT-LAST-WORDS of a session that ended"}}' > "$sw_tp"
-jq -n --arg p "$sw_tp" '{last_digest_turn:0,last_recall_at:0,recent_drawer_ids:[],nomemo:false,disabled:false,
-    digest_failures:3,digest_retry_after:0,transcript_path:$p,cwd:"/tmp"}' > "$SW_DIR/sessions/ended1.json"
-jq -n --arg p "$sw_tp" '{last_digest_turn:0,last_recall_at:0,recent_drawer_ids:[],nomemo:false,disabled:false,
-    digest_failures:1,digest_retry_after:9999999999,transcript_path:$p,cwd:"/tmp"}' > "$SW_DIR/sessions/waiting1.json"
+jq -n --arg e "http://127.0.0.1:1/mcp" '{endpoint:$e, bearer_token:"t", recall_timeout_ms:300}' > "$SW_DIR/config.json"
+sw_tp="$SW_DIR/live.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"one"}}' '{"type":"user","message":{"role":"user","content":"two"}}' > "$sw_tp"
+sw_state() {  # <sid> <pointer> <failures> <transcript> [nomemo]
+    jq -n --argjson p "$2" --argjson f "$3" --arg t "$4" --argjson n "${5:-false}" \
+        '{last_digest_turn:$p,recent_drawer_ids:[],nomemo:$n,disabled:false,digest_failures:$f,digest_retry_after:0,transcript_path:$t}' \
+        > "$SW_DIR/sessions/$1.json"
+}
+sw_state failed1 0 2 "$sw_tp"                       # counts: failures, lines past the pointer
+sw_state caughtup 2 1 "$sw_tp"                      # failures but nothing past the pointer
+sw_state private1 0 2 "$sw_tp" true                 # @nomemo
+sw_state gone1 0 2 "$SW_DIR/deleted.jsonl"          # transcript gone: cleared
+sw_state pend1 0 0 "$sw_tp"; printf '{"path":"%s","end":2}' "$sw_tp" > "$SW_DIR/sessions/pend1.digest.pending"   # counts
+sw_state spent1 2 0 "$sw_tp"; printf '{"path":"%s","end":1}' "$sw_tp" > "$SW_DIR/sessions/spent1.digest.pending" # removed
 sw_out=$(printf '{"session_id":"new1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
     | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$SW_DIR" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
 case "$sw_out" in
-    *"Mnemon: 2 session(s) have undigested turns after failures"*) PASS=$((PASS+1)); printf '  ok: wake: says how many sessions have undigested turns\n';;
-    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: no undigested-turns banner, got: %s\n' "$(printf '%s' "$sw_out" | head -c 200)";;
+    *"Mnemon: 2 session(s) have undigested turns after failures"*) PASS=$((PASS+1)); printf '  ok: wake: counts only sessions with work left\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: wrong undigested banner, got: %s\n' "$(printf '%s' "$sw_out" | head -c 200)";;
 esac
-for _ in $(seq 1 40); do grep -q 'SWEPT-LAST-WORDS' "$SW_LOG" 2>/dev/null && break; sleep 0.25; done
-assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.session_id] | join(",")' "$SW_LOG" 2>/dev/null)" "ended1" \
-    "wake: retries a failed session whose wait is over, and only that one"
-kill $SW_PID 2>/dev/null
-rm -rf "$SW_DIR"
+assert_eq "$([ -e "$SW_DIR/sessions/spent1.digest.pending" ] && echo kept || echo removed)" "removed" \
+    "wake: a pending range the pointer has passed is removed"
+assert_eq "$(jq -r '.digest_failures' "$SW_DIR/sessions/gone1.json")" "0" \
+    "wake: a session whose transcript is gone is given up on"
+grep -q 'session=gone1 has undigested turns but its transcript' "$SW_DIR/capture-errors.log" 2>/dev/null \
+    && { PASS=$((PASS+1)); printf '  ok: wake: giving up is logged\n'; } \
+    || { FAIL=$((FAIL+1)); printf '  FAIL: wake: giving up was not logged\n'; }
+sw_out2=$(printf '{"session_id":"new2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$SW_DIR" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$sw_out2" in
+    *"Mnemon: 2 session(s)"*) PASS=$((PASS+1)); printf '  ok: wake: the count is stable once tidied\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: second banner differs: %s\n' "$(printf '%s' "$sw_out2" | head -c 120)";;
+esac
+
+# Cheap however many sessions a device has seen: one grep, not a fork each.
+for i in $(seq 1 1500); do
+    printf '{"last_digest_turn":0,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' > "$SW_DIR/sessions/bulk$i.json"
+done
+sw_start=$(date +%s%N)
+sw_n=$(MNEMON_DIR="$SW_DIR" bash -c '. "$1/lib/common.sh"; mnemon_undigested_sessions' _ "$HOOKS_DIR")
+sw_ms=$(( ($(date +%s%N) - sw_start) / 1000000 ))
+assert_eq "$sw_n" "2" "wake: counts correctly among 1,500 sessions"
+if [ "$sw_ms" -lt 500 ]; then
+    PASS=$((PASS+1)); printf '  ok: wake: 1,500 sessions are scanned in %sms\n' "$sw_ms"
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: wake: scanning 1,500 sessions took %sms\n' "$sw_ms"
+fi
+case "$SW_DIR" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${SW_DIR:?}" ;; esac
+
+# Recall waits at most a second for the state lock, and then skips its
+# timestamp rather than hold up the prompt.
+RL_LOCK="$MNEMON_DIR/sessions/s37.state.lock.d"
+mkdir -p "$RL_LOCK"; echo "$$" > "$RL_LOCK/pid"
+: > "$MNEMON_DIR/capture-errors.log"
+rl_start=$(date +%s)
+printf '{"session_id":"s37","cwd":"/tmp","prompt":"a substantive prompt about the retry design"}' \
+  | "$HOOKS_DIR/mnemon-recall.sh" >/dev/null 2>&1 || true
+rl_secs=$(( $(date +%s) - rl_start ))
+if [ "$rl_secs" -le 3 ] && grep -q "s37.state.lock.d busy for 1s; skipped" "$MNEMON_DIR/capture-errors.log"; then
+    PASS=$((PASS+1)); printf '  ok: recall: a busy state lock skips the timestamp after a second\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: recall: busy lock took %ss / not logged\n' "$rl_secs"
+fi
+case "$RL_LOCK" in "$MNEMON_DIR"/*) rm -rf "${RL_LOCK:?}" ;; esac
 
 # --- Refresh tests -----------------------------------------------------------
 # A device enrolled through the device grant holds a one-hour access token and a
@@ -2037,7 +2154,8 @@ esac
 assert_eq "$(jq -r .bearer_token "$DR1/config.json")" "$DOC_JWT1" "doctor: a healthy run does not touch the config"
 # Sessions left with undigested turns after failures are part of "recent errors".
 mkdir -p "$DR1/sessions"
-printf '{"last_digest_turn":0,"digest_failures":2,"digest_retry_after":0}' > "$DR1/sessions/failed.json"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"x"}}' > "$DR1/failed-transcript.jsonl"
+jq -n --arg t "$DR1/failed-transcript.jsonl" '{last_digest_turn:0,digest_failures:2,digest_retry_after:0,transcript_path:$t}' > "$DR1/sessions/failed.json"
 doc_run "$DR1"
 doc_line "warn" "1 session.*undigested" "doctor: reports sessions with undigested turns after failures"
 rm -f "$DR1/sessions/failed.json"

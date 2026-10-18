@@ -51,34 +51,14 @@ fi
 # session_id and so gets fresh defaults anyway.
 mnemon_session_state "$session_id" > /dev/null
 
-# Sessions left with turns undigested after failures. A session that ended
-# while its digest was backing off, or with a range handed to a digest that
-# then failed, has no further Stop to retry it -- so say so here, and retry the
-# ones whose wait is over by running capture for them in the background. At
-# most three per SessionStart; capture applies its own backoff and checks.
-undigested=$(mnemon_undigested_sessions)
+# Sessions left with turns undigested after failures. Each is retried by its
+# own next Stop -- for a session that has ended, when it is resumed. Say so
+# here rather than leave it to a log nobody reads; --tidy also clears what can
+# never be retried, so this does not repeat for ever.
+undigested=$(mnemon_undigested_sessions --tidy)
 if [ "${undigested:-0}" -gt 0 ]; then
-    printf 'Mnemon: %s session(s) have undigested turns after failures; they will retry. See %s\n' \
+    printf 'Mnemon: %s session(s) have undigested turns after failures; each is retried the next time that session runs. See %s\n' \
         "$undigested" "$MNEMON_ERROR_LOG"
-    swept=0
-    now=$(date +%s)
-    for f in "$MNEMON_SESSIONS_DIR"/*.json; do
-        [ "$swept" -ge 3 ] && break
-        [ -e "$f" ] || continue
-        sid="${f##*/}"; sid="${sid%.json}"
-        [ -d "$MNEMON_SESSIONS_DIR/${sid}.digest.lock.d" ] && continue
-        if ! grep -qE '"digest_failures": *[1-9]' "$f" 2>/dev/null \
-            && [ ! -e "$MNEMON_SESSIONS_DIR/${sid}.digest.pending" ]; then
-            continue
-        fi
-        payload=$(jq -c --arg sid "$sid" --argjson now "$now" '
-            select((.digest_retry_after // 0) <= $now and (.transcript_path // "") != "")
-            | {session_id: $sid, transcript_path, cwd: (.cwd // ""), hook_event_name: "Stop"}' "$f" 2>/dev/null)
-        [ -n "$payload" ] || continue
-        [ -r "$(printf '%s' "$payload" | jq -r '.transcript_path')" ] || continue
-        ( printf '%s' "$payload" | "$SCRIPT_DIR/mnemon-capture.sh" ) >/dev/null 2>&1 < /dev/null &
-        swept=$((swept + 1))
-    done
 fi
 
 if mnemon_refresh_available; then

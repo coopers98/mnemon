@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Mnemon Stop hook: slice, clean, dispatch detached digest worker.
+# Mnemon Stop hook: decide whether there is anything to digest, then dispatch
+# the detached digest worker, which slices, cleans and sends.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,104 +23,86 @@ mnemon_capture_ignored "$(mnemon_repo_name "$cwd")" && exit 0
 # `.transcript` key that is never sent makes capture a permanent silent no-op.
 # An inline array is still accepted so callers that supply one keep working.
 if [ -z "$transcript" ] || [ "$transcript" = "null" ]; then
-    [ -n "$transcript_path" ] && [ -r "$transcript_path" ] || exit 0
+    [ -n "$transcript_path" ] || exit 0
+    if [ ! -r "$transcript_path" ]; then
+        mnemon_log_error "capture for session=$session_id: transcript $transcript_path is not readable; nothing sent"
+        exit 0
+    fi
     # No turn index is supplied; the transcript's line count is monotonic, so it
-    # serves as one. The content itself is read later, once the last digested
-    # turn is known, so only the new turns are loaded.
+    # serves as one.
     turn_index=$(wc -l < "$transcript_path" | tr -d ' ')
 else
     turn_index=$(printf '%s' "$input" | jq -r '.turn_index // 0')
-    [ -z "$transcript" ] || [ "$transcript" = "null" ] && exit 0
 fi
 
 mnemon_token > /dev/null || exit 0
 
 state=$(mnemon_session_state "$session_id")
-[ "$(printf '%s' "$state" | jq -r '.nomemo')" = "true" ] && exit 0
-[ "$(printf '%s' "$state" | jq -r '.disabled')" = "true" ] && exit 0
+IFS=$'\t' read -r nomemo disabled last_turn retry_after stored_path <<< \
+    "$(printf '%s' "$state" | jq -r '[(.nomemo // false), (.disabled // false), (.last_digest_turn // 0),
+        ((.digest_retry_after // 0) | floor), (.transcript_path // "")] | @tsv')"
+[ "$nomemo" = "true" ] && exit 0
+[ "$disabled" = "true" ] && exit 0
 
-last_turn=$(printf '%s' "$state" | jq -r '.last_digest_turn')
+# A range handed to a digest that has since moved past it is spent.
+pending="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
+if [ -e "$pending" ] && [ "$(jq -r '.end // 0' "$pending" 2>/dev/null)" -le "$last_turn" ] 2>/dev/null; then
+    rm -f "$pending"
+fi
+
 [ "$turn_index" -le "$last_turn" ] && exit 0
 
-# Where this session's transcript is, so SessionStart can retry a session that
-# ended with turns undigested (see mnemon-wake.sh).
-if [ -n "$transcript_path" ]; then
-    mnemon_session_state_update "$session_id" '.transcript_path = $p | .cwd = $c' \
-        --arg p "$transcript_path" --arg c "$cwd"
+# Where this session's transcript is, so SessionStart can tell whether a
+# session left with undigested turns still has them (mnemon_undigested_sessions).
+# Written only when it changes.
+if [ -n "$transcript_path" ] && [ "$transcript_path" != "$stored_path" ]; then
+    mnemon_session_state_update "$session_id" '.transcript_path = $p' --arg p "$transcript_path"
 fi
 
 # Back off after failures (the worker sets digest_retry_after: the next Stop
 # after one failure, then 60s doubling to 30 minutes; 30 minutes at once for a
 # failure the server says retrying cannot fix). A Stop inside the wait still
 # records its range, so the end of a session that finishes while backing off
-# is retried -- by a later Stop, or by the next SessionStart.
-retry_after=$(printf '%s' "$state" | jq -r '.digest_retry_after // 0 | floor')
+# is retried by the next Stop -- including when the session is resumed.
 if [ "$(date +%s)" -lt "$retry_after" ]; then
     [ -n "$transcript_path" ] && mnemon_digest_pending_add "$session_id" "$transcript_path" "$turn_index"
     exit 0
 fi
 
-# After a timeout, a smaller slice (see mnemon_digest_end). Only a transcript
-# file can be sliced; an inline transcript goes whole.
-[ -n "$transcript_path" ] && turn_index=$(mnemon_digest_end "$state" "$last_turn" "$turn_index")
-
+# The digest worker ships alongside this script. It used to be written here from
+# a heredoc on first run, guarded by [ ! -x ], which meant a copy from an older
+# release shadowed its own source forever -- and under a plugin the hooks
+# directory is a replaced-on-update cache that must not be written to at all.
 worker="$SCRIPT_DIR/lib/digest-worker.sh"
 if [ ! -r "$worker" ]; then
     mnemon_log_error "digest worker missing at $worker - reinstall the Mnemon hooks"
     exit 0
 fi
 
-# Send only the turns added since the last digest. Re-sending the whole
-# transcript every time re-digests content already stored and grows without
-# bound: a reverse proxy rejects the request with 413 once the body passes its
-# limit (1MiB by default), and the HTML error page comes back to the caller as
-# a jq parse error rather than anything resembling "too big".
+# A transcript file is sliced, cleaned and sent by the worker, holding the
+# session's lock: chunk boundaries then follow from the pointer it reads under
+# that lock, and the Stop hook does none of the work. An inline transcript has
+# no file to come back to, so it is cleaned here and sent whole.
 #
 # Only the conversation goes to the digest: user and assistant text, with tool
 # I/O, thinking, attachments, hook output (Mnemon's own recall and wake text
 # among it) and harness wrappers removed and secrets redacted. See
 # mnemon_clean_transcript.
-text_tmp="$MNEMON_SESSIONS_DIR/${session_id}.digest-input.$$.txt"
-raw_tmp="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
-if [ -n "$transcript_path" ]; then
-    mnemon_slice_transcript "$transcript_path" "$last_turn" "$turn_index" "$raw_tmp" \
-        || { rm -f "$raw_tmp"; exit 0; }
-else
+text_tmp=""
+if [ -z "$transcript_path" ]; then
+    text_tmp="$MNEMON_SESSIONS_DIR/${session_id}.digest-input.$$.txt"
+    raw_tmp="$MNEMON_SESSIONS_DIR/${session_id}.inline.$$.jsonl"
     printf '%s' "$transcript" > "$raw_tmp"
-fi
-mnemon_digest_text "$raw_tmp" "$text_tmp"
-rc=$?
-rm -f "$raw_tmp"
-
-case "$rc" in
-    0) ;;
-    1)
-        # No conversation in the slice: tool calls and hook output only. It
-        # starts at last_digest_turn, so nothing before it is undigested, and
-        # moving past it keeps a tool-only stretch from making every Stop
-        # re-read an ever-growing tail. Unless a digest is running: it may fail
-        # and must be able to resend from its own start, which an advanced
-        # pointer would skip. The range goes to that digest instead.
-        if [ -d "$MNEMON_SESSIONS_DIR/${session_id}.digest.lock.d" ]; then
-            [ -n "$transcript_path" ] && mnemon_digest_pending_add "$session_id" "$transcript_path" "$turn_index"
-        else
-            mnemon_session_state_update "$session_id" '.last_digest_turn = $t' --argjson t "$turn_index"
-        fi
-        exit 0
-        ;;
-    *)
-        # Cleaning failed and was logged. The pointer stays, so the slice is
-        # tried again rather than skipped.
+    mnemon_digest_text "$raw_tmp" "$text_tmp" > /dev/null
+    rc=$?
+    rm -f "$raw_tmp"
+    if [ "$rc" -ne 0 ]; then
+        # 1: no conversation; 2: cleaning failed (logged).
         rm -f "$text_tmp"
+        [ "$rc" -eq 1 ] && mnemon_session_state_update "$session_id" '.last_digest_turn = $t' --argjson t "$turn_index"
         exit 0
-        ;;
-esac
-
-# The digest worker ships alongside this script. It used to be written here from
-# a heredoc on first run, guarded by [ ! -x ], which meant a copy from an older
-# release shadowed its own source forever -- and under a plugin the hooks
-# directory is a replaced-on-update cache that must not be written to at all.
-# (Checked above, before any work is done.)
+    fi
+fi
 
 project=$(mnemon_project_name "$cwd")
 

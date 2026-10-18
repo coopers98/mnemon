@@ -49,6 +49,26 @@ assert_eq() {
     fi
 }
 
+# Poll until a command succeeds. Args: <seconds> <command...>. Fixed sleeps
+# made the suite flaky under load: a worker that had not finished, or a fake
+# server not yet listening, read as a failure.
+wait_until() {
+    local end=$((SECONDS + $1))
+    shift
+    until "$@"; do
+        [ "$SECONDS" -ge "$end" ] && return 1
+        sleep 0.05
+    done
+}
+# Wait for a fake server to answer. Args: <port>.
+wait_server() { wait_until 10 curl -s -o /dev/null "http://127.0.0.1:$1/"; }
+# Stop a fake server and wait until it has exited, so the next one can bind
+# its port.
+stop_server() { kill "$@" 2>/dev/null; wait "$@" 2>/dev/null; return 0; }
+# Wait until a session has no digest worker running. Args: <session_id>.
+_no_worker() { ! pgrep -f "digest-worker.sh $1 " >/dev/null 2>&1; }
+wait_worker() { wait_until 30 _no_worker "$1"; }
+
 # Start the fake server in the background.
 REQ_LOG="$MNEMON_DIR/requests.log"
 : > "$REQ_LOG"
@@ -56,7 +76,7 @@ export FAKE_REQUEST_LOG="$REQ_LOG"
 "$THIS_DIR/fixtures/server.sh" &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; rm -rf "$MNEMON_DIR"' EXIT
-sleep 0.5
+wait_server "$FAKE_PORT"
 
 # Test 0: the digest worker ships as a real, version-controlled file rather than
 # being written at runtime from a heredoc. Under a plugin the hooks directory is
@@ -112,6 +132,7 @@ tp8="$MNEMON_DIR/transcript-wedged.jsonl"
 printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"a normal turn"}]}}' > "$tp8"
 printf '{"session_id":"wedged","transcript_path":"%s","hook_event_name":"Stop"}' "$tp8" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker wedged
 sleep 2
 if grep -q 'argjson' "$MNEMON_DIR/capture-errors.log" 2>/dev/null; then
     FAIL=$((FAIL+1)); printf '  FAIL: capture still wedges on a zero-byte state file\n'
@@ -176,7 +197,7 @@ mv "$MNEMON_DIR/config.exp.json" "$MNEMON_DIR/config.json"
 TE_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$TE_PORT" FAKE_TOOL_ERROR=1 "$THIS_DIR/fixtures/server.sh" &
 TE_PID=$!
-sleep 0.5
+wait_server "$TE_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.te.json"
 jq --arg e "http://127.0.0.1:$TE_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -189,7 +210,7 @@ if grep -qiE 'does not have access|tool error|isError' "$MNEMON_DIR/capture-erro
 else
     FAIL=$((FAIL+1)); printf '  FAIL: tool-level error was silent: [%s]\n' "$(head -1 "$MNEMON_DIR/capture-errors.log" 2>/dev/null)"
 fi
-kill $TE_PID 2>/dev/null
+stop_server $TE_PID
 mv "$MNEMON_DIR/config.te.json" "$MNEMON_DIR/config.json"
 
 # Test 1: recall hook short-circuits on too-short prompt.
@@ -230,7 +251,7 @@ assert_eq "$out2" "" "recall: recent-fire suppression"
 SLOW_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$SLOW_PORT" FAKE_DELAY=1 "$THIS_DIR/fixtures/server.sh" &
 SLOW_PID=$!
-sleep 0.5
+wait_server "$SLOW_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.orig.json"
 
 set_budget() {
@@ -254,7 +275,7 @@ case "$out" in
     *) FAIL=$((FAIL+1)); printf '  FAIL: recall: budget above round trip should allow it, got: %s\n' "$out";;
 esac
 
-kill $SLOW_PID 2>/dev/null
+stop_server $SLOW_PID
 mv "$MNEMON_DIR/config.orig.json" "$MNEMON_DIR/config.json"
 
 # Test 9: capture accepts the payload Claude Code actually sends. The Stop hook
@@ -266,6 +287,7 @@ printf '%s\n' \
   '{"type":"assistant","message":{"role":"assistant","content":"we chose exponential backoff"}}' > "$tp"
 printf '{"session_id":"s7","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s7
 ldt=0
 for _ in $(seq 1 40); do
     ldt=$(jq -r '.last_digest_turn // 0' "$MNEMON_DIR/sessions/s7.json" 2>/dev/null || echo 0)
@@ -289,7 +311,7 @@ BIG_LOG="$MNEMON_DIR/requests-big.log"
 : > "$BIG_LOG"
 FAKE_PORT="$BIG_PORT" FAKE_REQUEST_LOG="$BIG_LOG" "$THIS_DIR/fixtures/server.sh" &
 BIG_PID=$!
-sleep 0.5
+wait_server "$BIG_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.big.json"
 jq --arg e "http://127.0.0.1:$BIG_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -302,6 +324,7 @@ for i in 1 2 3; do
 done
 printf '{"session_id":"s9","transcript_path":"%s","hook_event_name":"Stop"}' "$tp3" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s9
 for _ in $(seq 1 120); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -316,7 +339,7 @@ else
         printf '    worker log: (empty)\n'
     fi
 fi
-kill $BIG_PID 2>/dev/null
+stop_server $BIG_PID
 mv "$MNEMON_DIR/config.big.json" "$MNEMON_DIR/config.json"
 
 # Test 10a: capture sends only the turns added since the last digest. The
@@ -326,7 +349,7 @@ mv "$MNEMON_DIR/config.big.json" "$MNEMON_DIR/config.json"
 : > "$BIG_LOG"
 FAKE_PORT="$BIG_PORT2" FAKE_REQUEST_LOG="$BIG_LOG" "$THIS_DIR/fixtures/server.sh" &
 SLICE_PID=$!
-sleep 0.5
+wait_server "$BIG_PORT2"
 jq --arg e "http://127.0.0.1:$BIG_PORT2/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 
@@ -340,6 +363,7 @@ printf '{"last_digest_turn":2,"last_recall_at":0,"recent_drawer_ids":[],"nomemo"
   > "$MNEMON_DIR/sessions/s10.json"
 printf '{"session_id":"s10","transcript_path":"%s","hook_event_name":"Stop"}' "$tp4" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s10
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -366,6 +390,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text"
 rm -f "$MNEMON_DIR/sessions/s12.json"
 printf '{"session_id":"s12","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$proj_repo/sub" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s12
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -385,6 +410,7 @@ mkdir -p "$scratch"
 rm -f "$MNEMON_DIR/sessions/s15.json"
 printf '{"session_id":"s15","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$scratch" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s15
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -409,6 +435,7 @@ mkdir -p "$plain_dir"
 rm -f "$MNEMON_DIR/sessions/s13.json"
 printf '{"session_id":"s13","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$plain_dir" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s13
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -428,6 +455,7 @@ jq '.project_ignore=["widget-repo"]' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.
 rm -f "$MNEMON_DIR/sessions/s14.json"
 printf '{"session_id":"s14","transcript_path":"%s","hook_event_name":"Stop","cwd":"%s"}' "$tp_proj" "$proj_repo" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s14
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -468,6 +496,7 @@ done
 rm -f "$MNEMON_DIR/sessions/s11.json"
 printf '{"session_id":"s11","transcript_path":"%s","hook_event_name":"Stop"}' "$tp5" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s11
 for _ in $(seq 1 60); do
     grep -q 'session_digest' "$BIG_LOG" 2>/dev/null && break
     sleep 0.25
@@ -480,7 +509,7 @@ elif [ "$body_bytes" -gt 1048576 ]; then
 else
     PASS=$((PASS+1)); printf '  ok: capture: caps the request body below the 1MiB proxy limit (%s bytes)\n' "$body_bytes"
 fi
-kill $SLICE_PID 2>/dev/null
+stop_server $SLICE_PID
 
 # Test 10: capture strips tool I/O nested inside message.content. Real Claude
 # Code records are {"type":"assistant","message":{"content":[{"type":"tool_result",...}]}},
@@ -493,6 +522,7 @@ tp2="$MNEMON_DIR/transcript2.jsonl"
 } > "$tp2"
 printf '{"session_id":"s8","transcript_path":"%s","hook_event_name":"Stop"}' "$tp2" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s8
 for _ in $(seq 1 40); do
     grep -q 'session_digest' "$REQ_LOG" 2>/dev/null && break
     sleep 0.25
@@ -515,7 +545,7 @@ fi
 ERR_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$ERR_PORT" FAKE_STATUS=413 "$THIS_DIR/fixtures/server.sh" &
 ERR_PID=$!
-sleep 0.5
+wait_server "$ERR_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.err.json"
 jq --arg e "http://127.0.0.1:$ERR_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -526,6 +556,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text"
 rm -f "$MNEMON_DIR/sessions/s12.json"
 printf '{"session_id":"s12","transcript_path":"%s","hook_event_name":"Stop"}' "$tp6" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s12
 for _ in $(seq 1 40); do
     grep -qiE 'non-JSON|HTTP [0-9]{3}|too large' "$MNEMON_DIR/capture-errors.log" 2>/dev/null && break
     sleep 0.25
@@ -535,7 +566,7 @@ if grep -qiE 'non-JSON|HTTP [0-9]{3}|too large' "$MNEMON_DIR/capture-errors.log"
 else
     FAIL=$((FAIL+1)); printf '  FAIL: non-JSON response not reported clearly: %s\n' "$(head -1 "$MNEMON_DIR/capture-errors.log" 2>/dev/null)"
 fi
-kill $ERR_PID 2>/dev/null
+stop_server $ERR_PID
 mv "$MNEMON_DIR/config.err.json" "$MNEMON_DIR/config.json"
 
 # Test 10f: requests carry the Accept header MCP Streamable HTTP requires.
@@ -548,7 +579,7 @@ HDR_LOG="$MNEMON_DIR/headers.log"
 : > "$HDR_LOG"
 FAKE_PORT="$HDR_PORT" FAKE_HEADER_LOG="$HDR_LOG" "$THIS_DIR/fixtures/server.sh" &
 HDR_PID=$!
-sleep 0.5
+wait_server "$HDR_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.hdr.json"
 jq --arg e "http://127.0.0.1:$HDR_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -564,7 +595,7 @@ if grep -qi '^Accept:.*application/json' "$HDR_LOG" 2>/dev/null; then
 else
     FAIL=$((FAIL+1)); printf '  FAIL: no JSON Accept header sent (auth failures come back as 302 HTML)\n'
 fi
-kill $HDR_PID 2>/dev/null
+stop_server $HDR_PID
 mv "$MNEMON_DIR/config.hdr.json" "$MNEMON_DIR/config.json"
 
 # Test 10d: an expired token is reported. Laravel answers 401 with valid JSON
@@ -574,7 +605,7 @@ mv "$MNEMON_DIR/config.hdr.json" "$MNEMON_DIR/config.json"
 AUTH_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$AUTH_PORT" FAKE_STATUS=401 "$THIS_DIR/fixtures/server.sh" &
 AUTH_PID=$!
-sleep 0.5
+wait_server "$AUTH_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.auth.json"
 jq --arg e "http://127.0.0.1:$AUTH_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -585,6 +616,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text"
 rm -f "$MNEMON_DIR/sessions/s13.json"
 printf '{"session_id":"s13","transcript_path":"%s","hook_event_name":"Stop"}' "$tp7" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s13
 for _ in $(seq 1 40); do
     [ -s "$MNEMON_DIR/capture-errors.log" ] && break
     sleep 0.25
@@ -594,7 +626,7 @@ if grep -qiE '401|unautheni?ticated|expired|auth' "$MNEMON_DIR/capture-errors.lo
 else
     FAIL=$((FAIL+1)); printf '  FAIL: 401 produced no log entry (silent auth failure)\n'
 fi
-kill $AUTH_PID 2>/dev/null
+stop_server $AUTH_PID
 mv "$MNEMON_DIR/config.auth.json" "$MNEMON_DIR/config.json"
 
 # Test 10e: SessionStart must not rewind the digest pointer. It fires on resume
@@ -621,7 +653,7 @@ FAKE_PORT="$DE_PORT" FAKE_REQUEST_LOG="$DE_LOG" \
   FAKE_TOOL_ERROR="The digest did not run: the model call failed with HTTP 503. Nothing was stored. This is retryable: send the same turn range again." \
   "$THIS_DIR/fixtures/server.sh" &
 DE_PID=$!
-sleep 0.5
+wait_server "$DE_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.de.json"
 jq --arg e "http://127.0.0.1:$DE_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -638,26 +670,23 @@ printf '{"last_digest_turn":2,"last_recall_at":0,"recent_drawer_ids":[],"nomemo"
   > "$MNEMON_DIR/sessions/s20.json"
 printf '{"session_id":"s20","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_de" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
-for _ in $(seq 1 40); do
-    grep -q 'did not run' "$MNEMON_DIR/capture-errors.log" 2>/dev/null && break
-    sleep 0.25
-done
-sleep 0.5
+wait_worker s20
 if ! grep -q 'session_digest' "$DE_LOG" 2>/dev/null; then
     FAIL=$((FAIL+1)); printf '  FAIL: capture: the digest never reached the server\n'
 else
     assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" "2" \
         "capture: a digest that did not run leaves last_digest_turn where it was"
 fi
-kill $DE_PID 2>/dev/null
+stop_server $DE_PID
 
 # ...and the next Stop sends the same range again, to a server that is back.
 : > "$DE_LOG"
 FAKE_PORT="$DE_PORT" FAKE_REQUEST_LOG="$DE_LOG" "$THIS_DIR/fixtures/server.sh" &
 DE_PID=$!
-sleep 0.5
+wait_server "$DE_PORT"
 printf '{"session_id":"s20","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_de" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s20
 for _ in $(seq 1 40); do
     [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" = "4" ] && break
     sleep 0.25
@@ -666,7 +695,7 @@ retried=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.ar
 assert_eq "$retried" "2-4" "capture: after a failed digest the next Stop re-sends the same range"
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" "4" \
     "capture: the retried digest advances last_digest_turn once it succeeds"
-kill $DE_PID 2>/dev/null
+stop_server $DE_PID
 mv "$MNEMON_DIR/config.de.json" "$MNEMON_DIR/config.json"
 
 # Test 10h: the digest pointer only moves forward. It was written unconditionally,
@@ -693,7 +722,7 @@ WK_LOG="$MNEMON_DIR/requests-wk.log"
 : > "$WK_LOG"
 FAKE_PORT="$WK_PORT" FAKE_REQUEST_LOG="$WK_LOG" FAKE_DELAY=1 "$THIS_DIR/fixtures/server.sh" &
 WK_PID=$!
-sleep 0.5
+wait_server "$WK_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.wk.json"
 jq --arg e "http://127.0.0.1:$WK_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -752,7 +781,7 @@ printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s23.in"
 "$HOOKS_DIR/lib/digest-worker.sh" s23 0 4 "$MNEMON_DIR/sessions/s23.in" "" "" >/dev/null 2>&1
 assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
     "worker: a lock older than the stale limit is recovered"
-kill $WK_PID 2>/dev/null
+stop_server $WK_PID
 mv "$MNEMON_DIR/config.wk.json" "$MNEMON_DIR/config.json"
 
 # Test 10j: capture sends the conversation and nothing else. The old filter
@@ -911,13 +940,14 @@ CL_LOG="$MNEMON_DIR/requests-cl.log"
 : > "$CL_LOG"
 FAKE_PORT="$CL_PORT" FAKE_REQUEST_LOG="$CL_LOG" "$THIS_DIR/fixtures/server.sh" &
 CL_PID=$!
-sleep 0.5
+wait_server "$CL_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.cl.json"
 jq --arg e "http://127.0.0.1:$CL_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 rm -f "$MNEMON_DIR/sessions/s25.json"
 printf '{"session_id":"s25","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$SHAPES" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s25
 for _ in $(seq 1 40); do
     grep -q 'session_digest' "$CL_LOG" 2>/dev/null && break
     sleep 0.25
@@ -926,7 +956,7 @@ sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.argum
 assert_eq "$sent" "$cleaned" "capture: sends exactly the cleaned transcript"
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s25.json")" "$(wc -l < "$SHAPES" | tr -d ' ')" \
     "capture: the pointer still counts raw transcript lines"
-kill $CL_PID 2>/dev/null
+stop_server $CL_PID
 mv "$MNEMON_DIR/config.cl.json" "$MNEMON_DIR/config.json"
 
 # A slice with nothing left after cleaning -- only tool calls and hook output --
@@ -936,7 +966,7 @@ mv "$MNEMON_DIR/config.cl.json" "$MNEMON_DIR/config.json"
 : > "$CL_LOG"
 FAKE_PORT="$CL_PORT" FAKE_REQUEST_LOG="$CL_LOG" "$THIS_DIR/fixtures/server.sh" &
 CL_PID=$!
-sleep 0.5
+wait_server "$CL_PORT"
 jq --arg e "http://127.0.0.1:$CL_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 tp_empty="$MNEMON_DIR/transcript-noconv.jsonl"
@@ -944,6 +974,7 @@ grep -E '"type":"(attachment|queue-operation|last-prompt)"' "$SHAPES" | grep -v 
 rm -f "$MNEMON_DIR/sessions/s26.json"
 printf '{"session_id":"s26","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_empty" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s26
 sleep 1.5
 assert_eq "$(grep -c 'session_digest' "$CL_LOG" 2>/dev/null)" "0" "capture: a slice with no conversation sends no digest"
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s26.json" 2>/dev/null)" "$(wc -l < "$tp_empty" | tr -d ' ')" \
@@ -961,7 +992,7 @@ assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s27.json" 2>/dev/nu
 assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s27.digest.pending" 2>/dev/null)" "$(wc -l < "$tp_empty" | tr -d ' ')" \
     "capture: ...it leaves the range for that digest to finish"
 rm -rf "$MNEMON_DIR/sessions/s27".*
-kill $CL_PID 2>/dev/null
+stop_server $CL_PID
 mv "$MNEMON_DIR/config.cl.json" "$MNEMON_DIR/config.json" 2>/dev/null
 
 # Test 10k: a state write that is not a JSON object is refused. An empty $json
@@ -985,7 +1016,7 @@ assert_eq "$(jq -c '[.last_digest_turn, .nomemo, .recent_drawer_ids]' "$MNEMON_D
 NS_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$NS_PORT" FAKE_NO_STRUCTURED=1 "$THIS_DIR/fixtures/server.sh" &
 NS_PID=$!
-sleep 0.5
+wait_server "$NS_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.ns.json"
 jq --arg e "http://127.0.0.1:$NS_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -995,7 +1026,7 @@ printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s29.in"
 "$HOOKS_DIR/lib/digest-worker.sh" s29 0 4 "$MNEMON_DIR/sessions/s29.in" "" "" >/dev/null 2>&1
 assert_eq "$(jq -c '[.last_digest_turn, .recent_drawer_ids]' "$MNEMON_DIR/sessions/s29.json" 2>/dev/null)" "[4,[5]]" \
     "worker: a result without structuredContent still advances and keeps the state"
-kill $NS_PID 2>/dev/null
+stop_server $NS_PID
 mv "$MNEMON_DIR/config.ns.json" "$MNEMON_DIR/config.json"
 
 # Test 10l: a Stop that arrives while a digest runs is not thrown away. The
@@ -1007,7 +1038,7 @@ PD_LOG="$MNEMON_DIR/requests-pd.log"
 : > "$PD_LOG"
 FAKE_PORT="$PD_PORT" FAKE_REQUEST_LOG="$PD_LOG" FAKE_DELAY=2 "$THIS_DIR/fixtures/server.sh" &
 PD_PID=$!
-sleep 0.5
+wait_server "$PD_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.pd.json"
 jq --arg e "http://127.0.0.1:$PD_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -1019,13 +1050,14 @@ tp_pd="$MNEMON_DIR/transcript-pending.jsonl"
 rm -rf "$MNEMON_DIR/sessions/s30".*
 printf '{"session_id":"s30","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_pd" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
-for _ in $(seq 1 20); do [ -d "$MNEMON_DIR/sessions/s30.digest.lock.d" ] && break; sleep 0.1; done
+wait_until 10 test -d "$MNEMON_DIR/sessions/s30.digest.lock.d"
 {
   printf '%s\n' '{"type":"user","message":{"role":"user","content":"FINAL-RANGE one more thing"}}'
   printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"FINAL-RANGE done"}]}}'
 } >> "$tp_pd"
 printf '{"session_id":"s30","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_pd" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s30
 # ...and then the session ends: no further Stop.
 for _ in $(seq 1 60); do
     [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s30.json" 2>/dev/null)" = "4" ] && break
@@ -1035,7 +1067,7 @@ pd_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.a
 assert_eq "$pd_ranges" "0-2,2-4" "worker: a range left while a digest ran is digested when it finishes"
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s30.json" 2>/dev/null)" "4" \
     "worker: ...and the pointer reaches the end of the session"
-kill $PD_PID 2>/dev/null
+stop_server $PD_PID
 mv "$MNEMON_DIR/config.pd.json" "$MNEMON_DIR/config.json"
 
 # Test 10m: a slice too big for one digest goes in chunks, oldest first, with
@@ -1048,7 +1080,7 @@ TR_LOG="$MNEMON_DIR/requests-tr.log"
 : > "$TR_LOG"
 FAKE_PORT="$TR_PORT" FAKE_REQUEST_LOG="$TR_LOG" "$THIS_DIR/fixtures/server.sh" &
 TR_PID=$!
-sleep 0.5
+wait_server "$TR_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.tr.json"
 jq --arg e "http://127.0.0.1:$TR_PORT/mcp" '.endpoint=$e | .digest_chunk_chars=1000' \
   "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -1061,6 +1093,7 @@ done
 rm -f "$MNEMON_DIR/sessions/s31".*
 printf '{"session_id":"s31","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_tr" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s31
 for _ in $(seq 1 80); do
     [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s31.json" 2>/dev/null)" = "40" ] && break
     sleep 0.25
@@ -1074,7 +1107,7 @@ tr_turns=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.ar
 assert_eq "$tr_turns" "20" "chunking: every turn is sent, none dropped"
 assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.transcript | length] | max <= 1000' "$TR_LOG")" "true" \
     "chunking: no chunk is over digest_chunk_chars"
-kill $TR_PID 2>/dev/null
+stop_server $TR_PID
 mv "$MNEMON_DIR/config.tr.json" "$MNEMON_DIR/config.json"
 
 # A cleaning failure is logged, not read as "no conversation".
@@ -1097,7 +1130,7 @@ FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call failed with HTTP 429). Nothing was stored." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.bo.json"
 jq --arg e "http://127.0.0.1:$BO_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -1110,10 +1143,9 @@ rm -rf "$MNEMON_DIR/sessions/s32".*
 bo_stop() {  # $1 = session, $2 = transcript
     printf '{"session_id":"%s","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$1" "$2" \
       | "$HOOKS_DIR/mnemon-capture.sh" || true
-    # The worker is detached: wait for it to take the lock (up to 1.5s -- a
-    # Stop inside a backoff wait starts none), then for it to finish.
-    for _ in $(seq 1 15); do [ -d "$MNEMON_DIR/sessions/$1.digest.lock.d" ] && break; sleep 0.1; done
-    for _ in $(seq 1 60); do [ -d "$MNEMON_DIR/sessions/$1.digest.lock.d" ] || break; sleep 0.1; done
+    # The worker is detached, and already started when capture exits (a Stop
+    # inside a backoff wait starts none): wait for it to finish.
+    wait_worker "$1"
 }
 bo_wait_retry() {  # seconds the session waits before its next attempt
     jq -r '((.digest_retry_after // 0) - now) | round' "$MNEMON_DIR/sessions/$1.json"
@@ -1155,7 +1187,7 @@ if [ "$w" -ge 1795 ] && [ "$w" -le 1800 ]; then
 else
     FAIL=$((FAIL+1)); printf '  FAIL: backoff: the wait should cap at 1800s, waits %s\n' "$w"
 fi
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 
 # A failure that will not clear by retrying waits the full 30 minutes at once.
 : > "$BO_LOG"
@@ -1163,26 +1195,26 @@ FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Not retryable: the digest did not run (OPENAI_API_KEY is not set on the server). Nothing was stored." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 rm -rf "$MNEMON_DIR/sessions/s32".*
 bo_stop s32 "$tp_bo"; bo_stop s32 "$tp_bo"
 assert_eq "$(grep -c session_digest "$BO_LOG")" "1" "backoff: a not-retryable failure is not retried on the next Stop"
 w=$(bo_wait_retry s32)
 [ "$w" -ge 1795 ] && PASS=$((PASS+1)) && printf '  ok: backoff: a not-retryable failure waits 30 minutes\n' \
     || { FAIL=$((FAIL+1)); printf '  FAIL: backoff: a not-retryable failure waits %s\n' "$w"; }
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 
 # A retry after a failure sends exactly the same range: chunk boundaries come
 # from the file, the pointer and the chunk size alone. (The server recognises a
 # range it already stored from its start, so a call that timed out here but
 # committed there is not digested twice.)
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Retryable: the digest did not run (the model call timed out or could not connect). Nothing was stored." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 jq '.digest_chunk_chars = 400' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 tp_sh="$MNEMON_DIR/transcript-retry.jsonl"
 : > "$tp_sh"
@@ -1227,11 +1259,11 @@ assert_eq "$(jq -r '.digest_failed_kind' "$MNEMON_DIR/sessions/s35.json")" "tran
     "skip: a model timeout is recorded as a transient failure"
 assert_eq "$(jq -r '.digest_payload_failures // 0' "$MNEMON_DIR/sessions/s35.json")" "0" \
     "skip: a transient failure does not count towards skipping the line"
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 bo_stop s35 "$tp_one"
 for _ in $(seq 1 40); do [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s35.json")" = "2" ] && break; sleep 0.1; done
 skip_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
@@ -1241,7 +1273,7 @@ if grep -q 'skipping it' "$MNEMON_DIR/capture-errors.log"; then
 else
     PASS=$((PASS+1)); printf '  ok: skip: nothing is skipped after transient failures\n'
 fi
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 
 # A line the server keeps failing on for what it holds -- here the model's
 # answer to it is not a proposals list -- is skipped, logged, once it has been
@@ -1252,7 +1284,7 @@ FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
   FAKE_TOOL_ERROR="Retryable: the digest did not run (the model answered with content that is not a proposals list). Nothing was stored; send the same start again, with the same or a later end." \
   "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 rm -f "$MNEMON_DIR/sessions/s45".*
 for _ in 1 2; do
     bo_stop s45 "$tp_one"
@@ -1271,7 +1303,7 @@ if grep -q 'line 1 failed 3 times in a row on what it holds; skipping it' "$MNEM
 else
     FAIL=$((FAIL+1)); printf '  FAIL: skip: the skipped line was not logged\n'
 fi
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 
 # Which failures the payload can cause. A 413 and a validation error can; a
 # 5xx, a 401 and a "Not retryable:" cannot.
@@ -1281,12 +1313,12 @@ for kc in "FAKE_STATUS=413|payload" "FAKE_STATUS=503|transient" "FAKE_STATUS=401
     : > "$BO_LOG"
     env "${kc%|*}" FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
     BO_PID=$!
-    sleep 0.5
+    wait_server "$BO_PORT"
     rm -f "$MNEMON_DIR/sessions/s46".*
     bo_stop s46 "$tp_one"
     assert_eq "$(jq -r '.digest_failed_kind' "$MNEMON_DIR/sessions/s46.json")" "${kc##*|}" \
         "skip: $(printf '%s' "${kc%|*}" | cut -c1-48) is a ${kc##*|} failure"
-    kill $BO_PID 2>/dev/null
+    stop_server $BO_PID
 done
 
 # A digest that finds no credentials once the worker runs leaves its range in
@@ -1309,15 +1341,14 @@ assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s47.json")" "0" \
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" FAKE_REPLAY_END=2 "$THIS_DIR/fixtures/server.sh" &
 BO_PID=$!
-sleep 0.5
+wait_server "$BO_PORT"
 jq 'del(.digest_chunk_chars)' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 tp_rp="$MNEMON_DIR/transcript-replay.jsonl"
 for i in 1 2 3 4; do printf '{"type":"user","message":{"role":"user","content":"replay turn %s"}}\n' "$i"; done > "$tp_rp"
 rm -f "$MNEMON_DIR/sessions/s36".*
 printf '{"session_id":"s36","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_rp" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
-for _ in $(seq 1 40); do [ "$(grep -c session_digest "$BO_LOG")" -ge 2 ] && break; sleep 0.1; done
-sleep 0.5
+wait_worker s36
 rp_ranges=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
 assert_eq "${rp_ranges%%,*}" "0-4" "replay: the first send asks for the whole range"
 case "$rp_ranges" in
@@ -1329,7 +1360,7 @@ esac
 # it must say so on every digest.
 rp_modes=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.replay // "none"] | unique | join(",")' "$BO_LOG")
 assert_eq "$rp_modes" "by_start" "replay: every digest opts in to replay by start"
-kill $BO_PID 2>/dev/null
+stop_server $BO_PID
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
 
 # Test 10p: a worker that takes the lock after another finished sends from the
@@ -1342,7 +1373,7 @@ ST_LOG="$MNEMON_DIR/requests-st.log"
 : > "$ST_LOG"
 FAKE_PORT="$ST_PORT" FAKE_REQUEST_LOG="$ST_LOG" "$THIS_DIR/fixtures/server.sh" &
 ST_PID=$!
-sleep 0.5
+wait_server "$ST_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.st.json"
 jq --arg e "http://127.0.0.1:$ST_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -1365,7 +1396,7 @@ case "$st_sent" in
         esac;;
     *) FAIL=$((FAIL+1)); printf '  FAIL: worker: a stale start was sent as-is: %s\n' "$(printf '%s' "$st_sent" | head -c 80)";;
 esac
-kill $ST_PID 2>/dev/null
+stop_server $ST_PID
 mv "$MNEMON_DIR/config.st.json" "$MNEMON_DIR/config.json"
 
 # Test 10q: the digest lock is released only by its owner, and the pending
@@ -1395,7 +1426,7 @@ assert_eq "$(jq -c '[(.recent_drawer_ids | length), .nomemo]' "$MNEMON_DIR/sessi
 PG_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 FAKE_PORT="$PG_PORT" "$THIS_DIR/fixtures/server.sh" &
 PG_PID=$!
-sleep 0.5
+wait_server "$PG_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.pg.json"
 jq --arg e "http://127.0.0.1:$PG_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -1410,7 +1441,7 @@ else
     FAIL=$((FAIL+1)); printf '  FAIL: worker: an unusable pending range was dropped silently\n'
 fi
 rm -rf "$MNEMON_DIR/sessions/s44".*
-kill $PG_PID 2>/dev/null
+stop_server $PG_PID
 mv "$MNEMON_DIR/config.pg.json" "$MNEMON_DIR/config.json"
 
 # Test 10o: the inline `.transcript` a Stop payload can carry is cleaned and
@@ -1420,17 +1451,18 @@ IL_LOG="$MNEMON_DIR/requests-il.log"
 : > "$IL_LOG"
 FAKE_PORT="$IL_PORT" FAKE_REQUEST_LOG="$IL_LOG" "$THIS_DIR/fixtures/server.sh" &
 IL_PID=$!
-sleep 0.5
+wait_server "$IL_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.il.json"
 jq --arg e "http://127.0.0.1:$IL_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
 rm -rf "$MNEMON_DIR/sessions/s33".*
 jq -cn --slurpfile t "$SHAPES" '{session_id:"s33", transcript:$t, turn_index:2, cwd:"/tmp", hook_event_name:"Stop"}' \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s33
 for _ in $(seq 1 40); do grep -q 'session_digest' "$IL_LOG" 2>/dev/null && break; sleep 0.25; done
 il_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.transcript // ""' "$IL_LOG" 2>/dev/null)
 assert_eq "$il_sent" "$cleaned" "capture: an inline transcript is cleaned and sent like a file"
-kill $IL_PID 2>/dev/null
+stop_server $IL_PID
 mv "$MNEMON_DIR/config.il.json" "$MNEMON_DIR/config.json"
 
 # Test 10s: SessionStart says when sessions have turns undigested after
@@ -1481,7 +1513,9 @@ sw_start=$(date +%s%N)
 sw_n=$(MNEMON_DIR="$SW_DIR" bash -c '. "$1/lib/common.sh"; mnemon_undigested_sessions' _ "$HOOKS_DIR")
 sw_ms=$(( ($(date +%s%N) - sw_start) / 1000000 ))
 assert_eq "$sw_n" "2" "wake: counts correctly among 1,500 sessions"
-if [ "$sw_ms" -lt 500 ]; then
+# A fork per state file costs 3-60ms each, 5-90s for 1,500; one grep takes
+# tens of milliseconds. The bound is loose so a loaded machine does not fail it.
+if [ "$sw_ms" -lt 1500 ]; then
     PASS=$((PASS+1)); printf '  ok: wake: 1,500 sessions are scanned in %sms\n' "$sw_ms"
 else
     FAIL=$((FAIL+1)); printf '  FAIL: wake: scanning 1,500 sessions took %sms\n' "$sw_ms"
@@ -1497,7 +1531,7 @@ rl_start=$(date +%s)
 printf '{"session_id":"s37","cwd":"/tmp","prompt":"a substantive prompt about the retry design"}' \
   | "$HOOKS_DIR/mnemon-recall.sh" >/dev/null 2>&1 || true
 rl_secs=$(( $(date +%s) - rl_start ))
-if [ "$rl_secs" -le 3 ] && grep -q "s37.state.lock.d busy for 1s; skipped" "$MNEMON_DIR/capture-errors.log"; then
+if [ "$rl_secs" -le 4 ] && grep -q "s37.state.lock.d busy for 1s; skipped" "$MNEMON_DIR/capture-errors.log"; then
     PASS=$((PASS+1)); printf '  ok: recall: a busy state lock skips the timestamp after a second\n'
 else
     FAIL=$((FAIL+1)); printf '  FAIL: recall: busy lock took %ss / not logged\n' "$rl_secs"
@@ -1525,12 +1559,12 @@ rf_start() {
     env FAKE_PORT="$port" FAKE_REQUEST_LOG="$log" FAKE_STATE_DIR="$state" "$@" \
         "$THIS_DIR/fixtures/server.sh" &
     RF_SERVERS="$RF_SERVERS $!"
-    sleep 0.5
+    wait_server "$port"
 }
 
 rf_stop_all() {
     # shellcheck disable=SC2086
-    [ -n "$RF_SERVERS" ] && kill $RF_SERVERS 2>/dev/null
+    [ -n "$RF_SERVERS" ] && stop_server $RF_SERVERS
     RF_SERVERS=""
 }
 
@@ -2087,7 +2121,7 @@ CAP_LOG="$MNEMON_DIR/requests-cap.log"
 FAKE_PORT="$CAP_PORT" FAKE_REQUEST_LOG="$CAP_LOG" FAKE_MAX_TRANSCRIPT=200000 \
   "$THIS_DIR/fixtures/server.sh" &
 CAP_PID=$!
-sleep 0.5
+wait_server "$CAP_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.cap-orig.json"
 jq --arg e "http://127.0.0.1:$CAP_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -2101,6 +2135,7 @@ for _ in $(seq 1 12); do
 done
 printf '{"session_id":"s15","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp4" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s15
 cap_ldt=0
 for _ in $(seq 1 60); do
     cap_ldt=$(jq -r '.last_digest_turn // 0' "$MNEMON_DIR/sessions/s15.json" 2>/dev/null || echo 0)
@@ -2109,7 +2144,7 @@ for _ in $(seq 1 60); do
 done
 assert_ne "$cap_ldt" "0" "capture: an oversized transcript is trimmed under the server's limit"
 
-kill $CAP_PID 2>/dev/null
+stop_server $CAP_PID
 mv "$MNEMON_DIR/config.cap-orig.json" "$MNEMON_DIR/config.json"
 
 # Test: a long prompt must still recall. `RecallTool` validates
@@ -2123,7 +2158,7 @@ LP_LOG="$MNEMON_DIR/requests-longprompt.log"
 FAKE_PORT="$LP_PORT" FAKE_REQUEST_LOG="$LP_LOG" FAKE_MAX_PROMPT=4000 \
   "$THIS_DIR/fixtures/server.sh" &
 LP_PID=$!
-sleep 0.5
+wait_server "$LP_PORT"
 cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.lp-orig.json"
 jq --arg e "http://127.0.0.1:$LP_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
   && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
@@ -2166,7 +2201,7 @@ else
     FAIL=$((FAIL+1)); printf '  FAIL: recall: prompt on the wire measured %s chars\n' "${lp_sent:-0}"
 fi
 
-kill $LP_PID 2>/dev/null
+stop_server $LP_PID
 mv "$MNEMON_DIR/config.lp-orig.json" "$MNEMON_DIR/config.json"
 
 # --- Doctor -------------------------------------------------------------------

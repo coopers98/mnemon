@@ -886,12 +886,13 @@ texts = [
     "next_page_token: none", "TOKEN_LIMIT=4096", "secret=true", "access_token=$ACCESS_TOKEN",
     "token=${GITHUB_TOKEN}", "Token = refresh.token", "MNEMON_TOKEN= (unset)", "max_tokens=4096",
     "MAX_TOKENS=8000", "tokens: 1234 used", "assert PASSWORD==expected",
+    "DB_PASSWORD=Ab3}xYz9]q", "DB_PASSWORD=p@ss,w0rd!x",
 ]
 for t in texts:
     print(json.dumps({"type": "user", "message": {"role": "user", "content": "SA-BEFORE " + t}}))
     print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}}))' > "$sa_in"
 sa_out=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$sa_in")
-sa_left=$(printf '%s' "$sa_out" | grep -oE 'wJalrXUtnFEMI|pgS3cretValue|myS3cretValue|a1b2c3d4e5f6railsSecret|v1\.0123456789abcdefInstallTok|lowerS3cret|dashS3cret|quotedS3cret|jsonS3cret|jsonKeyS3cret|yamlTokS3cret|yamlS3cret' | sort -u | tr '\n' ' ')
+sa_left=$(printf '%s' "$sa_out" | grep -oE 'wJalrXUtnFEMI|pgS3cretValue|myS3cretValue|a1b2c3d4e5f6railsSecret|v1\.0123456789abcdefInstallTok|lowerS3cret|dashS3cret|quotedS3cret|jsonS3cret|jsonKeyS3cret|yamlTokS3cret|yamlS3cret|xYz9|w0rd!x' | sort -u | tr '\n' ' ')
 assert_eq "$sa_left" "" "cleaner: suffixed, glued, lowercase, --flag, JSON and YAML secrets are redacted"
 assert_eq "$(printf '%s' "$sa_out" | jq '[.[] | select(.role == "user") | .text | test("^SA-BEFORE ")] | all')" "true" \
     "cleaner: redacting an assignment keeps the text around it"
@@ -906,6 +907,24 @@ for kept in AWS_SECRET_ACCESS_KEY= PGPASSWORD= MYSQL_PWD= SECRET_KEY_BASE= GITHU
         *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: lost %s\n' "$kept";;
     esac
 done
+
+# Rule C runs in linear time, and a turn ending in a quoted key stays valid JSON.
+sa_big=$(mktemp)
+python3 -c '
+import json
+print(json.dumps({"type": "user", "message": {"role": "user", "content": "token:" * 33334}}))
+print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}}))' > "$sa_big"
+sa_t0=$(date +%s.%N)
+bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$sa_big" > /dev/null
+sa_el=$(awk -v a="$sa_t0" -v b="$(date +%s.%N)" 'BEGIN{print (b-a < 1) ? "fast" : "slow"}')
+assert_eq "$sa_el" "fast" "cleaner: 200k characters of repeated 'token:' finish in under a second"
+rm -f "$sa_big"
+sa_q=$(mktemp)
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"the \"token\":"}}' \
+    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}' > "$sa_q"
+assert_eq "$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$sa_q" | jq -r '.[0].text')" 'the "token":' \
+    "cleaner: a turn ending in a quoted key is unchanged"
+rm -f "$sa_q"
 
 # Stdin works too, and a line cut off mid-record (a transcript still being
 # written) is skipped rather than failing the whole slice.

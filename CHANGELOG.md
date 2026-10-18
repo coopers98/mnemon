@@ -10,6 +10,14 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 ## [Unreleased]
 
 ### Fixed
+- **Secret rules run in linear time and redact whole values.** Rule C no
+  longer re-scans quadratically (1 MB took 162 s on the server), rule A keeps
+  values containing `,` `}` `]` whole, and rule B no longer breaks a JSON
+  transcript whose turn ends in `"token":`. Known gaps: ini/TOML
+  `key = value` without quotes, YAML quoted values, rule-C values inside
+  backticks/brackets, `--api-key=`, `Authorization: Basic`, `.netrc`,
+  `curl -u`, `APP_KEY=base64:`, `DB_PASS=`; values under 4 characters,
+  all-digit, or starting with `$ % { <` are left alone by design.
 - **A failed digest model call no longer loses the turns it was given.** A
   timeout, an OpenAI 429 or 5xx, a missing `OPENAI_API_KEY` and unparseable
   model output all came back as "no proposals", so `session_digest` recorded

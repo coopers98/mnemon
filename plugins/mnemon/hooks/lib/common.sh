@@ -1089,9 +1089,9 @@ mnemon_clean_transcript() {
             # A. env/flag assignment, B. quoted JSON key, C. unquoted key
             # with an opaque value (8+ characters, letters and digits).
             # (\x27 is a single quote.)
-            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)=)(?<n>(?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \\t]*=[ \\t]*(?=\\\\?[\"\\x27]))(?<q>(?:\\\\?[\"\\x27])?)(?![$<%{=]|\\[REDACTED|(?i:true|false|null|none)\\b|\\d+\\b)[^\\s\"\\x27\\\\,}\\]]{4,}"; "\(.n)=\(.q)[REDACTED]"); "assign")
-            | keep(gsub("(?<k>(?<![A-Za-z0-9])\\\\?\"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?\"[ \\t]*:[ \\t]*\\\\?\")(?![$<%{]|\\[REDACTED)[^\"\\\\]+"; "\(.k)[REDACTED]"); "jsonkey")
-            | keep(gsub("(?<k>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \\t]*:[ \\t]*)(?=[^\\s\"\\x27,}\\]\\\\]*\\d)(?=[^\\s\"\\x27,}\\]\\\\]*[A-Za-z])(?![$<%{]|\\[REDACTED)[A-Za-z0-9+/=._~!@#%^&*-]{8,}(?=[\\s\"\\x27,}\\]\\\\]|$)"; "\(.k)[REDACTED]"); "keyvalue")
+            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)=)(?<n>(?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \\t]*=[ \\t]*(?=\\\\?[\"\\x27]))(?<q>(?:\\\\?[\"\\x27])?)(?![$<%{=]|\\[REDACTED|(?i:true|false|null|none)\\b|\\d+\\b)[^\\s\"\\x27\\\\,}\\]:][^\\s\"\\x27\\\\]{3,}"; "\(.n)=\(.q)[REDACTED]"); "assign")
+            | keep(gsub("(?<k>(?<![A-Za-z0-9])\\\\?\"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?\"[ \\t]*:[ \\t]*\\\\?\")(?![$<%{,}\\]]|\\[REDACTED)[^\"\\\\]+"; "\(.k)[REDACTED]"); "jsonkey")
+            | keep(gsub("(?<k>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \\t]*:[ \\t]*)(?=[A-Za-z0-9+/=._~!@#%^&*-]*\\d)(?=[A-Za-z0-9+/=._~!@#%^&*-]*[A-Za-z])(?![$<%{]|\\[REDACTED)[A-Za-z0-9+/=._~!@#%^&*-]{8,}(?=[\\s\"\\x27,}\\]\\\\]|$)"; "\(.k)[REDACTED]"); "keyvalue")
             # scheme://user:pass@ -- the scheme tells admin:123456@ (a
             # password) from a bare //host:8080@ or //TODO:fix@.
             | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"); "url");

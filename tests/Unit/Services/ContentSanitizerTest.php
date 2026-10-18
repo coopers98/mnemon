@@ -368,4 +368,42 @@ class ContentSanitizerTest extends TestCase
         $this->assertLessThan(2.0, microtime(true) - $start);
         $this->assertSame($prose, $out);
     }
+
+    public function test_rule_c_on_repeated_keys_runs_in_linear_time(): void
+    {
+        $text = str_repeat('token:', 33334);
+
+        $start = microtime(true);
+        $out = $this->sanitizer->sanitize($text);
+
+        $this->assertLessThan(1.0, microtime(true) - $start);
+        $this->assertSame($text, $out);
+    }
+
+    public static function valuesWithPunctuation(): array
+    {
+        return [
+            ['DB_PASSWORD=Ab3}xYz9]q', 'Ab3}xYz9]q'],
+            ['DB_PASSWORD=p@ss,w0rd!x', 'w0rd!x'],
+        ];
+    }
+
+    #[DataProvider('valuesWithPunctuation')]
+    public function test_an_assignment_value_with_punctuation_is_redacted_whole(string $text, string $tail): void
+    {
+        $out = $this->sanitizer->sanitize($text);
+
+        $this->assertStringNotContainsString($tail, $out);
+        $this->assertSame('DB_PASSWORD=[REDACTED]', $out);
+    }
+
+    public function test_a_turn_ending_in_a_quoted_key_stays_valid_json(): void
+    {
+        $json = '[{"text":"the \\"token\\":"},{"text":"ok"}]';
+
+        $out = $this->sanitizer->sanitize($json);
+
+        $this->assertSame($json, $out);
+        $this->assertNotNull(json_decode($out));
+    }
 }

@@ -68,15 +68,15 @@ class ContentSanitizer
         // comparison). It stops at whitespace, a quote, a backslash or , } ]
         // -- so in a JSON transcript it never takes the closing quote, the
         // brackets after it or an escaped line break.
-        ['/(?<![A-Za-z0-9])(?!(?i:pwd)=)((?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \t]*=[ \t]*(?=\\\\?["\']))((?:\\\\?["\'])?)(?![$<%{=]|\[REDACTED|(?i:true|false|null|none)\b|\d+\b)[^\s"\'\\\\,}\]]{4,}/', '$1=$2[REDACTED]'],
+        ['/(?<![A-Za-z0-9])(?!(?i:pwd)=)((?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \t]*=[ \t]*(?=\\\\?["\']))((?:\\\\?["\'])?)(?![$<%{=]|\[REDACTED|(?i:true|false|null|none)\b|\d+\b)[^\s"\'\\\\,}\]:][^\s"\'\\\\]{3,}/', '$1=$2[REDACTED]'],
         // B. A quoted JSON key ending in the keyword ("password",
         // "db_password", "api-key", escaped or not): any quoted value that is
         // not a reference.
-        ['/((?<![A-Za-z0-9])\\\\?"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?"[ \t]*:[ \t]*\\\\?")(?![$<%{]|\[REDACTED)[^"\\\\]+/', '$1[REDACTED]'],
+        ['/((?<![A-Za-z0-9])\\\\?"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?"[ \t]*:[ \t]*\\\\?")(?![$<%{,}\]]|\[REDACTED)[^"\\\\]+/', '$1[REDACTED]'],
         // C. An unquoted YAML or prose key ("token: ...", "Secret: ..."): only
         // an opaque value -- one token of 8+ characters on the same line,
         // mixing letters and digits.
-        ['/((?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \t]*:[ \t]*)(?=[^\s"\',}\]\\\\]*\d)(?=[^\s"\',}\]\\\\]*[A-Za-z])(?![$<%{]|\[REDACTED)[A-Za-z0-9+\/=._~!@#%^&*-]{8,}(?=[\s"\',}\]\\\\]|$)/', '$1[REDACTED]'],
+        ['/((?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \t]*:[ \t]*)(?=[A-Za-z0-9+\/=._~!@#%^&*-]*\d)(?=[A-Za-z0-9+\/=._~!@#%^&*-]*[A-Za-z])(?![$<%{]|\[REDACTED)[A-Za-z0-9+\/=._~!@#%^&*-]{8,}(?=[\s"\',}\]\\\\]|$)/', '$1[REDACTED]'],
         // Credentials in a URL: scheme://user:pass@. The scheme is what tells
         // admin:123456@ (a password, redacted) from a bare //host:8080@ or
         // //TODO:fix@ (not a URL credential, left alone).

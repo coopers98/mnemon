@@ -46,7 +46,11 @@ REPLY = (
     b'"summary":"Found 1 wiki page and 0 drawers.",'
     b'"wiki":[{"slug":"person:dorothy-vaughan","title":"Dorothy Vaughan",'
     b'"content":"Lead engineer.","confidence":0.9}],'
-    b'"drawers":[],"tokens_used":50}}}'
+    b'"drawers":[],"tokens_used":50,'
+    # palace_wake_up's shape. The same canned reply serves every tool, so the
+    # wake-only field rides along; recall ignores it.
+    b'"active_wings":[{"slug":"research","drawer_count":3},'
+    b'{"slug":"project-atlas","drawer_count":1}]}}}'
 )
 
 # The access token a successful refresh hands back. FAKE_EXPIRE_FIRST rejects
@@ -142,6 +146,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             '{"token_type":"Bearer","expires_in":3600,'
             '"access_token":"%s","refresh_token":"refresh-2"}' % REFRESHED_TOKEN
         ).encode())
+
+    def do_GET(self):
+        # The instance's landing page, which is all mnemon-doctor's reachability
+        # check asks for. FAKE_STATUS governs /mcp only: a token rejection there
+        # leaves the site itself answering.
+        self._reply(200, b"<html>Mnemon</html>", "text/html")
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)

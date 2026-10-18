@@ -1270,6 +1270,269 @@ fi
 kill $LP_PID 2>/dev/null
 mv "$MNEMON_DIR/config.lp-orig.json" "$MNEMON_DIR/config.json"
 
+# --- Doctor -------------------------------------------------------------------
+# mnemon-doctor.sh answers one question for a person at a terminal: does this
+# device's connection work, and if not, why not. Every case runs in its own
+# MNEMON_DIR and HOME, so neither the state the tests above left behind nor the
+# real ~/.claude.json fallback can make a broken device look connected.
+DOCTOR_SH="$HOOKS_DIR/../scripts/mnemon-doctor.sh"
+LOCAL_VERSION=$(jq -r .version "$HOOKS_DIR/../.claude-plugin/plugin.json")
+DOC_ALL=""
+DOC_DIRS=""
+# Distinctive, so the leak check below cannot pass by accident.
+DOC_BEARER="doctor-bearer-SECRET-1f2e"
+DOC_REFRESH="doctor-refresh-SECRET-3c4d"
+DOC_CSEC="doctor-client-SECRET-5a6b"
+
+doc_dir() {
+    local d
+    d=$(mktemp -d)
+    mkdir -p "$d/home"
+    printf '%s' "$d"
+}
+
+# Args: <dir> <port> <bearer> [renewable]. Writes a 0600 config.
+doc_config() {
+    local dir="$1" port="$2" bearer="$3" renew="${4:-}"
+    if [ -n "$renew" ]; then
+        jq -n --arg e "http://127.0.0.1:$port/mcp" --arg te "http://127.0.0.1:$port/oauth/token" \
+            --arg b "$bearer" --arg r "$DOC_REFRESH" --arg cs "$DOC_CSEC" \
+            '{endpoint:$e, token_endpoint:$te, bearer_token:$b, refresh_token:$r,
+              client_id:"cid", client_secret:$cs, auth_state:"ok"}' > "$dir/config.json"
+    else
+        jq -n --arg e "http://127.0.0.1:$port/mcp" --arg b "$bearer" \
+            '{endpoint:$e, bearer_token:$b}' > "$dir/config.json"
+    fi
+    chmod 600 "$dir/config.json"
+}
+
+# Args: <dir> [VAR=value ...]. Sets DOC_OUT and DOC_RC.
+doc_run() {
+    local dir="$1"; shift
+    DOC_OUT=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN \
+        -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+        -u MNEMON_DISABLE -u CLAUDE_PLUGIN_OPTION_MNEMON_DISABLE -u CLAUDE_PLUGIN_ROOT \
+        HOME="$dir/home" MNEMON_DIR="$dir" MNEMON_CLAUDE_SETTINGS="$dir/settings.json" \
+        "$@" bash "$DOCTOR_SH" 2>&1)
+    DOC_RC=$?
+    DOC_ALL="$DOC_ALL
+$DOC_OUT"
+}
+
+doc_show() { printf '    output was:\n%s\n' "$(printf '%s\n' "$DOC_OUT" | sed 's/^/      /')"; }
+
+# Args: <line-prefix-regex> <extended-regex> <label>. Some line starting with
+# the prefix (ok / warn / FAIL) must match the regex, case-insensitively.
+doc_line() {
+    if printf '%s\n' "$DOC_OUT" | grep -E "^($1) " | grep -qiE "$2"; then
+        PASS=$((PASS+1)); printf '  ok: %s\n' "$3"
+    else
+        FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$3"; doc_show
+    fi
+}
+doc_no_line() {
+    if printf '%s\n' "$DOC_OUT" | grep -E "^($1) " | grep -qiE "$2"; then
+        FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$3"; doc_show
+    else
+        PASS=$((PASS+1)); printf '  ok: %s\n' "$3"
+    fi
+}
+doc_has() {
+    case "$DOC_OUT" in
+        *"$1"*) PASS=$((PASS+1)); printf '  ok: %s\n' "$2";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$2"; doc_show;;
+    esac
+}
+
+# DR1: healthy. Every check passes, the wings are named, exit 0.
+DR1_PORT=$(rf_free_port); DR1_STATE=$(mktemp -d); DR1=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR1"
+rf_start "$DR1_PORT" "$DR1/req.log" "$DR1_STATE" FAKE_PLUGIN_VERSION="$LOCAL_VERSION"
+doc_config "$DR1" "$DR1_PORT" "$(make_jwt 3000)" renew
+DOC_JWT1=$(jq -r .bearer_token "$DR1/config.json")
+doc_run "$DR1"
+assert_eq "$DOC_RC" "0" "doctor: a healthy device exits 0"
+doc_has "All checks passed." "doctor: a healthy device says all checks passed"
+doc_has "research" "doctor: names the wings the device can reach"
+doc_has "project-atlas" "doctor: names every reachable wing"
+doc_no_line "FAIL" "." "doctor: a healthy device has no FAIL line"
+doc_no_line "warn" "." "doctor: a healthy device has no warning"
+doc_line "ok" "renew" "doctor: says the device can self-renew"
+doc_line "ok" "config\.json" "doctor: says the credentials come from config.json"
+doc_line "ok" "minute" "doctor: reports the time left on the access token"
+doc_line "ok" "none" "doctor: an empty error log reports no recent errors"
+case "$DOC_OUT" in
+    *$'\e['*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: output carries colour codes\n';;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: output is plain text\n';;
+esac
+assert_eq "$(jq -r .bearer_token "$DR1/config.json")" "$DOC_JWT1" "doctor: a healthy run does not touch the config"
+rf_stop_all
+
+# DR2: no configuration at all. FAIL with the enrolment command, exit 1.
+DR2=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR2"
+doc_run "$DR2"
+assert_eq "$DOC_RC" "1" "doctor: an unconfigured device exits 1"
+doc_line "FAIL" "not connected|no credentials|not configured" "doctor: an unconfigured device FAILs"
+doc_has "mnemon-authorize.sh" "doctor: the unconfigured FAIL names the enrolment script"
+doc_has "mnemon:device-client" "doctor: the unconfigured FAIL says how to get a client"
+doc_has "1 problem(s) found." "doctor: counts the problem"
+
+# DR3: the server rejects the token and nothing can renew it. The FAIL names
+# authentication, not reachability -- the fixes are different.
+DR3_PORT=$(rf_free_port); DR3_STATE=$(mktemp -d); DR3=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR3"
+rf_start "$DR3_PORT" "$DR3/req.log" "$DR3_STATE" FAKE_STATUS=401
+doc_config "$DR3" "$DR3_PORT" "$DOC_BEARER"
+doc_run "$DR3"
+assert_eq "$DOC_RC" "1" "doctor: a rejected token exits 1"
+doc_line "FAIL" "auth|401|rejected" "doctor: a rejected token FAILs naming authentication"
+doc_no_line "FAIL" "reach|resolve|connect" "doctor: a rejected token is not reported as unreachable"
+doc_line "ok" "reach|answered" "doctor: a server that answers 401 is still reachable"
+rf_stop_all
+
+# DR4: nothing listening. The FAIL names reachability, not authentication.
+DR4_PORT=$(rf_free_port); DR4=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR4"
+doc_config "$DR4" "$DR4_PORT" "$DOC_BEARER"
+doc_run "$DR4"
+assert_eq "$DOC_RC" "1" "doctor: an unreachable server exits 1"
+doc_line "FAIL" "reach|connect" "doctor: an unreachable server FAILs naming reachability"
+doc_no_line "FAIL" "auth|401|token" "doctor: an unreachable server is not blamed on the token"
+
+# DR5: plugin version mismatch is a warning, not a failure.
+DR5_PORT=$(rf_free_port); DR5_STATE=$(mktemp -d); DR5=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR5"
+rf_start "$DR5_PORT" "$DR5/req.log" "$DR5_STATE" FAKE_PLUGIN_VERSION=9.9.9
+doc_config "$DR5" "$DR5_PORT" "$DOC_BEARER"
+doc_run "$DR5"
+assert_eq "$DOC_RC" "0" "doctor: a version mismatch alone still exits 0"
+doc_line "warn" "9\.9\.9" "doctor: a version mismatch is a warning naming the server's version"
+doc_has "claude plugin update mnemon" "doctor: the mismatch names the fix"
+rf_stop_all
+
+# DR6: an expired token that can renew is fine -- the call renews it.
+DR6_PORT=$(rf_free_port); DR6_STATE=$(mktemp -d); DR6=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR6"
+rf_start "$DR6_PORT" "$DR6/req.log" "$DR6_STATE" FAKE_EXPIRE_FIRST=1
+doc_config "$DR6" "$DR6_PORT" "$(make_jwt -600)" renew
+DOC_JWT6=$(jq -r .bearer_token "$DR6/config.json")
+doc_run "$DR6"
+assert_eq "$DOC_RC" "0" "doctor: an expired but renewable token exits 0"
+doc_line "ok" "renew" "doctor: an expired renewable token says it will renew"
+assert_eq "$(jq -r .bearer_token "$DR6/config.json")" "token-2" "doctor: the tool call's own refresh renewed the token"
+rf_stop_all
+
+# DR7: an expired token that cannot renew is a FAIL.
+DR7_PORT=$(rf_free_port); DR7_STATE=$(mktemp -d); DR7=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR7"
+rf_start "$DR7_PORT" "$DR7/req.log" "$DR7_STATE"
+doc_config "$DR7" "$DR7_PORT" "$(make_jwt -600)"
+DOC_JWT7=$(jq -r .bearer_token "$DR7/config.json")
+doc_run "$DR7"
+assert_eq "$DOC_RC" "1" "doctor: an expired token that cannot renew exits 1"
+doc_line "FAIL" "expired" "doctor: an expired token that cannot renew FAILs"
+rf_stop_all
+
+# DR8: a dead authorization FAILs with the reason and the re-enrol command.
+DR8_PORT=$(rf_free_port); DR8_STATE=$(mktemp -d); DR8=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR8"
+rf_start "$DR8_PORT" "$DR8/req.log" "$DR8_STATE"
+doc_config "$DR8" "$DR8_PORT" "$DOC_BEARER" renew
+jq '. + {auth_state:"dead", auth_dead_reason:"invalid_grant"}' "$DR8/config.json" > "$DR8/c.tmp" \
+    && mv "$DR8/c.tmp" "$DR8/config.json" && chmod 600 "$DR8/config.json"
+doc_run "$DR8"
+assert_eq "$DOC_RC" "1" "doctor: a dead authorization exits 1"
+doc_line "FAIL" "dead.*invalid_grant|invalid_grant.*dead" "doctor: a dead authorization FAILs with its reason"
+doc_has "mnemon-authorize.sh http://127.0.0.1:$DR8_PORT" "doctor: the dead FAIL names the re-enrol command for this instance"
+rf_stop_all
+
+# DR9: loose permissions and recent errors are warnings; env credentials are named.
+DR9_PORT=$(rf_free_port); DR9_STATE=$(mktemp -d); DR9=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR9"
+rf_start "$DR9_PORT" "$DR9/req.log" "$DR9_STATE"
+doc_config "$DR9" "$DR9_PORT" "$DOC_BEARER"
+chmod 644 "$DR9/config.json"
+printf '[2000-01-01T00:00:00Z] an error from long ago\n' > "$DR9/capture-errors.log"
+printf '[%s] HTTP 502 from somewhere: bad gateway\n' "$(date -u +%FT%TZ)" >> "$DR9/capture-errors.log"
+doc_run "$DR9"
+assert_eq "$DOC_RC" "0" "doctor: warnings alone exit 0"
+doc_line "warn" "600|permission" "doctor: a config readable by others is a warning"
+doc_has "chmod 600" "doctor: the permission warning names the fix"
+doc_has "bad gateway" "doctor: shows a recent error from the log"
+case "$DOC_OUT" in
+    *"long ago"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: showed an error older than 24h\n';;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: errors older than 24h are left out\n';;
+esac
+rm -f "$DR9/config.json"
+doc_run "$DR9" MNEMON_ENDPOINT="http://127.0.0.1:$DR9_PORT/mcp" MNEMON_TOKEN="$DOC_BEARER"
+assert_eq "$DOC_RC" "0" "doctor: environment credentials count as configured"
+doc_line "ok" "environment" "doctor: says the credentials come from the environment"
+rf_stop_all
+
+# DR10: MNEMON_DISABLE and a double registration are warnings.
+DR10_PORT=$(rf_free_port); DR10_STATE=$(mktemp -d); DR10=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR10"
+rf_start "$DR10_PORT" "$DR10/req.log" "$DR10_STATE"
+doc_config "$DR10" "$DR10_PORT" "$DOC_BEARER"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/x/mnemon-wake.sh"}]}]}}' > "$DR10/settings.json"
+doc_run "$DR10" MNEMON_DISABLE=1 CLAUDE_PLUGIN_ROOT="$HOOKS_DIR/.."
+assert_eq "$DOC_RC" "0" "doctor: opt-out and double registration are not failures"
+doc_line "warn" "MNEMON_DISABLE|off on purpose" "doctor: MNEMON_DISABLE is a warning"
+doc_line "warn" "twice|double" "doctor: a double registration is a warning"
+rf_stop_all
+
+# DR11: no jq. FAIL naming jq, stop there, exit 1. PATH is a directory of links
+# to every tool on the box except jq.
+NOJQ_BIN=$(mktemp -d)
+for f in /usr/local/bin/* /usr/bin/* /bin/*; do
+    n="${f##*/}"
+    [ "$n" = jq ] && continue
+    [ -e "$NOJQ_BIN/$n" ] || ln -s "$f" "$NOJQ_BIN/$n" 2>/dev/null
+done
+DR11=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR11 $NOJQ_BIN"
+doc_config "$DR11" "$(rf_free_port)" "$DOC_BEARER"
+doc_run "$DR11" PATH="$NOJQ_BIN"
+assert_eq "$DOC_RC" "1" "doctor: missing jq exits 1"
+doc_line "FAIL" "jq" "doctor: missing jq FAILs naming jq"
+doc_no_line "ok|warn|FAIL" "reach|tool call" "doctor: stops after the missing jq"
+
+# DR12: redaction must not shred the report. A one-letter secret redacted as a
+# substring turned "passed" into "pa[redacted][redacted]ed" on every line.
+DR12_PORT=$(rf_free_port); DR12_STATE=$(mktemp -d); DR12=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR12"
+rf_start "$DR12_PORT" "$DR12/req.log" "$DR12_STATE"
+jq -n --arg e "http://127.0.0.1:$DR12_PORT/mcp" --arg te "http://127.0.0.1:$DR12_PORT/oauth/token" \
+    '{endpoint:$e, token_endpoint:$te, bearer_token:"t", refresh_token:"r", client_id:"c", client_secret:"s"}' \
+    > "$DR12/config.json"
+chmod 600 "$DR12/config.json"
+doc_run "$DR12"
+doc_line "ok" "palace_wake_up succeeded" "doctor: a short secret does not shred the report"
+case "$DOC_OUT" in
+    *"[redacted]"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: redacted text that was not a secret\n'; doc_show;;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: redacts nothing when no secret is in the text\n';;
+esac
+rf_stop_all
+
+# No run, healthy or not, prints a secret.
+for s in "$DOC_BEARER" "$DOC_REFRESH" "$DOC_CSEC" "$DOC_JWT1" "$DOC_JWT6" "$DOC_JWT7" "token-2" "refresh-2"; do
+    case "$DOC_ALL" in
+        *"$s"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: printed a secret (%s...)\n' "${s:0:12}";;
+        *) PASS=$((PASS+1)); printf '  ok: doctor: never prints %s...\n' "${s:0:12}";;
+    esac
+done
+
+# The wake banners point at the doctor as the next step.
+mv "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.dr.json" 2>/dev/null
+out=$(printf '{"session_id":"dr-w1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN HOME="$DR2/home" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *"/mnemon:doctor"*) PASS=$((PASS+1)); printf '  ok: wake: the not-connected banner points at the doctor\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: not-connected banner does not mention the doctor, got: %s\n' "$out";;
+esac
+jq -n '{endpoint:"http://127.0.0.1:1/mcp", bearer_token:"t", refresh_token:"r", client_id:"c",
+        client_secret:"s", token_endpoint:"http://127.0.0.1:1/oauth/token",
+        auth_state:"dead", auth_dead_reason:"invalid_grant"}' > "$MNEMON_DIR/config.json"
+out=$(printf '{"session_id":"dr-w2","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *"/mnemon:doctor"*) PASS=$((PASS+1)); printf '  ok: wake: the dead banner points at the doctor\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: dead banner does not mention the doctor, got: %s\n' "$out";;
+esac
+mv "$MNEMON_DIR/config.dr.json" "$MNEMON_DIR/config.json" 2>/dev/null
+for d in $DOC_DIRS; do
+    case "$d" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${d:?}" ;; esac
+done
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)

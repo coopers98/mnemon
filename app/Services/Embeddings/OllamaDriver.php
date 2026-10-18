@@ -17,7 +17,9 @@ class OllamaDriver implements EmbeddingDriverInterface
     public function embed(string $text): ?array
     {
         try {
-            $response = Http::post("{$this->host}/api/embed", [
+            // An explicit, short budget: the default is 30s, and a drawer
+            // write waits on this call.
+            $response = Http::timeout((int) config('mnemon.embedding.timeout', 10))->post("{$this->host}/api/embed", [
                 'model' => $this->model,
                 'input' => $text,
             ]);

@@ -10,6 +10,7 @@ use App\Models\Wing;
 use App\Support\WingPatterns;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class SessionDigestService
@@ -98,10 +99,25 @@ class SessionDigestService
         // One transaction for every write and the slice record. A proposal that
         // fails mid-loop used to leave the drawers before it committed; the
         // client, seeing an error, retried the range and wrote them again.
-        return DB::transaction(fn () => $this->persist(
-            $proposals, $floor, $sessionId, $harness, $turnRange,
-            $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug,
-        ));
+        try {
+            return DB::transaction(fn () => $this->persist(
+                $proposals, $floor, $sessionId, $harness, $turnRange,
+                $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug,
+            ));
+        } catch (QueryException $e) {
+            // Another worker recorded this range while the model ran. This
+            // run's drawers were rolled back with the transaction; report
+            // the winner's. Any other database failure propagates.
+            if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns)) {
+                Log::info('mnemon: digest lost the race to record a slice; returned the winner\'s result', [
+                    'session_id' => $sessionId, 'turn_range' => $turnRange,
+                ]);
+
+                return $replay;
+            }
+
+            throw $e;
+        }
     }
 
     /**
@@ -258,12 +274,28 @@ class SessionDigestService
      */
     private function withoutMnemonContext(string $transcript): string
     {
-        return preg_replace([
+        // Possessive throughout: a backtracking `.*?` or `(?:a|b)*` runs out
+        // of PCRE's JIT stack past a few KB, preg_replace returns null, and
+        // every pattern was skipped -- silently.
+        $stripped = preg_replace([
             // `<\/` too: a JSON encoder may escape the slash.
-            '#<system-reminder>.*?<\\\\?/system-reminder>#s',
-            '#(?<=")Mnemon (?:recall|palace state):(?:[^"\\\\]|\\\\.)*#',
-            '#(?<=^|\n)Mnemon (?:recall|palace state):[^\n]*(?:\n  [^\n]*)*\n?#',
-        ], '', $transcript) ?? $transcript;
+            // An unclosed tag stops at the next opening one rather than
+            // running on to a later span's close.
+            '#<system-reminder>(?:[^<]++|<(?!\\\\?/system-reminder>|system-reminder>))*+<\\\\?/system-reminder>#',
+            '#(?<=")Mnemon (?:recall|palace state):(?:[^"\\\\]++|\\\\.)*+#',
+            '#(?<=^|\n)Mnemon (?:recall|palace state):[^\n]*+(?:\n  [^\n]*+)*+\n?#',
+        ], '', $transcript);
+
+        if ($stripped === null) {
+            Log::warning('mnemon: stripping Mnemon context from a digest transcript failed', [
+                'error' => preg_last_error_msg(),
+                'length' => strlen($transcript),
+            ]);
+
+            return $transcript;
+        }
+
+        return $stripped;
     }
 
     /**
@@ -415,19 +447,17 @@ class SessionDigestService
      */
     private function recordSlice(string $sessionId, array $turnRange, array $persisted): void
     {
-        try {
-            // A savepoint: inside the caller's transaction a failed insert
-            // would otherwise abort the whole of it on PostgreSQL.
-            DB::transaction(fn () => SessionDigest::create([
-                'session_id' => $sessionId,
-                'turn_start' => $turnRange['start'],
-                'turn_end' => $turnRange['end'],
-                'drawer_ids' => collect($persisted)->pluck('id')->all(),
-            ]));
-        } catch (QueryException) {
-            // A concurrent worker recorded the same slice first. The unique
-            // index is the arbiter; losing the race is not an error.
-        }
+        // The unique index on (session_id, turn_start, turn_end) is the
+        // arbiter between two workers digesting one range. Losing throws and
+        // rolls back the whole transaction -- the loser's drawers included,
+        // which used to commit alongside the winner's -- and run() returns
+        // the winner's replay.
+        SessionDigest::create([
+            'session_id' => $sessionId,
+            'turn_start' => $turnRange['start'],
+            'turn_end' => $turnRange['end'],
+            'drawer_ids' => collect($persisted)->pluck('id')->all(),
+        ]);
     }
 
     /**

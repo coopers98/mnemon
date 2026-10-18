@@ -9,11 +9,13 @@ use App\Services\ContentSanitizer;
 use App\Services\Digest\DigestUnavailable;
 use App\Services\SessionDigestService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\Log;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tool;
+use Throwable;
 
 #[Description('Digest a sanitized transcript slice into 0-N drawer proposals; persists high-confidence ones, queues new-wing proposals for admin review.')]
 class SessionDigestTool extends Tool
@@ -78,6 +80,18 @@ class SessionDigestTool extends Tool
             return Response::error($e->retryable
                 ? "Retryable: the digest did not run ({$e->getMessage()}). Nothing was stored; send the same start again, with the same or a later end."
                 : "Not retryable: the digest did not run ({$e->getMessage()}). Nothing was stored; retrying fails the same way until the server is fixed.");
+        } catch (Throwable $e) {
+            // Anything else -- a deadlock, a proposal the service could not
+            // persist -- rolled the digest back. It used to escape as a bare
+            // JSON-RPC -32603 with no audit row. Its detail stays in the log.
+            Log::error('mnemon: session_digest failed', [
+                'session_id' => $params['session_id'],
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            BrainSessionLogger::logFailure($request, 'session_digest', $audit, $e::class.': '.$e->getMessage());
+
+            return Response::error('Retryable: the digest did not run (the server failed while storing it). Nothing was stored; send the same start again, with the same or a later end.');
         }
 
         BrainSessionLogger::log($request, 'session_digest', $audit, count($result['persisted']));

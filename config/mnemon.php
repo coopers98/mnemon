@@ -24,6 +24,9 @@ return [
 
     'embedding' => [
         'driver' => env('MNEMON_EMBEDDING_DRIVER', 'openai'),
+        // Seconds to wait for one embedding. Without it the HTTP client's
+        // 30s default applied to every drawer written.
+        'timeout' => (int) env('MNEMON_EMBEDDING_TIMEOUT', 10),
         'drivers' => [
             'openai' => [
                 'model' => env('MNEMON_OPENAI_MODEL', 'text-embedding-3-small'),

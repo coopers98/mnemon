@@ -9,6 +9,7 @@ use App\Models\SessionDigest;
 use App\Models\Wing;
 use App\Services\DrawerWriteService;
 use App\Services\SessionDigestService;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -291,6 +292,40 @@ class SessionDigestToolTest extends TestCase
             'the retry must reach the model, not replay a stale empty result');
         $this->assertCount(1, $second->json('result.structuredContent.persisted'));
         $this->assertSame(1, Drawer::count());
+    }
+
+    /**
+     * Anything else that escapes the digest -- a deadlock, a proposal the
+     * driver let through and the service could not persist -- used to reach
+     * the client as a bare -32603, with no audit row.
+     */
+    public function test_an_unexpected_failure_is_an_audited_retryable_tool_error(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $this->app->bind(SessionDigestService::class, function () {
+            $llm = new class
+            {
+                public function digest(string $t, array $c): array
+                {
+                    return [['content' => 'a note', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                        'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false]];
+                }
+            };
+            $writer = \Mockery::mock(DrawerWriteService::class);
+            $writer->shouldReceive('createDrawer')->andThrow(new DeadlockException('Deadlock found when trying to get lock'));
+
+            return new SessionDigestService($llm, $writer);
+        });
+
+        $response = $this->mcpCall('session_digest', $this->digestArgs('sess-deadlock'), ['mcp:use']);
+
+        $this->assertTrue($response->json('result.isError'));
+        $text = collect($response->json('result.content'))->pluck('text')->join(' ');
+        $this->assertStringStartsWith('Retryable:', $text);
+        $this->assertStringNotContainsString('Deadlock found', $text, 'database internals stay in the log');
+        $this->assertSame(0, SessionDigest::count());
+        $this->assertSame('failed', BrainSession::latest('id')->first()->outcome);
     }
 
     private function digestArgs(string $sessionId): array

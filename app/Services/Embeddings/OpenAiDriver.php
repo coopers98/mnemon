@@ -16,7 +16,9 @@ class OpenAiDriver implements EmbeddingDriverInterface
     public function embed(string $text): ?array
     {
         try {
-            $response = Http::withHeaders([
+            // An explicit, short budget: the default is 30s, and a drawer
+            // write waits on this call.
+            $response = Http::timeout((int) config('mnemon.embedding.timeout', 10))->withHeaders([
                 'Authorization' => 'Bearer '.config('services.openai.api_key'),
                 'Content-Type' => 'application/json',
             ])->post('https://api.openai.com/v1/embeddings', [

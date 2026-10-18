@@ -80,4 +80,40 @@ class ContentSanitizerTest extends TestCase
         $this->assertStringNotContainsString('s3cr3tvalue', $out);
         $this->assertStringContainsString('PASSWORD=[REDACTED]', $out);
     }
+
+    /**
+     * The client cleaner learned these; the server set must agree with it, or
+     * text the plugin leaves alone is mangled here anyway.
+     */
+    public function test_it_leaves_lookalikes_alone(): void
+    {
+        foreach ([
+            'the prefix ghp_short is documented',
+            'github_pat_short is a prefix',
+            'slack xoxb-1, not a token',
+            'assert PASSWORD==expected',
+            'connect to //host:8080@x',
+        ] as $text) {
+            $this->assertSame($text, $this->sanitizer->sanitize($text), $text);
+        }
+    }
+
+    public function test_it_redacts_what_the_client_redacts(): void
+    {
+        $secrets = [
+            'AKIAABCDEFGHIJKLMNOP',
+            'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXNlY3JldA',
+            'ghs_'.str_repeat('b', 36),
+            'github_pat_11'.str_repeat('C', 80),
+            'xoxb-1234-SECRETxoxb',
+            "-----BEGIN RSA PRIVATE KEY-----\nSECRETpem\n-----END RSA PRIVATE KEY-----",
+        ];
+
+        foreach ($secrets as $secret) {
+            $out = $this->sanitizer->sanitize("before {$secret} after");
+            $this->assertStringNotContainsString($secret, $out);
+            $this->assertStringStartsWith('before ', $out);
+            $this->assertStringEndsWith(' after', $out);
+        }
+    }
 }

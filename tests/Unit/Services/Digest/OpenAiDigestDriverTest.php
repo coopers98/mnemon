@@ -189,6 +189,23 @@ class OpenAiDigestDriverTest extends TestCase
         $this->assertSame(['kept'], array_column($result, 'content'));
     }
 
+    public function test_drops_proposals_whose_wing_cannot_be_used_and_coerces_a_numeric_string_confidence(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode(['proposals' => [
+            ['content' => 'string confidence', 'wing_slug' => 'work', 'confidence' => '0.75'],
+            ['content' => 'array wing', 'wing_slug' => ['work'], 'confidence' => 0.9],
+            ['content' => 'new wing without a name', 'propose_new_wing' => true, 'confidence' => 0.9],
+            ['content' => 'array room', 'wing_slug' => 'work', 'room_slug' => ['x'], 'confidence' => 0.9],
+            ['content' => 'no wing at all is the service\'s call', 'confidence' => 0.9],
+        ]])]]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $result = (new OpenAiDigestDriver)->digest('t', []);
+
+        $this->assertSame(['string confidence', 'no wing at all is the service\'s call'], array_column($result, 'content'));
+        $this->assertSame(0.75, $result[0]['confidence']);
+    }
+
     public function test_the_failure_reason_does_not_carry_the_raw_transport_error(): void
     {
         Http::fake(function () {

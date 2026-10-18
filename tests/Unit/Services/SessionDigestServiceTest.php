@@ -7,10 +7,13 @@ use App\Models\Room;
 use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use App\Observers\DrawerObserver;
 use App\Services\Digest\DigestUnavailable;
 use App\Services\DrawerWriteService;
+use App\Services\EmbeddingManager;
 use App\Services\SessionDigestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class SessionDigestServiceTest extends TestCase
@@ -518,6 +521,125 @@ class SessionDigestServiceTest extends TestCase
         $service->run('sess-stale', 'claude-code', ['start' => 3, 'end' => 4], $raw, [], null);
         $this->assertStringNotContainsString('LEAK', $driver->seen);
         $this->assertStringContainsString('USER-RAW-WORDS stay', $driver->seen);
+    }
+
+    /**
+     * Two workers digesting one range: the loser's drawers used to commit
+     * alongside the winner's.
+     */
+    public function test_losing_the_race_to_record_a_slice_rolls_back_and_returns_the_winners_replay(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $driver = new class
+        {
+            public function digest(string $transcript, array $context): array
+            {
+                // The other worker records the same range while this one waits on the model.
+                SessionDigest::create(['session_id' => 'sess-race', 'turn_start' => 0, 'turn_end' => 4, 'drawer_ids' => []]);
+
+                return [['content' => 'the loser\'s drawer', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                    'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false]];
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        $result = $service->run('sess-race', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+
+        $this->assertTrue($result['replayed'] ?? false);
+        $this->assertSame(0, Drawer::count(), 'the loser must not leave drawers behind');
+        $this->assertSame(1, SessionDigest::count());
+    }
+
+    public function test_a_long_mnemon_block_is_stripped_rather_than_skipping_every_pattern(): void
+    {
+        $driver = new class
+        {
+            public string $seen = '';
+
+            public function digest(string $transcript, array $context): array
+            {
+                $this->seen = $transcript;
+
+                return [];
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        // Past the PCRE JIT stack, a backtracking pattern returns null and
+        // preg_replace skipped every pattern -- silently.
+        $stale = json_encode([
+            ['type' => 'attachment', 'attachment' => ['content' => ["Mnemon recall:\n".str_repeat('drawer text ', 8000).'LONG-RECALL-LEAK']]],
+            ['type' => 'attachment', 'attachment' => ['stdout' => '<system-reminder>'.str_repeat('x', 50000).'LONG-REMINDER-LEAK</system-reminder>']],
+            ['type' => 'user', 'message' => ['content' => str_repeat('<system-reminder>unclosed ', 2000).'USER-WORDS stay']],
+        ]);
+
+        $service->run('sess-long', 'claude-code', ['start' => 0, 'end' => 3], $stale, [], null);
+
+        $this->assertStringNotContainsString('LEAK', $driver->seen);
+        $this->assertStringContainsString('USER-WORDS stay', $driver->seen);
+    }
+
+    /**
+     * Embeddings are an HTTP call per drawer. Inside the digest transaction
+     * they held its locks (the wiki page counters among them) for as long as
+     * the embedding API took.
+     */
+    public function test_embeddings_and_wiki_counters_run_after_the_transaction_commits(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $observer = new class(app(EmbeddingManager::class)) extends DrawerObserver
+        {
+            public array $levels = [];
+
+            protected function shouldEmbed(): bool
+            {
+                return true;
+            }
+
+            protected function embedStored(Drawer $drawer): void
+            {
+                $this->levels[] = DB::transactionLevel();
+            }
+        };
+        $this->app->instance(DrawerObserver::class, $observer);
+        $baseline = DB::transactionLevel();
+
+        $this->makeServiceWithMockLlm([
+            ['content' => 'one', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+            ['content' => 'two', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ])->run('sess-embed', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+
+        $this->assertSame([$baseline, $baseline], $observer->levels);
+    }
+
+    public function test_an_embedding_that_fails_after_commit_does_not_fail_the_digest(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $this->app->instance(DrawerObserver::class, new class(app(EmbeddingManager::class)) extends DrawerObserver
+        {
+            protected function shouldEmbed(): bool
+            {
+                return true;
+            }
+
+            protected function embedStored(Drawer $drawer): void
+            {
+                throw new \RuntimeException('embedding API down');
+            }
+        });
+
+        $result = $this->makeServiceWithMockLlm([
+            ['content' => 'kept anyway', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ])->run('sess-embed-fail', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+
+        $this->assertCount(1, $result['persisted']);
+        $this->assertSame(1, Drawer::count());
     }
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService

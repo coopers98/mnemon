@@ -87,13 +87,41 @@ class OpenAiDigestDriver
         }
 
         // Only what the service can persist. One proposal it cannot -- no
-        // content, content that is not text -- used to throw mid-loop after
-        // earlier drawers were written, and the client's retry wrote them again.
-        return array_values(array_filter(
-            $parsed['proposals'],
-            fn ($p) => is_array($p)
-                && is_string($p['content'] ?? null) && trim($p['content']) !== ''
-                && (is_int($p['confidence'] ?? null) || is_float($p['confidence'] ?? null)),
-        ));
+        // content, content that is not text, a wing that is not a name --
+        // used to throw mid-loop after earlier drawers were written, and the
+        // client's retry wrote them again.
+        $usable = [];
+        foreach ($parsed['proposals'] as $p) {
+            if (is_array($p) && is_string($p['confidence'] ?? null) && is_numeric($p['confidence'])) {
+                $p['confidence'] = (float) $p['confidence'];
+            }
+            if ($this->usable($p)) {
+                $usable[] = $p;
+            }
+        }
+
+        if (($dropped = count($parsed['proposals']) - count($usable)) > 0) {
+            Log::info('mnemon: digest proposals dropped as unusable', ['dropped' => $dropped, 'kept' => count($usable)]);
+        }
+
+        return $usable;
+    }
+
+    private function usable(mixed $p): bool
+    {
+        if (! is_array($p)
+            || ! is_string($p['content'] ?? null) || trim($p['content']) === ''
+            || ! (is_int($p['confidence'] ?? null) || is_float($p['confidence'] ?? null))) {
+            return false;
+        }
+
+        foreach (['wing_slug', 'room_slug'] as $key) {
+            if (array_key_exists($key, $p) && $p[$key] !== null && ! is_string($p[$key])) {
+                return false;
+            }
+        }
+
+        // A new wing has to be named.
+        return empty($p['propose_new_wing']) || trim((string) ($p['wing_slug'] ?? '')) !== '';
     }
 }

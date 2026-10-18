@@ -15,20 +15,41 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   model output all came back as "no proposals", so `session_digest` recorded
   the slice as digested and answered success. The client moved past those
   turns, and a retry was served the empty replay. The tool now answers with a
-  tool error saying the digest did not run and whether retrying can help;
-  nothing is stored and the slice is not recorded, so the next Stop sends the
-  same range again and it is digested normally. Failed digests appear in the
-  audit trail with outcome `failed`. A model that finds nothing worth keeping
-  is still a successful, empty digest.
+  tool error that leads with `Retryable:` or `Not retryable:` and says the
+  digest did not run; nothing is stored and the slice is not recorded, so the
+  next Stop resends from the same start (through its own, later end) and it is
+  digested normally. Failed digests appear in the audit trail with outcome
+  `failed`. A model that finds nothing worth keeping is still a successful,
+  empty digest.
+- **A digest that fails part-way no longer duplicates drawers on retry.** The
+  model's proposals are checked before use (text content, a numeric
+  confidence), and the drawers and the slice record are written in one
+  transaction, so a failure leaves nothing behind for the retry to repeat.
 - **Mnemon's own recall and wake output is no longer digested back into the
   palace.** It reached the digest as hook output and attachments, and came back
-  as new drawers. See the capture change below.
+  as new drawers. The plugin no longer sends it (see the capture change below),
+  and the server now strips `<system-reminder>` spans and Mnemon recall/wake
+  blocks itself, so devices still on plugin 0.3.10 stop feeding it back too.
 - **Digest progress can no longer move backwards.** `last_digest_turn` is
   written as the larger of the stored and new values, whoever writes it, so a
   stale copy of the session state cannot rewind it and have turns digested
   twice. The digest worker's lock is now an atomic `mkdir` lock per session
   (replacing a PID file that two workers could both claim), recovered when its
-  owner is gone or it is older than 10 minutes. Plugin 0.3.11.
+  owner is gone or it is older than 10 minutes. Session-state writes apply
+  their change to the state on disk, and a write that is not a JSON object is
+  refused rather than resetting the session (which used to clear `@nomemo`).
+  Plugin 0.3.11.
+- **A reply that arrives while a digest runs is no longer lost.** Its Stop
+  used to exit and leave the turns to "the next Stop", which never came if the
+  user quit. The running digest now picks the range up when it finishes.
+  Plugin 0.3.11.
+- **A transcript record of an unexpected shape no longer stops capture for the
+  session.** It made cleaning fail with no output, which read as "nothing to
+  send"; the slice was never sent and nothing was logged. Such a record is now
+  skipped, and a cleaning failure is logged. Plugin 0.3.11.
+- **Messages typed while Claude was still working are digested.** Claude Code
+  stores them as queued-command attachments, often with no user record, so
+  they were dropped. Plugin 0.3.11.
 
 ### Changed
 - **Capture now sends only the conversation.** Digests see the user's and the
@@ -39,7 +60,9 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   slash-command output. The old filter matched nothing at the top level and let
   93.5% of transcript bytes through; measured on 1,319 real transcripts, what
   is sent is now 2.5% of the raw size. Each turn goes as
-  `{"role","ts","text"}`, consecutive turns of one role merged. Facts that
+  `{"role","ts","text"}`, consecutive turns of one role merged, a slash
+  command as `/name args`; a single text over 16,000 characters is cut and
+  marked as cut. Facts that
   appeared only in tool output (a command's result, a file's contents) are no
   longer seen by the digest. Secret redaction on the client now also covers
   GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
@@ -48,7 +71,14 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - **`max_digest_bytes` defaults to 2 MiB** (was 256 KiB). It bounds the raw
   slice cleaned on each Stop; since cleaning keeps a few percent of it, the old
   default left a long slice with only a few KB of conversation to digest.
-  `max_digest_chars` (190000) still caps what is sent. Plugin 0.3.11.
+  `max_digest_chars` (190000) still caps what is sent. Trimming to either cap
+  is now logged. Plugin 0.3.11.
+- **Repeated digest failures back off.** After three failures in a row a
+  session's digest is retried at most every 30 minutes (`digest_max_failures`,
+  `digest_backoff_seconds`), and a failure the server reports as not
+  retryable (a missing API key) starts the backoff at once. A success resets
+  it. The client waits 90 seconds for a digest, above the server's 60.
+  Plugin 0.3.11.
 
 ## [1.0.0] — 2026-10-18
 

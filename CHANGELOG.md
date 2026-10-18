@@ -7,6 +7,49 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **A failed digest model call no longer loses the turns it was given.** A
+  timeout, an OpenAI 429 or 5xx, a missing `OPENAI_API_KEY` and unparseable
+  model output all came back as "no proposals", so `session_digest` recorded
+  the slice as digested and answered success. The client moved past those
+  turns, and a retry was served the empty replay. The tool now answers with a
+  tool error saying the digest did not run and whether retrying can help;
+  nothing is stored and the slice is not recorded, so the next Stop sends the
+  same range again and it is digested normally. Failed digests appear in the
+  audit trail with outcome `failed`. A model that finds nothing worth keeping
+  is still a successful, empty digest.
+- **Mnemon's own recall and wake output is no longer digested back into the
+  palace.** It reached the digest as hook output and attachments, and came back
+  as new drawers. See the capture change below.
+- **Digest progress can no longer move backwards.** `last_digest_turn` is
+  written as the larger of the stored and new values, whoever writes it, so a
+  stale copy of the session state cannot rewind it and have turns digested
+  twice. The digest worker's lock is now an atomic `mkdir` lock per session
+  (replacing a PID file that two workers could both claim), recovered when its
+  owner is gone or it is older than 10 minutes. Plugin 0.3.11.
+
+### Changed
+- **Capture now sends only the conversation.** Digests see the user's and the
+  assistant's words and nothing else: no tool calls or tool output, no
+  thinking, no attachments (system-prompt and environment snapshots,
+  CLAUDE.md, attached and edited files), no hook output, no meta, compact-summary
+  or sidechain records, and no harness wrappers such as `<system-reminder>` or
+  slash-command output. The old filter matched nothing at the top level and let
+  93.5% of transcript bytes through; measured on 1,319 real transcripts, what
+  is sent is now 2.5% of the raw size. Each turn goes as
+  `{"role","ts","text"}`, consecutive turns of one role merged. Facts that
+  appeared only in tool output (a command's result, a file's contents) are no
+  longer seen by the digest. Secret redaction on the client now also covers
+  GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
+  Aiven, `PASSWORD=`-style assignments, credentials in URLs and PEM private
+  keys. Plugin 0.3.11.
+- **`max_digest_bytes` defaults to 2 MiB** (was 256 KiB). It bounds the raw
+  slice cleaned on each Stop; since cleaning keeps a few percent of it, the old
+  default left a long slice with only a few KB of conversation to digest.
+  `max_digest_chars` (190000) still caps what is sent. Plugin 0.3.11.
+
 ## [1.0.0] — 2026-10-18
 
 ### Added

@@ -765,12 +765,17 @@ jq '.recall_timeout_ms = 3000' ~/.mnemon/config.json > /tmp/c && \
 
 `max_digest_chars` defaults to 190000 and caps the payload each Stop sends to
 `session_digest`, whose `transcript` field the server validates at 200000
-characters. The cap is applied *after* sanitization, because that is what the
+characters. The cap is applied *after* cleaning, because that is what the
 server measures — capping the raw slice instead lets a payload that looks small
 enough arrive over the limit, and the tool then rejects the digest whole. When a
 slice is over budget the oldest turns are dropped first, so the most recent ones
 survive. Lower it if a proxy in front of your instance imposes a smaller body
 limit than the app does.
+
+`max_digest_bytes` defaults to 2097152 (2 MiB) and bounds the raw transcript
+slice each Stop reads and cleans; when a slice is larger, its oldest records are
+dropped first. Cleaning keeps only a few percent of a raw transcript, so this
+rarely matters outside the first digest of a long session.
 
 `max_recall_prompt_chars` defaults to 3800 and caps the prompt each
 `UserPromptSubmit` sends to `recall`, whose `prompt` field the server validates
@@ -873,7 +878,7 @@ if you have previously used the artisan installer, remove its entries from
 
 - **SessionStart (`mnemon-wake.sh`)** — calls `palace_wake_up`; injects a `<system-reminder>` summarizing recent drawers, active wings, and pending wiki updates.
 - **UserPromptSubmit (`mnemon-recall.sh`)** — gated by length/stopword/recent-fire checks; on a substantive prompt, calls `recall` and injects up to ~1500 tokens of relevant wiki + drawer context. Budget: 800ms; failures are silent.
-- **Stop (`mnemon-capture.sh`)** — sanitizes the transcript (strips tool I/O + thinking + secret patterns), then dispatches a detached background worker that calls `session_digest`. Drawers with confidence ≥ 0.5 auto-persist. The hook names the project the session ran in — the repository's `origin` name, else its directory; a session in a Claude Code scratchpad counts as the directory the scratchpad belongs to — and project-specific drawers are filed under that project's wing (`mnemon` → `project-mnemon`). A wing whose name differs from its repository lists the repository under **Aliases** in `/admin` → Wings (e.g. `project:cora` with alias `recital-lineup`). A project with no wing gets one, unless the token is wing-restricted. Person and other cross-project wings are still the model's call. Sessions outside a repository send no project, and their project-specific drawers go to the `unfiled` wing, with the model's guess recorded as `suggested_wing` in each drawer's metadata; so does everything from a client older than plugin 0.3.6. A repository whose sessions span many projects — an assistant's workspace, say — is not one project: list its name in `~/.mnemon/config.json` as `"project_ignore": ["clawd-brain"]` and its sessions send none, leaving the wing to the model (new-wing proposals queue at `/admin/wiki-pending-wings`). A repository whose sessions are machine-driven — a workspace answering a scheduled heartbeat — can be left out of capture entirely with `"capture_ignore": ["clawd-brain"]`; recall still runs there.
+- **Stop (`mnemon-capture.sh`)** — takes the turns added since the last digest and keeps only the conversation: the user's and the assistant's words. Tool calls and their output, thinking, attachments (system-prompt snapshots, CLAUDE.md, attached and edited files), hook output — Mnemon's own recall and wake text included — and harness wrappers such as `<system-reminder>` are dropped, and secrets (API keys, GitHub and Slack tokens, JWTs, bearer tokens, `PASSWORD=` assignments, credentials in URLs, private keys) are redacted. What a tool printed is therefore never digested; what you or Claude said about it is. It then dispatches a detached background worker that calls `session_digest`. If the digest cannot run (the model timed out, was rate-limited, or the server has no OpenAI key), nothing is stored and the same turns are sent again on the next Stop; the reason is in `~/.mnemon/capture-errors.log`. Drawers with confidence ≥ 0.5 auto-persist. The hook names the project the session ran in — the repository's `origin` name, else its directory; a session in a Claude Code scratchpad counts as the directory the scratchpad belongs to — and project-specific drawers are filed under that project's wing (`mnemon` → `project-mnemon`). A wing whose name differs from its repository lists the repository under **Aliases** in `/admin` → Wings (e.g. `project:cora` with alias `recital-lineup`). A project with no wing gets one, unless the token is wing-restricted. Person and other cross-project wings are still the model's call. Sessions outside a repository send no project, and their project-specific drawers go to the `unfiled` wing, with the model's guess recorded as `suggested_wing` in each drawer's metadata; so does everything from a client older than plugin 0.3.6. A repository whose sessions span many projects — an assistant's workspace, say — is not one project: list its name in `~/.mnemon/config.json` as `"project_ignore": ["clawd-brain"]` and its sessions send none, leaving the wing to the model (new-wing proposals queue at `/admin/wiki-pending-wings`). A repository whose sessions are machine-driven — a workspace answering a scheduled heartbeat — can be left out of capture entirely with `"capture_ignore": ["clawd-brain"]`; recall still runs there.
 
 ### `@nomemo` — turn it off mid-session
 

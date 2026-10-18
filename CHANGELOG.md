@@ -92,10 +92,14 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   be retried; `/mnemon:doctor` reports the same count. A success resets it.
   The client waits 90 seconds for a digest, above the server's 60.
   Plugin 0.3.11.
-- **A digest whose reply was lost is not digested again.** The server
-  recognises a range it already stored by its start, whatever end the retry
-  asks for, and says where the stored range ended; the plugin advances there
-  and sends the rest.
+- **A digest whose reply was lost is not digested again.** Plugin 0.3.11
+  sends `replay: "by_start"` with each digest; the server then recognises a
+  range it already stored by its start, whatever end the retry asks for, and
+  says where the stored range ended (`turn_end`), and the plugin advances there
+  and sends the rest. Without that argument -- plugin 0.3.10 and older, which
+  advance to the end they sent whatever the reply says -- only the exact same
+  range is replayed, as in 1.0.0: a retry with a later end is digested again,
+  which can repeat drawers but never skips turns.
 - **Turns are no longer digested twice when two digests overlap.** A digest
   that starts after another has finished now sends from where that one left
   off, rather than from where its own Stop read the pointer. Plugin 0.3.11.

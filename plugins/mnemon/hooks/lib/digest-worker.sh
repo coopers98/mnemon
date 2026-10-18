@@ -80,6 +80,11 @@ run_once() {
     recent_ids=$(mnemon_session_state "$session_id" | jq -c '.recent_drawer_ids // []' 2>/dev/null)
     [ -n "$recent_ids" ] || recent_ids='[]'
 
+    # replay "by_start": this worker advances to a replay's turn_end and carries
+    # the rest, so the server may answer a retry from a recorded start with that
+    # slice. It does so only when asked -- an older worker advances to the end
+    # it sent, and a by-start replay would lose the turns past the slice.
+    #
     # --rawfile, not --arg: a transcript passed through argv dies with
     # "Argument list too long" past MAX_ARG_STRLEN (~128KB on Linux), and real
     # sessions run to megabytes.
@@ -91,7 +96,7 @@ run_once() {
         --argjson r "$recent_ids" \
         --arg p "$project" \
         --arg f "$filing" \
-        '{name:"session_digest",arguments:({session_id:$sid,harness:"claude-code",turn_range:{start:$ts,end:$te},transcript:$t,recent_drawer_ids:$r}
+        '{name:"session_digest",arguments:({session_id:$sid,harness:"claude-code",turn_range:{start:$ts,end:$te},transcript:$t,recent_drawer_ids:$r,replay:"by_start"}
             + (if $p == "" then {} else {project:$p} end)
             + (if $f == "" then {} else {project_filing:$f} end))}')
 

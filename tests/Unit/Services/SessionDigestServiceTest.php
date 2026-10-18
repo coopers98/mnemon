@@ -665,9 +665,9 @@ class SessionDigestServiceTest extends TestCase
         };
         $service = new SessionDigestService($driver, app(DrawerWriteService::class));
 
-        $first = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
-        $same = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
-        $later = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 12], 't', [], null);
+        $first = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null, replayByStart: true);
+        $same = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null, replayByStart: true);
+        $later = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 12], 't', [], null, replayByStart: true);
 
         $this->assertSame(1, $driver->calls, 'neither retry may reach the model');
         $this->assertSame(1, Drawer::count());
@@ -677,6 +677,41 @@ class SessionDigestServiceTest extends TestCase
         $this->assertSame(8, $later['turn_end'], 'the client advances to what was recorded, and carries the rest');
         $this->assertSame(collect($first['persisted'])->pluck('id')->all(), collect($later['persisted'])->pluck('id')->all());
         $this->assertSame(8, $first['turn_end']);
+    }
+
+    /**
+     * A 0.3.10 client ignores turn_end and advances to the end it sent. Its
+     * call times out while the server commits 0-8; the next Stop sends 0-12.
+     * Replaying 0-8 there would move it to 12 with 8-12 never digested, so
+     * without the opt-in only the exact range replays.
+     */
+    public function test_without_the_opt_in_a_later_end_from_a_recorded_start_is_digested(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $driver = new class
+        {
+            public int $calls = 0;
+
+            public function digest(string $transcript, array $context): array
+            {
+                $this->calls++;
+
+                return [['content' => "call {$this->calls}", 'wing_slug' => 'work', 'room_slug' => 'notes',
+                    'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false]];
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        $service->run('sess-old', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
+        $same = $service->run('sess-old', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
+        $later = $service->run('sess-old', 'claude-code', ['start' => 0, 'end' => 12], 't', [], null);
+
+        $this->assertTrue($same['replayed'], 'the exact range still replays');
+        $this->assertArrayNotHasKey('replayed', $later, 'a later end must reach the model');
+        $this->assertSame(2, $driver->calls);
+        $this->assertSame(12, $later['turn_end']);
+        $this->assertSame(2, SessionDigest::where('session_id', 'sess-old')->count());
     }
 
     public function test_a_wiki_counter_failure_after_commit_does_not_fail_the_digest(): void

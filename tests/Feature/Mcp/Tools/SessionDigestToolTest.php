@@ -328,6 +328,38 @@ class SessionDigestToolTest extends TestCase
         $this->assertSame('failed', BrainSession::latest('id')->first()->outcome);
     }
 
+    public function test_replay_by_start_is_opt_in(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $this->mockDigestService([
+            ['content' => 'a real note', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        $this->mcpCall('session_digest', $this->digestArgs('sess-opt'), ['mcp:use'])->assertStatus(200);
+
+        $later = $this->digestArgs('sess-opt');
+        $later['turn_range'] = ['start' => 0, 'end' => 9];
+
+        $byStart = $this->mcpCall('session_digest', $later + ['replay' => 'by_start'], ['mcp:use'])
+            ->json('result.structuredContent');
+        $this->assertTrue($byStart['replayed'] ?? false);
+        $this->assertSame(4, $byStart['turn_end']);
+
+        $old = $this->mcpCall('session_digest', $later, ['mcp:use'])->json('result.structuredContent');
+        $this->assertArrayNotHasKey('replayed', $old, 'a client that did not opt in is digested, not replayed');
+        $this->assertSame(9, $old['turn_end']);
+    }
+
+    public function test_an_unknown_replay_mode_is_rejected(): void
+    {
+        $response = $this->mcpCall('session_digest', $this->digestArgs('sess-bad') + ['replay' => 'sideways'], ['mcp:use']);
+
+        $this->assertTrue($response->json('result.isError'));
+        $this->assertSame(0, SessionDigest::count());
+    }
+
     private function digestArgs(string $sessionId): array
     {
         return [

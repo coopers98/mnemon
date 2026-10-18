@@ -47,6 +47,7 @@ class SessionDigestTool extends Tool
             'auto_persist' => 'boolean',
             'project' => 'nullable|string|max:100',
             'project_filing' => 'nullable|string|in:model',
+            'replay' => 'nullable|string|in:by_start',
         ]);
 
         $cleaned = $this->sanitizer->sanitize($params['transcript']);
@@ -69,6 +70,7 @@ class SessionDigestTool extends Tool
                 allowedWingPatterns: $this->wingPatternsFor($request),
                 project: $params['project'] ?? null,
                 projectFiling: $params['project_filing'] ?? null,
+                replayByStart: ($params['replay'] ?? null) === 'by_start',
             );
         } catch (DigestUnavailable $e) {
             // Nothing was persisted and the slice is not recorded, so the same
@@ -110,6 +112,7 @@ class SessionDigestTool extends Tool
             'auto_persist' => $s->boolean()->description('When false, returns proposals without writing. Default true.'),
             'project' => $s->string()->description('The project the session ran in (e.g. its repository name). Project-specific drawers are filed in that project\'s wing, matched by slug or alias; an unrestricted token creates the wing if it does not exist. Without a project, project-specific drawers go to the `unfiled` wing.'),
             'project_filing' => $s->string()->enum(['model'])->description('Send "model" when the project is left out on purpose (a repository spanning many projects): the model then picks the wing instead of `unfiled`.'),
+            'replay' => $s->string()->enum(['by_start'])->description('Send "by_start" when the client advances to the reply\'s `turn_end`: a range whose start this session already digested is then replayed (not digested again) even when its end is later, and `turn_end` says where the recorded slice ended. Without it only the exact same range replays.'),
         ];
     }
 }

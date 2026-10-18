@@ -42,6 +42,11 @@ class SessionDigestService
      *                                      purpose (a repository spanning many projects), so the
      *                                      model's wing stands. Otherwise, without a project,
      *                                      project-specific drawers are filed as unfiled.
+     * @param  bool  $replayByStart  The client asked for a replay keyed on the start alone
+     *                               (plugin 0.3.11+, which advances to the replay's turn_end and
+     *                               carries the rest). Without it only the exact range replays:
+     *                               an older client advances to the end it sent, so a replay of
+     *                               a shorter recorded slice would skip the turns past it.
      */
     public function run(
         string $sessionId,
@@ -52,12 +57,13 @@ class SessionDigestService
         ?array $allowedWingPatterns,
         ?string $project = null,
         ?string $projectFiling = null,
+        bool $replayByStart = false,
     ): array {
         // A slice already digested is returned as-is rather than digested again.
         // The capture hook can dispatch the same range twice -- two workers
         // racing, or a session replaying a range after a resume -- and each
         // dispatch otherwise costs a reader call and duplicates drawers.
-        if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns)) {
+        if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns, $replayByStart)) {
             return $replay;
         }
 
@@ -107,8 +113,9 @@ class SessionDigestService
         } catch (QueryException $e) {
             // Another worker recorded this range while the model ran. This
             // run's drawers were rolled back with the transaction; report
-            // the winner's. Any other database failure propagates.
-            if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns)) {
+            // the winner's. Any other database failure propagates. The
+            // unique index is on the exact range, so that is what conflicted.
+            if ($replay = $this->replayFor($sessionId, $turnRange, $allowedWingPatterns, false)) {
                 Log::info('mnemon: digest lost the race to record a slice; returned the winner\'s result', [
                     'session_id' => $sessionId, 'turn_range' => $turnRange,
                 ]);
@@ -397,22 +404,28 @@ class SessionDigestService
     }
 
     /**
-     * The result of a slice already digested from this start, or null.
+     * The result of a slice already digested for this range, or null.
      *
      * @param  array{start: int, end: int}  $turnRange
      * @return array<string, mixed>|null
      */
-    private function replayFor(string $sessionId, array $turnRange, ?array $allowedWingPatterns): ?array
+    private function replayFor(string $sessionId, array $turnRange, ?array $allowedWingPatterns, bool $byStart): ?array
     {
-        // Keyed on the start. A client whose call timed out after the server
-        // committed retries from the same start -- with the same end, or a
-        // later one if the session went on. Either way those turns are done;
-        // the reply says where the recorded slice ended so the client
-        // advances there and carries the rest. An exact match is the same
-        // case. The furthest recorded end wins.
+        // By start, for a client that opted in: one whose call timed out
+        // after the server committed retries from the same start -- with the
+        // same end, or a later one if the session went on. Either way those
+        // turns are done; the reply says where the recorded slice ended so
+        // the client advances there and carries the rest. The furthest
+        // recorded end wins.
+        //
+        // Otherwise the exact range only. A client from before plugin 0.3.11
+        // ignores turn_end and advances to the end it sent: replaying a
+        // shorter slice to it would lose the turns past that slice, where
+        // digesting the longer range again costs duplicates at worst.
         $digest = SessionDigest::query()
             ->where('session_id', $sessionId)
             ->where('turn_start', $turnRange['start'])
+            ->when(! $byStart, fn ($q) => $q->where('turn_end', $turnRange['end']))
             ->orderByDesc('turn_end')
             ->first();
 

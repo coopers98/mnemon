@@ -1259,13 +1259,19 @@ case "$rp_ranges" in
     0-4,2-4*) PASS=$((PASS+1)); printf '  ok: replay: the client advances to the replayed end and sends the rest\n';;
     *) FAIL=$((FAIL+1)); printf '  FAIL: replay: expected 0-4 then 2-4, got %s\n' "$rp_ranges";;
 esac
+# Replay by start is opt-in on the server: a 0.3.10 client, which ignores
+# turn_end, gets only exact-range replays. This client advances to turn_end, so
+# it must say so on every digest.
+rp_modes=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.replay // "none"] | unique | join(",")' "$BO_LOG")
+assert_eq "$rp_modes" "by_start" "replay: every digest opts in to replay by start"
 kill $BO_PID 2>/dev/null
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
 
 # Test 10p: a worker that takes the lock after another finished sends from the
 # pointer, not from where its own Stop read it. W1 digests 0-2; a Stop at 4
 # read the pointer as 0 while W1 ran; W2, starting after W1, used to send 0-4,
-# digesting 0-2 twice -- and the server's replay check keys on the exact range.
+# digesting 0-2 twice on a server that replays only the exact range (and
+# costing a round trip on one that replays by start).
 ST_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 ST_LOG="$MNEMON_DIR/requests-st.log"
 : > "$ST_LOG"

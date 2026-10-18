@@ -2,7 +2,12 @@
 # Mnemon doctor: does this device's connection to its Mnemon instance work, and
 # if not, why not.
 #
-# Usage: mnemon-doctor.sh       (or /mnemon:doctor inside Claude Code)
+# Usage: mnemon-doctor.sh [--exit-zero]     (or /mnemon:doctor in Claude Code)
+#
+# --exit-zero is for the slash command: same report, stderr folded into stdout,
+# always exit 0. A failing `!` injection could swallow the report exactly when
+# it matters, and "|| true" would make it a compound command that allowed-tools
+# may not cover. The verdict is still the last line.
 #
 # Every check prints one line, "ok", "warn" or "FAIL", and a failure or warning
 # is followed by the fix. Exit 0 iff nothing FAILed.
@@ -20,6 +25,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../hooks/lib/common.sh
 . "$SCRIPT_DIR/../hooks/lib/common.sh"
 
+exit_zero=0
+if [ "${1:-}" = "--exit-zero" ]; then
+    exit_zero=1
+    exec 2>&1
+fi
+
 FAILS=0
 WARNS=0
 
@@ -31,11 +42,19 @@ SECRETS=()
 # Only values of 8+ characters are replaced. Replacement is by substring, so a
 # one-letter secret would shred every line it appeared in -- and one that short
 # turning up inside ordinary text is a coincidence, not a leak.
+#
+# URLs lose their userinfo (user:password@) and query string, either of which
+# can carry a credential.
 redact() {
     local line="$1" s
     for s in "${SECRETS[@]+"${SECRETS[@]}"}"; do
         [ "${#s}" -ge 8 ] && line="${line//"$s"/[redacted]}"
     done
+    case "$line" in
+        *://*) line=$(printf '%s\n' "$line" | sed -E \
+            -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]"]*@#\1#g' \
+            -e 's#([A-Za-z][A-Za-z0-9+.-]*://[^[:space:]"?]*)[?][^[:space:]"]*#\1#g') ;;
+    esac
     printf '%s\n' "$line"
 }
 
@@ -50,6 +69,7 @@ finish() {
         exit 0
     fi
     echo "$FAILS problem(s) found."
+    [ "$exit_zero" = 1 ] && exit 0
     exit 1
 }
 
@@ -59,8 +79,9 @@ case "$os" in
     *) windows=0 ;;
 esac
 
+# Paths are quoted: a Windows profile is often C:\Users\First Last.
 enrol_cmd() {  # Args: [instance-url] [client-id]
-    printf 'bash %s/scripts/mnemon-authorize.sh %s%s' \
+    printf 'bash "%s/scripts/mnemon-authorize.sh" %s%s' \
         "$MNEMON_PLUGIN_ROOT" "${1:-https://<your-instance>}" "${2:+ $2}"
 }
 
@@ -139,7 +160,8 @@ SECRETS+=("$token")
 
 if [ -n "$env_endpoint" ] && [ -n "$env_token" ]; then
     source_desc="environment (MNEMON_ENDPOINT/MNEMON_TOKEN)"
-elif [ "$config_ok" = 1 ] && [ -n "$(mnemon_config_value bearer_token '')" ]; then
+elif [ "$config_ok" = 1 ] && [ -n "$(mnemon_config_value bearer_token '')" ] \
+    && [ -n "$(mnemon_config_value endpoint '')" ]; then
     source_desc="$MNEMON_CONFIG"
 else
     source_desc="$HOME/.claude.json (mcpServers.mnemon)"
@@ -153,12 +175,16 @@ else
     ok "config: endpoint $endpoint, credentials from $source_desc; cannot self-renew (static token)"
 fi
 
+# The client id goes into every re-enrol hint, so the command is complete.
+client_id=""
+[ "$source_desc" = "$MNEMON_CONFIG" ] && client_id=$(mnemon_config_value client_id '')
+
 dead=0
 if [ "$config_ok" = 1 ] && [ "$(mnemon_config_value auth_state ok)" = "dead" ] \
     && [ "$source_desc" = "$MNEMON_CONFIG" ]; then
     dead=1
     fail "auth: this device's authorization is dead ($(mnemon_config_value auth_dead_reason unknown)) -- memory is off" \
-        "re-enrol: $(enrol_cmd "$(mnemon_instance_url)" "$(mnemon_config_value client_id '')")"
+        "re-enrol: $(enrol_cmd "$(mnemon_instance_url)" "$client_id")"
 fi
 
 # Mode bits mean nothing on Windows; there every file reads as 644.
@@ -166,7 +192,7 @@ if [ "$config_ok" = 1 ] && [ "$windows" = 0 ]; then
     mode=$(stat -c '%a' "$MNEMON_CONFIG" 2>/dev/null || stat -f '%Lp' "$MNEMON_CONFIG" 2>/dev/null)
     if [ -n "$mode" ] && [ "$mode" != "600" ] && [ "$mode" != "400" ]; then
         warn "config: $MNEMON_CONFIG has permissions $mode; it holds credentials and should be 600" \
-            "chmod 600 $MNEMON_CONFIG"
+            "chmod 600 \"$MNEMON_CONFIG\""
     fi
 fi
 
@@ -194,81 +220,122 @@ else
 fi
 
 # --- 5. Reachability ----------------------------------------------------------
-base="${endpoint%/}"
+# Measured here, printed after the tool call: a failed GET / with a working MCP
+# endpoint is a warning, not a failure, and only the call can tell which.
+ep="${endpoint%%\?*}"
+base="${ep%/}"
 base="${base%/mcp}"
-reachable=0
 http=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$base/" 2>/dev/null)
-rc=$?
-if [ "$rc" -ne 0 ]; then
-    case "$rc" in
+reach_rc=$?
+if [ "$reach_rc" -ne 0 ]; then
+    case "$reach_rc" in
+        5)  why="could not resolve the proxy (curl exit 5)"
+            fix="check the https_proxy / http_proxy settings in this environment" ;;
         6)  why="DNS lookup failed (could not resolve the host)"
             fix="check the hostname in the endpoint and this machine's DNS / network" ;;
         7)  why="connection refused or no route to the host"
             fix="check the instance is up and the endpoint's host and port are right" ;;
         28) why="timed out after 10s"
             fix="check the network, VPN or firewall between this machine and the instance" ;;
+        52) why="the server closed the connection without answering (curl exit 52)"
+            fix="check the instance's web server and any proxy in front of it" ;;
+        56) why="the connection broke while receiving (curl exit 56)"
+            fix="check the network, and any proxy or firewall that may be cutting connections" ;;
         35|51|53|54|58|59|60|64|66|77|80|82|83|90|91)
-            why="TLS failure (curl exit $rc: certificate or handshake problem)"
+            why="TLS failure (curl exit $reach_rc: certificate or handshake problem)"
             fix="check the instance's certificate; a corporate proxy may be intercepting TLS" ;;
-        *)  why="curl exit $rc"
-            fix="run: curl -v $base/" ;;
+        *)  why="curl exit $reach_rc"
+            fix="run: curl -v \"$base/\"" ;;
     esac
-    fail "reach: cannot reach $base -- $why" "$fix"
-else
-    reachable=1
-    if [ "${http:-0}" -ge 500 ] 2>/dev/null; then
-        warn "reach: $base answered HTTP $http (server error)" "check the instance's logs"
-    else
-        ok "reach: $base answered HTTP $http"
-    fi
 fi
 
 # --- 6. A real tool call ------------------------------------------------------
 # Snapshot the error log so step 7 reports what happened before this run, and
-# this step can find exactly the line its own call wrote.
+# this step reads exactly the lines its own call wrote.
 log_lines_before=0
 if [ -f "$MNEMON_ERROR_LOG" ]; then
     log_lines_before=$(wc -l < "$MNEMON_ERROR_LOG" | tr -d ' ')
 fi
 
-if [ "$reachable" = 0 ]; then
-    note "(tool call skipped: the instance is unreachable)"
-elif [ "$dead" = 1 ]; then
-    note "(tool call skipped: the authorization is dead)"
-else
+call_ok=0
+call_msg=""
+call_fix=""
+if [ "$dead" = 0 ]; then
     result=$(mnemon_call "tools/call" \
         "$(jq -n --arg v "$local_version" \
             'if $v == "" then {name:"palace_wake_up",arguments:{}}
              else {name:"palace_wake_up",arguments:{client_version:$v}} end')" \
         10000 "$endpoint" "$token")
     call_rc=$?
-    if [ "$call_rc" -eq 0 ] && [ -n "$result" ]; then
-        wings=$(printf '%s' "$result" | jq -r '[.structuredContent.active_wings[]?.slug] | join(", ")' 2>/dev/null)
-        ok "tool call: palace_wake_up succeeded; wings this device can reach: ${wings:-none with content yet}"
-        server_version=$(printf '%s' "$result" | jq -r '.structuredContent.plugin_version // empty' 2>/dev/null)
-        if [ -n "$server_version" ] && [ -n "$local_version" ] && [ "$server_version" != "$local_version" ]; then
-            warn "plugin: this device runs $local_version, the server ships $server_version" \
-                "claude plugin update mnemon"
-        fi
-    else
-        last=$(tail -n +"$((log_lines_before + 1))" "$MNEMON_ERROR_LOG" 2>/dev/null | tail -1 | sed 's/^\[[^]]*\] //')
-        case "$last" in
-            *"HTTP 401"*)
-                fail "tool call: authentication failed (HTTP 401) -- the server rejected this device's token" \
-                    "re-enrol: $(enrol_cmd "$base")" ;;
-            *"HTTP 403"*)
-                fail "tool call: access denied (HTTP 403) -- the token lacks the mcp:use scope or wing access" \
-                    "re-enrol and grant access on the consent screen: $(enrol_cmd "$base")" ;;
-            *"tool error"*)
-                fail "tool call: the server answered with an error: $last" \
-                    "check this device's wing restrictions in the Mnemon admin" ;;
-            "")
-                fail "tool call: palace_wake_up got no answer within 10s (network error or timeout)" \
-                    "retry; if it persists, check the instance's load and logs" ;;
-            *)
-                fail "tool call: palace_wake_up failed: $last" "check the instance's logs" ;;
-        esac
+    # A refresh during the call may have put new tokens in the config.
+    if [ "$config_ok" = 1 ]; then
+        SECRETS+=("$(jq -r '.bearer_token // empty' "$MNEMON_CONFIG" 2>/dev/null)")
+        SECRETS+=("$(jq -r '.refresh_token // empty' "$MNEMON_CONFIG" 2>/dev/null)")
     fi
+    if [ "$call_rc" -eq 0 ] && [ -n "$result" ]; then
+        call_ok=1
+    else
+        # Every line this run wrote, not just the last: a 401 whose refresh
+        # failed logs the refresh failure first and the 401 after it, and the
+        # two need opposite fixes.
+        mine=$(tail -n +"$((log_lines_before + 1))" "$MNEMON_ERROR_LOG" 2>/dev/null | sed 's/^\[[^]]*\] //')
+        last=$(printf '%s\n' "$mine" | grep -v '^$' | tail -1)
+        rejected=$(printf '%s\n' "$mine" | sed -n 's/.*refresh rejected (\([^)]*\)).*/\1/p' | tail -1)
+        if [ -n "$rejected" ]; then
+            call_msg="authorization is now dead ($rejected): the token expired and the server refused to renew it"
+            call_fix="re-enrol: $(enrol_cmd "$base" "$client_id")"
+        elif printf '%s\n' "$mine" | grep -qE 'refresh failed|refresh lock busy'; then
+            call_msg="token expired and renewal failed transiently (credentials kept): $(printf '%s\n' "$mine" | grep -E 'refresh failed|refresh lock busy' | tail -1)"
+            call_fix="retry in a minute; check $(mnemon_config_value token_endpoint "$base/oauth/token") is reachable"
+        else
+            case "$last" in
+                *"HTTP 401"*)
+                    call_msg="authentication failed (HTTP 401) -- the server rejected this device's token"
+                    call_fix="re-enrol: $(enrol_cmd "$base" "$client_id")" ;;
+                *"HTTP 403"*)
+                    call_msg="access denied (HTTP 403) -- the token lacks the mcp:use scope or wing access"
+                    call_fix="re-enrol and grant access on the consent screen: $(enrol_cmd "$base" "$client_id")" ;;
+                *"tool error"*)
+                    call_msg="the server answered with an error: $last"
+                    call_fix="check this device's wing restrictions in the Mnemon admin" ;;
+                "")
+                    call_msg="palace_wake_up got no answer (network error, or no reply within 10s)"
+                    call_fix="retry; if it persists, check the instance's load and logs" ;;
+                *)
+                    call_msg="palace_wake_up failed: $last"
+                    call_fix="check the instance's logs" ;;
+            esac
+        fi
+    fi
+fi
+
+if [ "$reach_rc" -ne 0 ]; then
+    if [ "$call_ok" = 1 ]; then
+        warn "reach: GET $base/ failed -- $why -- but the MCP endpoint answered" "$fix"
+    else
+        fail "reach: cannot reach $base -- $why" "$fix"
+    fi
+elif [ "${http:-0}" -ge 500 ] 2>/dev/null; then
+    warn "reach: $base answered HTTP $http (server error)" "check the instance's logs"
+else
+    ok "reach: $base answered HTTP $http"
+fi
+
+if [ "$dead" = 1 ]; then
+    note "(tool call skipped: the authorization is dead)"
+elif [ "$call_ok" = 1 ]; then
+    wings=$(printf '%s' "$result" | jq -r '[.structuredContent.active_wings[]?.slug] | join(", ")' 2>/dev/null)
+    ok "tool call: palace_wake_up succeeded; wings this device can reach: ${wings:-none with content yet}"
+    server_version=$(printf '%s' "$result" | jq -r '.structuredContent.plugin_version // empty' 2>/dev/null)
+    if [ -n "$server_version" ] && [ -n "$local_version" ] && [ "$server_version" != "$local_version" ]; then
+        warn "plugin: this device runs $local_version, the server ships $server_version" \
+            "claude plugin update mnemon"
+    fi
+elif [ "$reach_rc" -ne 0 ]; then
+    # Not counted again: it follows from the reachability failure above.
+    note "(tool call also failed, as expected with the instance unreachable: $call_msg)"
+else
+    fail "tool call: $call_msg" "$call_fix"
 fi
 
 # --- 7. Recent errors ---------------------------------------------------------

@@ -28,7 +28,7 @@ fi
 pair=$(mnemon_token) || {
     # The device flow is the way in now: the hooks can refresh, so an enrolled
     # device stays connected without anyone minting a long-lived token by hand.
-    printf 'Mnemon: not connected. Ask the Mnemon owner to run "php artisan mnemon:device-client <name>", then enrol this machine:\n  bash %s/scripts/mnemon-authorize.sh https://<your-instance>\nAgents that cannot refresh can instead put a personal access token in ~/.mnemon/config.json (chmod 600).\nTo check the connection: /mnemon:doctor\n' \
+    printf 'Mnemon: not connected. Ask the Mnemon owner to run "php artisan mnemon:device-client <name>", then enrol this machine:\n  bash "%s/scripts/mnemon-authorize.sh" https://<your-instance>\nAgents that cannot refresh can instead put a personal access token in ~/.mnemon/config.json (chmod 600).\nTo check the connection: /mnemon:doctor\n' \
         "$(dirname "$SCRIPT_DIR")"
     exit 0
 }
@@ -37,7 +37,7 @@ pair=$(mnemon_token) || {
 # else in these hooks degrades quietly by design; this one cannot, because no
 # amount of waiting fixes it and the machine has no browser to notice with.
 if [ "$(mnemon_config_value 'auth_state' 'ok')" = "dead" ]; then
-    printf 'Mnemon: this device'"'"'s authorization is dead (%s) — memory is off.\nRe-enrol: bash %s/scripts/mnemon-authorize.sh %s\nTo check the connection: /mnemon:doctor\n' \
+    printf 'Mnemon: this device'"'"'s authorization is dead (%s) — memory is off.\nRe-enrol: bash "%s/scripts/mnemon-authorize.sh" %s\nTo check the connection: /mnemon:doctor\n' \
         "$(mnemon_config_value 'auth_dead_reason' 'unknown')" \
         "$(dirname "$SCRIPT_DIR")" \
         "$(mnemon_instance_url)"

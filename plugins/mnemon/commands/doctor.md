@@ -5,14 +5,18 @@ allowed-tools: Bash(bash:*)
 
 Mnemon doctor report for this device:
 
-!`bash "${CLAUDE_PLUGIN_ROOT}/scripts/mnemon-doctor.sh" 2>&1 || true`
+!`bash "${CLAUDE_PLUGIN_ROOT}/scripts/mnemon-doctor.sh" --exit-zero`
 
 If the report above is empty, or says the script could not be found, run it
-yourself with the Bash tool: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/mnemon-doctor.sh"`
-(the script is `scripts/mnemon-doctor.sh` inside the installed mnemon plugin).
+yourself with the Bash tool (Claude Code does not set the plugin root there, so
+use the newest installed copy):
 
-Relay the report to the user as it is, in a code block, without the secrets it
-never contains anyway. Then, in a sentence or two:
+```bash
+bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-doctor.sh"
+```
+
+Relay the report to the user as it is, in a code block. Then, in a sentence or
+two:
 
 - if the last line is "All checks passed.", say the connection works and name
   any warnings worth acting on;

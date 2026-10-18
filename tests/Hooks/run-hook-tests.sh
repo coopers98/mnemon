@@ -1313,7 +1313,7 @@ doc_run() {
         -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
         -u MNEMON_DISABLE -u CLAUDE_PLUGIN_OPTION_MNEMON_DISABLE -u CLAUDE_PLUGIN_ROOT \
         HOME="$dir/home" MNEMON_DIR="$dir" MNEMON_CLAUDE_SETTINGS="$dir/settings.json" \
-        "$@" bash "$DOCTOR_SH" 2>&1)
+        "$@" bash "${DOC_SCRIPT:-$DOCTOR_SH}" ${DOC_ARGS:-} 2>&1)
     DOC_RC=$?
     DOC_ALL="$DOC_ALL
 $DOC_OUT"
@@ -1395,6 +1395,8 @@ doc_run "$DR4"
 assert_eq "$DOC_RC" "1" "doctor: an unreachable server exits 1"
 doc_line "FAIL" "reach|connect" "doctor: an unreachable server FAILs naming reachability"
 doc_no_line "FAIL" "auth|401|token" "doctor: an unreachable server is not blamed on the token"
+doc_has "1 problem(s) found." "doctor: an unreachable server counts once, not again for the tool call"
+doc_has "tool call also failed, as expected with the instance unreachable" "doctor: the tool call is still attempted and labelled as following from reachability"
 
 # DR5: plugin version mismatch is a warning, not a failure.
 DR5_PORT=$(rf_free_port); DR5_STATE=$(mktemp -d); DR5=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR5"
@@ -1436,7 +1438,8 @@ jq '. + {auth_state:"dead", auth_dead_reason:"invalid_grant"}' "$DR8/config.json
 doc_run "$DR8"
 assert_eq "$DOC_RC" "1" "doctor: a dead authorization exits 1"
 doc_line "FAIL" "dead.*invalid_grant|invalid_grant.*dead" "doctor: a dead authorization FAILs with its reason"
-doc_has "mnemon-authorize.sh http://127.0.0.1:$DR8_PORT" "doctor: the dead FAIL names the re-enrol command for this instance"
+doc_has "mnemon-authorize.sh\" http://127.0.0.1:$DR8_PORT cid" "doctor: the dead FAIL names the re-enrol command for this instance and client"
+assert_eq "$(grep -c jsonrpc "$DR8/req.log")" "0" "doctor: a dead authorization makes no MCP call"
 rf_stop_all
 
 # DR9: loose permissions and recent errors are warnings; env credentials are named.
@@ -1503,8 +1506,119 @@ case "$DOC_OUT" in
 esac
 rf_stop_all
 
+# DR13: a transient refresh failure is not a dead credential. mnemon_call logs
+# "refresh failed ... keeping credentials" and then the 401; reading only the
+# last line said "re-enrol", which would replace credentials that still work.
+DR13_PORT=$(rf_free_port); DR13_STATE=$(mktemp -d); DR13=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR13"
+rf_start "$DR13_PORT" "$DR13/req.log" "$DR13_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL=500
+doc_config "$DR13" "$DR13_PORT" "$(make_jwt -600)" renew
+DOC_JWT13=$(jq -r .bearer_token "$DR13/config.json")
+doc_run "$DR13"
+assert_eq "$DOC_RC" "1" "doctor: a transient refresh failure exits 1"
+doc_line "FAIL" "renewal failed transiently" "doctor: a transient refresh failure is named as such"
+case "$DOC_OUT" in
+    *mnemon-authorize*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: told a device with working credentials to re-enrol\n'; doc_show;;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: a transient refresh failure does not say re-enrol\n';;
+esac
+doc_has "http://127.0.0.1:$DR13_PORT/oauth/token" "doctor: the transient fix names the token endpoint"
+assert_eq "$(jq -r .bearer_token "$DR13/config.json")" "$DOC_JWT13" "doctor: credentials are kept after a transient refresh failure"
+rf_stop_all
+
+# DR14: a refresh rejected with invalid_grant kills the authorization during
+# the run; say so, with the re-enrol command for this client.
+DR14_PORT=$(rf_free_port); DR14_STATE=$(mktemp -d); DR14=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR14"
+rf_start "$DR14_PORT" "$DR14/req.log" "$DR14_STATE" FAKE_EXPIRE_FIRST=1 FAKE_REFRESH_FAIL=invalid_grant
+doc_config "$DR14" "$DR14_PORT" "$(make_jwt -600)" renew
+DOC_JWT14=$(jq -r .bearer_token "$DR14/config.json")
+doc_run "$DR14"
+assert_eq "$DOC_RC" "1" "doctor: a rejected refresh exits 1"
+doc_line "FAIL" "authorization is now dead \(invalid_grant\)" "doctor: a rejected refresh says the authorization is now dead"
+doc_has "mnemon-authorize.sh\" http://127.0.0.1:$DR14_PORT cid" "doctor: a rejected refresh names the re-enrol command with the client id"
+rf_stop_all
+
+# DR15: printed commands survive a path with a space (C:\Users\First Last).
+DR15_BASE=$(mktemp -d); DOC_DIRS="$DOC_DIRS $DR15_BASE"
+DR15="$DR15_BASE/First Last"; mkdir -p "$DR15/home"
+DR15_PORT=$(rf_free_port); DR15_STATE=$(mktemp -d)
+rf_start "$DR15_PORT" "$DR15_BASE/req.log" "$DR15_STATE"
+doc_config "$DR15" "$DR15_PORT" "$DOC_BEARER"
+chmod 644 "$DR15/config.json"
+doc_run "$DR15"
+dr15_fix=$(printf '%s\n' "$DOC_OUT" | grep 'fix: chmod 600' | head -1 | sed 's/^ *fix: //')
+( eval "$dr15_fix" ) >/dev/null 2>&1
+assert_eq "$(stat -c '%a' "$DR15/config.json")" "600" "doctor: the printed chmod works on a path with a space"
+rf_stop_all
+DR15_PLUG="$DR15_BASE/plug in/mnemon"; mkdir -p "$DR15_BASE/plug in"
+cp -r "$HOOKS_DIR/.." "$DR15_PLUG"
+rm -f "$DR15/config.json"
+DOC_SCRIPT="$DR15_PLUG/scripts/mnemon-doctor.sh" doc_run "$DR15"
+doc_has "bash \"$DR15_PLUG/scripts/mnemon-authorize.sh\"" "doctor: the enrol command quotes a plugin path with a space"
+out=$(printf '{"session_id":"dr15","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN HOME="$DR15/home" MNEMON_DIR="$DR15" bash "$DR15_PLUG/hooks/mnemon-wake.sh" 2>/dev/null)
+case "$out" in
+    *"bash \"$DR15_PLUG/scripts/mnemon-authorize.sh\""*) PASS=$((PASS+1)); printf '  ok: wake: the not-connected banner quotes the script path\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: banner path unquoted, got: %s\n' "$out";;
+esac
+
+# DR16: the slash command's mode. --exit-zero reports the same and exits 0, so
+# the command needs no "|| true" -- a compound command allowed-tools may not
+# cover. Everything goes to stdout.
+DOC_ARGS=--exit-zero doc_run "$DR2"
+assert_eq "$DOC_RC" "0" "doctor: --exit-zero exits 0 even with a FAIL"
+doc_has "1 problem(s) found." "doctor: --exit-zero still reports the problem"
+dr16_line=$(grep '^!`' "$HOOKS_DIR/../commands/doctor.md")
+case "$dr16_line" in
+    *"--exit-zero"*) PASS=$((PASS+1)); printf '  ok: command: runs the doctor in --exit-zero mode\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: command: does not use --exit-zero: %s\n' "$dr16_line";;
+esac
+case "$dr16_line" in
+    *"||"*|*"&&"*|*";"*|*"|"*|*">"*) FAIL=$((FAIL+1)); printf '  FAIL: command: the injection is not a single command: %s\n' "$dr16_line";;
+    *) PASS=$((PASS+1)); printf '  ok: command: the injection is a single command\n';;
+esac
+if grep -q 'CLAUDE_PLUGIN_ROOT' <(grep -v '^!`' "$HOOKS_DIR/../commands/doctor.md"); then
+    FAIL=$((FAIL+1)); printf '  FAIL: command: the Bash-tool fallback relies on CLAUDE_PLUGIN_ROOT\n'
+else
+    PASS=$((PASS+1)); printf '  ok: command: the Bash-tool fallback does not rely on CLAUDE_PLUGIN_ROOT\n'
+fi
+
+# DR17: a secret that does reach the text is redacted -- so the sweep below is
+# not vacuous -- and URLs lose their userinfo and query string.
+DR17_PORT=$(rf_free_port); DR17_STATE=$(mktemp -d); DR17=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR17"
+rf_start "$DR17_PORT" "$DR17/req.log" "$DR17_STATE"
+jq -n --arg e "http://user:pw-URLSECRET-9@127.0.0.1:$DR17_PORT/mcp?key=QUERYSECRET-9" --arg b "$DOC_BEARER" \
+    '{endpoint:$e, bearer_token:$b}' > "$DR17/config.json"
+chmod 600 "$DR17/config.json"
+printf '[%s] upstream echoed: Authorization: Bearer %s\n' "$(date -u +%FT%TZ)" "$DOC_BEARER" > "$DR17/capture-errors.log"
+doc_run "$DR17"
+doc_has "[redacted]" "doctor: a token in an error line is shown as [redacted]"
+case "$DOC_OUT" in
+    *URLSECRET*|*QUERYSECRET*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: printed URL userinfo or query string\n'; doc_show;;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: URLs are printed without userinfo or query string\n';;
+esac
+doc_line "ok" "tool call: palace_wake_up succeeded" "doctor: an endpoint with userinfo and query still works"
+rf_stop_all
+
+# DR18: a config with a token but no endpoint is not the credential source.
+DR18_PORT=$(rf_free_port); DR18_STATE=$(mktemp -d); DR18=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR18"
+rf_start "$DR18_PORT" "$DR18/req.log" "$DR18_STATE"
+jq -n --arg b "$DOC_BEARER" '{bearer_token:$b}' > "$DR18/config.json"; chmod 600 "$DR18/config.json"
+jq -n --arg u "http://127.0.0.1:$DR18_PORT/mcp" --arg a "Bearer $DOC_BEARER" \
+    '{mcpServers:{mnemon:{url:$u, headers:{Authorization:$a}}}}' > "$DR18/home/.claude.json"
+doc_run "$DR18"
+doc_line "ok" "credentials from .*\.claude\.json" "doctor: a config without an endpoint is not named as the source"
+rf_stop_all
+
+# DR19: a 401 that survives a successful refresh names the client in the fix.
+DR19_PORT=$(rf_free_port); DR19_STATE=$(mktemp -d); DR19=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR19"
+rf_start "$DR19_PORT" "$DR19/req.log" "$DR19_STATE" FAKE_STATUS=401
+doc_config "$DR19" "$DR19_PORT" "$DOC_BEARER" renew
+doc_run "$DR19"
+doc_line "FAIL" "HTTP 401" "doctor: a 401 after a good refresh is an authentication FAIL"
+doc_has "mnemon-authorize.sh\" http://127.0.0.1:$DR19_PORT cid" "doctor: the 401 fix names the client id"
+rf_stop_all
+
 # No run, healthy or not, prints a secret.
-for s in "$DOC_BEARER" "$DOC_REFRESH" "$DOC_CSEC" "$DOC_JWT1" "$DOC_JWT6" "$DOC_JWT7" "token-2" "refresh-2"; do
+for s in "$DOC_BEARER" "$DOC_REFRESH" "$DOC_CSEC" "$DOC_JWT1" "$DOC_JWT6" "$DOC_JWT7" "$DOC_JWT13" "$DOC_JWT14" "token-2" "refresh-2"; do
     case "$DOC_ALL" in
         *"$s"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: printed a secret (%s...)\n' "${s:0:12}";;
         *) PASS=$((PASS+1)); printf '  ok: doctor: never prints %s...\n' "${s:0:12}";;

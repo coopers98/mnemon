@@ -123,6 +123,48 @@ if [ -n "$local_version" ] && CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$MNEMON_
         "remove the mnemon-* hook entries from $MNEMON_CLAUDE_SETTINGS"
 fi
 
+# Plugin auto-update. Off by default for third-party marketplaces, so a device
+# otherwise stays on the version it installed. Read with Claude Code's own
+# precedence: the extraKnownMarketplaces entry in settings.json, then what the
+# /plugin UI writes to known_marketplaces.json, then off. Read only.
+if [ -n "$local_version" ]; then
+    claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    known="${MNEMON_KNOWN_MARKETPLACES:-$claude_dir/plugins/known_marketplaces.json}"
+    # The marketplace is the cache directory the plugin was installed into:
+    # .../plugins/cache/<marketplace>/mnemon/<version>.
+    mp_name="mnemon"
+    case "$MNEMON_PLUGIN_ROOT" in
+        */plugins/cache/*/mnemon/*)
+            mp_name="${MNEMON_PLUGIN_ROOT%/mnemon/*}"
+            mp_name="${mp_name##*/}" ;;
+    esac
+    au_jq='(.extraKnownMarketplaces // {})[$n] // {} | if type == "object" and has("autoUpdate") then (.autoUpdate | tostring) else empty end'
+    au_val=$(jq -r --arg n "$mp_name" "$au_jq" "$MNEMON_CLAUDE_SETTINGS" 2>/dev/null)
+    au_src="$MNEMON_CLAUDE_SETTINGS"
+    if [ -z "$au_val" ]; then
+        au_val=$(jq -r --arg n "$mp_name" '.[$n] // {} | if type == "object" and has("autoUpdate") then (.autoUpdate | tostring) else empty end' "$known" 2>/dev/null)
+        au_src="$known"
+    fi
+    au_off_by=""
+    for v in DISABLE_UPDATES DISABLE_AUTOUPDATER CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC; do
+        case "${!v:-}" in ''|0|false) ;; *) au_off_by="${au_off_by:+$au_off_by, }$v=${!v}" ;; esac
+    done
+    au_forced=0
+    case "${FORCE_AUTOUPDATE_PLUGINS:-}" in ''|0|false) ;; *) au_forced=1 ;; esac
+    au_manual="new releases need \"claude plugin update mnemon@$mp_name\""
+    if [ "$au_val" != "true" ]; then
+        warn "plugin auto-update: off -- $au_manual" \
+            "in Claude Code: /plugin > Marketplaces > $mp_name > Enable auto-update, or re-run the setup script: curl -fsSL $(mnemon_instance_url)/install | bash"
+    elif [ -n "$au_off_by" ] && [ "$au_forced" = 0 ]; then
+        warn "plugin auto-update: on in $au_src, but disabled in this environment by $au_off_by -- $au_manual" \
+            "unset $(printf '%s' "$au_off_by" | sed 's/=[^,]*//g'), or set FORCE_AUTOUPDATE_PLUGINS=1 to keep plugin updates"
+    elif [ -n "$au_off_by" ]; then
+        ok "plugin auto-update: on ($au_src; FORCE_AUTOUPDATE_PLUGINS overrides $au_off_by)"
+    else
+        ok "plugin auto-update: on ($au_src)"
+    fi
+fi
+
 # --- 3. Config ----------------------------------------------------------------
 config_ok=0
 if [ -f "$MNEMON_CONFIG" ]; then

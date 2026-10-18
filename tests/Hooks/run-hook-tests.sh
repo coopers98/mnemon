@@ -1312,7 +1312,10 @@ doc_run() {
     DOC_OUT=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN \
         -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
         -u MNEMON_DISABLE -u CLAUDE_PLUGIN_OPTION_MNEMON_DISABLE -u CLAUDE_PLUGIN_ROOT \
+        -u DISABLE_UPDATES -u DISABLE_AUTOUPDATER -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
+        -u FORCE_AUTOUPDATE_PLUGINS -u CLAUDE_CONFIG_DIR \
         HOME="$dir/home" MNEMON_DIR="$dir" MNEMON_CLAUDE_SETTINGS="$dir/settings.json" \
+        MNEMON_KNOWN_MARKETPLACES="$dir/known_marketplaces.json" \
         "$@" bash "${DOC_SCRIPT:-$DOCTOR_SH}" ${DOC_ARGS:-} 2>&1)
     DOC_RC=$?
     DOC_ALL="$DOC_ALL
@@ -1348,6 +1351,7 @@ doc_has() {
 DR1_PORT=$(rf_free_port); DR1_STATE=$(mktemp -d); DR1=$(doc_dir); DOC_DIRS="$DOC_DIRS $DR1"
 rf_start "$DR1_PORT" "$DR1/req.log" "$DR1_STATE" FAKE_PLUGIN_VERSION="$LOCAL_VERSION"
 doc_config "$DR1" "$DR1_PORT" "$(make_jwt 3000)" renew
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$DR1/settings.json"
 DOC_JWT1=$(jq -r .bearer_token "$DR1/config.json")
 doc_run "$DR1"
 assert_eq "$DOC_RC" "0" "doctor: a healthy device exits 0"
@@ -1616,6 +1620,194 @@ doc_run "$DR19"
 doc_line "FAIL" "HTTP 401" "doctor: a 401 after a good refresh is an authentication FAIL"
 doc_has "mnemon-authorize.sh\" http://127.0.0.1:$DR19_PORT cid" "doctor: the 401 fix names the client id"
 rf_stop_all
+
+# --- Plugin auto-update ---------------------------------------------------------
+# Claude Code leaves auto-update off for third-party marketplaces, so a device
+# stays on whatever it installed until someone runs "claude plugin update". The
+# doctor reports the effective setting; the setup script turns it on.
+
+# AU1-AU6: the doctor's line. No config, so the run stops at the config check --
+# the plugin section, where this line lives, comes first.
+AU=$(doc_dir); DOC_DIRS="$DOC_DIRS $AU"
+au_line() { printf '%s\n' "$DOC_OUT" | grep -E '^(ok|warn|FAIL) +plugin auto-update' | head -1; }
+
+# AU1: on via settings.json's extraKnownMarketplaces entry.
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$AU/settings.json"
+printf '{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"}}}' > "$AU/known_marketplaces.json"
+au_sum=$(cat "$AU/settings.json" "$AU/known_marketplaces.json" | cksum)
+doc_run "$AU"
+case "$(au_line)" in
+    "ok "*"auto-update: on"*settings.json*) PASS=$((PASS+1)); printf '  ok: doctor: auto-update on via settings.json\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: auto-update via settings.json, got: %s\n' "$(au_line)"; doc_show;;
+esac
+assert_eq "$(cat "$AU/settings.json" "$AU/known_marketplaces.json" | cksum)" "$au_sum" "doctor: never writes the Claude Code settings"
+
+# AU2: on via known_marketplaces.json (what the /plugin UI writes).
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"}}}}' > "$AU/settings.json"
+printf '{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}' > "$AU/known_marketplaces.json"
+doc_run "$AU"
+case "$(au_line)" in
+    "ok "*"auto-update: on"*known_marketplaces.json*) PASS=$((PASS+1)); printf '  ok: doctor: auto-update on via known_marketplaces.json\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: auto-update via known_marketplaces.json, got: %s\n' "$(au_line)";;
+esac
+
+# AU3: settings.json wins. false there beats true in known_marketplaces.json.
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":false}}}' > "$AU/settings.json"
+doc_run "$AU"
+case "$(au_line)" in
+    "warn "*"auto-update: off"*) PASS=$((PASS+1)); printf '  ok: doctor: settings.json takes precedence over known_marketplaces.json\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: precedence wrong, got: %s\n' "$(au_line)";;
+esac
+
+# AU4: off -- a warning with the manual command and the fix, never a FAIL.
+rm -f "$AU/settings.json" "$AU/known_marketplaces.json"
+doc_run "$AU"
+case "$(au_line)" in
+    "warn "*"auto-update: off"*'claude plugin update mnemon@mnemon'*) PASS=$((PASS+1)); printf '  ok: doctor: auto-update off is a warning naming the manual update\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: auto-update off, got: %s\n' "$(au_line)"; doc_show;;
+esac
+doc_has "/plugin" "doctor: the auto-update fix names the /plugin UI path"
+doc_has "/install" "doctor: the auto-update fix names the setup script"
+doc_no_line "FAIL" "auto-update" "doctor: auto-update off is never a FAIL"
+
+# AU5: on, but switched off by the environment.
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$AU/settings.json"
+doc_run "$AU" DISABLE_AUTOUPDATER=1
+case "$(au_line)" in
+    "warn "*DISABLE_AUTOUPDATER*) PASS=$((PASS+1)); printf '  ok: doctor: names the env var that disables auto-update\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: env-disabled auto-update, got: %s\n' "$(au_line)";;
+esac
+doc_run "$AU" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+case "$(au_line)" in
+    "warn "*CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC*) PASS=$((PASS+1)); printf '  ok: doctor: nonessential-traffic switch counts as disabling\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: nonessential traffic not reported, got: %s\n' "$(au_line)";;
+esac
+
+# AU6: FORCE_AUTOUPDATE_PLUGINS overrides the disabling switch.
+doc_run "$AU" DISABLE_UPDATES=1 FORCE_AUTOUPDATE_PLUGINS=1
+case "$(au_line)" in
+    "ok "*"auto-update: on"*FORCE_AUTOUPDATE_PLUGINS*) PASS=$((PASS+1)); printf '  ok: doctor: FORCE_AUTOUPDATE_PLUGINS overrides the disabling switch\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: doctor: force override, got: %s\n' "$(au_line)";;
+esac
+
+# --- Setup script: turning auto-update on --------------------------------------
+# The stub is what /install serves, with two placeholders filled in. Rendered
+# here the way the controller renders it, then either sourced for its enable
+# function or run whole against a fake `claude`. Every case has its own HOME and
+# CLAUDE_CONFIG_DIR, so the real ~/.claude is never in reach.
+STUB="$THIS_DIR/../../resources/install/install.sh.stub"
+IN_DIR=$(mktemp -d); DOC_DIRS="$DOC_DIRS $IN_DIR"
+IN_SH="$IN_DIR/install.sh"
+sed -e 's#{{INSTANCE_URL}}#https://mnemon.example.test#g' -e 's#{{MARKETPLACE}}#coopers98/mnemon#g' "$STUB" > "$IN_SH"
+# A `claude` that refuses everything, first on PATH for the enable-step cases:
+# if the library guard ever regressed, sourcing the stub would run the whole
+# install, and it must not reach the real binary.
+mkdir -p "$IN_DIR/nobin"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$IN_DIR/nobin/claude"; chmod +x "$IN_DIR/nobin/claude"
+
+# Args: <case-dir> [VAR=value ...]. Runs the enable step alone; sets IN_OUT.
+in_enable() {
+    local d="$1"; shift
+    mkdir -p "$d/home" "$d/claude"
+    IN_OUT=$(env -u MNEMON_NO_AUTOUPDATE PATH="$IN_DIR/nobin:$PATH" HOME="$d/home" CLAUDE_CONFIG_DIR="$d/claude" "$@" \
+        bash -c 'MNEMON_INSTALL_LIB_ONLY=1; . "$1"; mnemon_enable_autoupdate' _ "$IN_SH" 2>&1)
+    IN_RC=$?
+}
+in_has() {
+    case "$IN_OUT" in
+        *"$1"*) PASS=$((PASS+1)); printf '  ok: %s\n' "$2";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: %s\n    output: %s\n' "$2" "$IN_OUT";;
+    esac
+}
+
+# I1: no settings file yet -- created with the right source and autoUpdate.
+I1="$IN_DIR/i1"
+in_enable "$I1"
+assert_eq "$IN_RC" "0" "install: enabling auto-update succeeds with no settings file"
+assert_eq "$(jq -c '.extraKnownMarketplaces.mnemon' "$I1/claude/settings.json" 2>/dev/null)" \
+    '{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}' \
+    "install: creates the marketplace entry with its github source and autoUpdate"
+in_has "Turned on auto-update for the mnemon marketplace in $I1/claude/settings.json" "install: says what it did"
+
+# I2: an existing entry without autoUpdate, among other settings. Merged in;
+# nothing else moves; a backup of the original exists; the file mode is kept.
+I2="$IN_DIR/i2"; mkdir -p "$I2/claude"
+cat > "$I2/claude/settings.json" <<'JSON'
+{
+  "theme": "dark",
+  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/x/other.sh"}]}]},
+  "extraKnownMarketplaces": {
+    "mnemon": {"source": {"source": "github", "repo": "someone-else/mnemon"}},
+    "other": {"source": {"source": "github", "repo": "a/b"}}
+  }
+}
+JSON
+chmod 640 "$I2/claude/settings.json"
+i2_orig=$(cat "$I2/claude/settings.json")
+in_enable "$I2"
+assert_eq "$(jq -c '.extraKnownMarketplaces.mnemon' "$I2/claude/settings.json")" \
+    '{"source":{"source":"github","repo":"someone-else/mnemon"},"autoUpdate":true}' \
+    "install: merges autoUpdate into the existing entry and keeps its source"
+assert_eq "$(jq -c 'del(.extraKnownMarketplaces.mnemon.autoUpdate)' "$I2/claude/settings.json")" \
+    "$(printf '%s' "$i2_orig" | jq -c .)" "install: every other setting is preserved"
+i2_backup=$(ls "$I2/claude"/settings.json.mnemon-backup-* 2>/dev/null | head -1)
+assert_eq "$(cat "$i2_backup" 2>/dev/null)" "$i2_orig" "install: backs up settings.json before changing it"
+assert_eq "$(stat -c '%a' "$I2/claude/settings.json")" "640" "install: keeps the settings file's mode"
+assert_eq "$(ls -A "$I2/claude" | grep -c 'tmp')" "0" "install: leaves no temp file behind"
+
+# I3: settings.json that is not plain JSON (comments) is left byte-identical.
+I3="$IN_DIR/i3"; mkdir -p "$I3/claude"
+printf '{\n  // my settings\n  "theme": "dark"\n}\n' > "$I3/claude/settings.json"
+i3_orig=$(cksum < "$I3/claude/settings.json")
+in_enable "$I3"
+assert_eq "$IN_RC" "0" "install: unreadable settings do not abort the setup"
+assert_eq "$(cksum < "$I3/claude/settings.json")" "$i3_orig" "install: settings that are not valid JSON are left untouched"
+assert_eq "$(ls "$I3/claude"/settings.json.mnemon-backup-* 2>/dev/null | wc -l | tr -d ' ')" "0" "install: no backup when nothing was changed"
+in_has "/plugin" "install: unreadable settings get the manual /plugin instruction"
+
+# I4: the opt-out.
+I4="$IN_DIR/i4"; mkdir -p "$I4/claude"
+printf '{"theme":"dark"}' > "$I4/claude/settings.json"
+in_enable "$I4" MNEMON_NO_AUTOUPDATE=1
+assert_eq "$(cat "$I4/claude/settings.json")" '{"theme":"dark"}' "install: MNEMON_NO_AUTOUPDATE=1 changes nothing"
+in_has "MNEMON_NO_AUTOUPDATE" "install: the opt-out says it was honoured"
+
+# I5: already on -- nothing to do, nothing rewritten.
+I5="$IN_DIR/i5"; mkdir -p "$I5/claude"
+printf '{"extraKnownMarketplaces":{"mnemon":{"source":{"source":"github","repo":"coopers98/mnemon"},"autoUpdate":true}}}' > "$I5/claude/settings.json"
+i5_orig=$(cksum < "$I5/claude/settings.json")
+in_enable "$I5"
+assert_eq "$(cksum < "$I5/claude/settings.json")" "$i5_orig" "install: an entry already on is not rewritten"
+in_has "already on" "install: says auto-update was already on"
+
+# I6: the whole script, against a fake `claude` that records what it was asked.
+I6="$IN_DIR/i6"; mkdir -p "$I6/bin" "$I6/home" "$I6/claude"
+cat > "$I6/bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_CLAUDE_LOG"
+exit 0
+FAKE
+chmod +x "$I6/bin/claude"
+i6_out=$(env -u MNEMON_NO_AUTOUPDATE PATH="$I6/bin:$PATH" HOME="$I6/home" CLAUDE_CONFIG_DIR="$I6/claude" \
+    FAKE_CLAUDE_LOG="$I6/claude.log" bash "$IN_SH" 2>&1); i6_rc=$?
+assert_eq "$i6_rc" "0" "install: the whole script runs to the end"
+case "$i6_out" in
+    *"Turned on auto-update for the mnemon marketplace"*) PASS=$((PASS+1)); printf '  ok: install: the full run turns auto-update on\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: install: full run did not enable auto-update:\n%s\n' "$i6_out";;
+esac
+assert_eq "$(jq -r '.extraKnownMarketplaces.mnemon.autoUpdate' "$I6/claude/settings.json" 2>/dev/null)" "true" \
+    "install: the full run leaves autoUpdate true in settings.json"
+case "$i6_out" in
+    *"Plugin installed."*"auto-update"*"One step left"*) PASS=$((PASS+1)); printf '  ok: install: auto-update comes after the plugin install, before the last step\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: install: auto-update step out of place\n';;
+esac
+i6b_out=$(PATH="$I6/bin:$PATH" HOME="$I6/home" CLAUDE_CONFIG_DIR="$IN_DIR/i6b" MNEMON_NO_AUTOUPDATE=1 \
+    FAKE_CLAUDE_LOG="$I6/claude.log" bash "$IN_SH" 2>&1)
+case "$i6b_out" in
+    *"MNEMON_NO_AUTOUPDATE"*) PASS=$((PASS+1)); printf '  ok: install: a full run with the opt-out says so\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: install: full opt-out run silent about it\n';;
+esac
+assert_eq "$([ -e "$IN_DIR/i6b/settings.json" ] && echo exists || echo absent)" "absent" "install: a full run with the opt-out writes no settings"
 
 # No run, healthy or not, prints a secret.
 for s in "$DOC_BEARER" "$DOC_REFRESH" "$DOC_CSEC" "$DOC_JWT1" "$DOC_JWT6" "$DOC_JWT7" "$DOC_JWT13" "$DOC_JWT14" "token-2" "refresh-2"; do

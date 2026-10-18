@@ -79,6 +79,24 @@ class InstallScriptTest extends TestCase
             'a URL that cannot be quoted safely falls back to the placeholder');
     }
 
+    public function test_it_turns_on_plugin_auto_update_with_an_opt_out(): void
+    {
+        // Claude Code leaves auto-update off for third-party marketplaces, so a
+        // device installed from this script would otherwise stay on its first
+        // version. The behaviour itself is exercised against a sandboxed HOME in
+        // tests/Hooks/run-hook-tests.sh; this pins that the served script has it.
+        $body = $this->get('/install')->getContent();
+
+        $this->assertStringContainsString('extraKnownMarketplaces', $body);
+        $this->assertStringContainsString('autoUpdate: true', $body);
+        $this->assertStringContainsString('MNEMON_NO_AUTOUPDATE', $body,
+            'turning auto-update on must have an opt-out');
+        $this->assertStringContainsString('/plugin', $body,
+            'when it cannot edit settings safely it must say how to do it by hand');
+        $this->assertMatchesRegularExpression('/^mnemon_enable_autoupdate$/m', $body,
+            'the setup must actually call the enable step');
+    }
+
     public function test_it_does_not_enrol_on_the_users_behalf(): void
     {
         // Enrolment needs a client id and secret that only the instance owner

@@ -14,8 +14,9 @@ MNEMON_CONFIG="$MNEMON_DIR/config.json"
 MNEMON_SESSIONS_DIR="$MNEMON_DIR/sessions"
 MNEMON_ERROR_LOG="$MNEMON_DIR/capture-errors.log"
 # Where Claude Code's own hook registrations live. Overridable so the tests can
-# point at a fixture instead of the real one.
-MNEMON_CLAUDE_SETTINGS="${MNEMON_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+# point at a fixture instead of the real one. CLAUDE_CONFIG_DIR is Claude Code's
+# own relocation of ~/.claude.
+MNEMON_CLAUDE_SETTINGS="${MNEMON_CLAUDE_SETTINGS:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json}"
 
 mkdir -p "$MNEMON_SESSIONS_DIR" 2>/dev/null || true
 

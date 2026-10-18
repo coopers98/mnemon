@@ -19,7 +19,104 @@ set -euo pipefail
 INSTANCE='{{INSTANCE_URL}}'
 MARKETPLACE='{{MARKETPLACE}}'
 
+# The marketplace name `claude plugin marketplace add` registers: the `name` in
+# the repository's .claude-plugin/marketplace.json.
+MARKETPLACE_NAME='mnemon'
+
 say() { printf '%s\n' "$*"; }
+
+# Turn on plugin auto-update for this marketplace.
+#
+# Claude Code leaves auto-update off for third-party marketplaces, and
+# marketplace.json has no field to change that, so without this a device stays
+# on the plugin version it installed until someone runs `claude plugin update`.
+# The switch is `autoUpdate: true` on the marketplace's extraKnownMarketplaces
+# entry in user settings. Same-name entries in different settings files replace
+# each other whole, so it is merged into the existing entry, keeping its
+# `source`, and never written as a fresh file over the user's own settings.
+#
+# Never fails the setup: anything it cannot do safely, it says how to do by hand.
+mnemon_enable_autoupdate() {
+    local dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    local settings="$dir/settings.json"
+    local manual="To turn it on by hand: in Claude Code run /plugin, open Marketplaces, select ${MARKETPLACE_NAME}, and choose Enable auto-update."
+    local src backup tmp
+
+    case "${MNEMON_NO_AUTOUPDATE:-}" in
+        ''|0|false|no) ;;
+        *)
+            say "Left plugin auto-update alone (MNEMON_NO_AUTOUPDATE is set). Update with: claude plugin update mnemon@${MARKETPLACE_NAME}"
+            return 0 ;;
+    esac
+
+    # A github owner/repo spec has a known source shape; anything else is only
+    # merged into an entry that already carries its own source.
+    src='null'
+    if [[ "$MARKETPLACE" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        src=$(jq -cn --arg r "$MARKETPLACE" '{source:"github", repo:$r}')
+    fi
+
+    if [ -f "$settings" ]; then
+        if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+            say "Did not turn on plugin auto-update: $settings is not plain JSON (comments?), so it was left untouched."
+            say "$manual"
+            return 0
+        fi
+        if jq -e --arg n "$MARKETPLACE_NAME" '.extraKnownMarketplaces[$n].autoUpdate == true' "$settings" >/dev/null 2>&1; then
+            say "Plugin auto-update is already on for the ${MARKETPLACE_NAME} marketplace."
+            return 0
+        fi
+    fi
+
+    if [ "$src" = 'null' ] && ! jq -e --arg n "$MARKETPLACE_NAME" \
+        '.extraKnownMarketplaces[$n].source != null' "$settings" >/dev/null 2>&1; then
+        say "Did not turn on plugin auto-update: no ${MARKETPLACE_NAME} marketplace entry in $settings to add it to."
+        say "$manual"
+        return 0
+    fi
+
+    mkdir -p "$dir" 2>/dev/null || { say "$manual"; return 0; }
+    tmp="$settings.mnemon-tmp.$$"
+    backup=""
+    if [ -f "$settings" ]; then
+        backup="$settings.mnemon-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+        if ! cp -p "$settings" "$backup" 2>/dev/null; then
+            say "Did not turn on plugin auto-update: could not back up $settings."
+            say "$manual"
+            return 0
+        fi
+        # Copied first so the temp file carries the original's mode; the
+        # redirect below truncates it without changing that.
+        cp -p "$settings" "$tmp" 2>/dev/null || true
+    else
+        printf '{}' > "$tmp.in" 2>/dev/null
+    fi
+
+    if jq --arg n "$MARKETPLACE_NAME" --argjson src "$src" '
+            .extraKnownMarketplaces = ((.extraKnownMarketplaces // {})
+                | .[$n] = ((.[$n] // {})
+                    + (if (.[$n].source // null) == null then {source: $src} else {} end)
+                    + {autoUpdate: true}))' \
+            "$( [ -n "$backup" ] && printf '%s' "$settings" || printf '%s' "$tmp.in" )" > "$tmp" 2>/dev/null \
+        && jq -e . "$tmp" >/dev/null 2>&1 \
+        && mv -f "$tmp" "$settings"; then
+        rm -f "$tmp.in"
+        say "Turned on auto-update for the ${MARKETPLACE_NAME} marketplace in $settings${backup:+ (backup: $backup)}."
+        return 0
+    fi
+
+    rm -f "$tmp" "$tmp.in"
+    [ -n "$backup" ] && rm -f "$backup"
+    say "Did not turn on plugin auto-update: could not update $settings; it was left untouched."
+    say "$manual"
+    return 0
+}
+
+# The hook tests source this file for the function above, without running the
+# setup. Nothing a real run sets.
+if [ "${MNEMON_INSTALL_LIB_ONLY:-}" = 1 ]; then
+    return 0
+fi
 
 say "Mnemon setup for ${INSTANCE}"
 say
@@ -45,14 +142,15 @@ fi
 # --- plugin ------------------------------------------------------------------
 say "Adding the marketplace..."
 claude plugin marketplace add "$MARKETPLACE" 2>/dev/null \
-    || claude plugin marketplace update mnemon >/dev/null 2>&1 \
+    || claude plugin marketplace update "$MARKETPLACE_NAME" >/dev/null 2>&1 \
     || true
 
 say "Installing the plugin..."
-claude plugin install mnemon@mnemon
+claude plugin install "mnemon@${MARKETPLACE_NAME}"
 
 say
 say "Plugin installed."
+mnemon_enable_autoupdate
 say
 
 # --- what is left ------------------------------------------------------------

@@ -971,6 +971,79 @@ case "$pem_big" in
     *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: a megabyte after BEGIN came back empty\n';;
 esac
 
+# An inline transcript cannot be resumed part-way, so turns that do not fit
+# max_digest_chars are dropped -- and that is logged now. The limit is the
+# server's, counted in characters: a byte cut (head -c) split a multi-byte
+# character or the JSON itself. Whole turns are trimmed; a lone turn too long
+# for the limit has its text cut, and the payload stays valid JSON.
+m1_dir=$(mktemp -d); mkdir -p "$m1_dir/sessions"
+printf '{"endpoint":"http://127.0.0.1:1/mcp","bearer_token":"t","max_digest_chars":400}' > "$m1_dir/config.json"
+python3 -c '
+import json
+for i in range(1, 7):
+    role = "user" if i % 2 else "assistant"
+    text = "M1-TURN-%d " % i + "héllo wörld ✓ " * 6
+    content = text if role == "user" else [{"type": "text", "text": text}]
+    print(json.dumps({"type": role, "message": {"role": role, "content": content}}))' > "$m1_dir/inline.jsonl"
+MNEMON_DIR="$m1_dir" bash -c '. "$1/lib/common.sh"; mnemon_digest_text "$2" "$3"' _ "$HOOKS_DIR" "$m1_dir/inline.jsonl" "$m1_dir/out.json" >/dev/null
+assert_eq "$(jq -r 'type' "$m1_dir/out.json" 2>/dev/null)" "array" "inline: a payload over max_digest_chars is still a JSON array"
+assert_eq "$(jq -r 'tojson | length <= 400' "$m1_dir/out.json" 2>/dev/null)" "true" "inline: the payload fits max_digest_chars, counted in characters"
+assert_eq "$(jq -r '[.[].text] | join(" ") | test("M1-TURN-1 ") and (test("M1-TURN-6") | not)' "$m1_dir/out.json" 2>/dev/null)" "true" \
+    "inline: the oldest turns are kept and the newest dropped"
+if grep -qE 'inline transcript: [0-9]+ newest turn\(s\) over max_digest_chars=400 were not sent' "$m1_dir/capture-errors.log" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  ok: inline: dropped turns are logged\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: inline: dropped turns were not logged: %s\n' "$(cat "$m1_dir/capture-errors.log" 2>/dev/null | head -c 200)"
+fi
+python3 -c '
+import json
+print(json.dumps({"type": "user", "message": {"role": "user", "content": "M1-LONE-START " + "ünïcødé ✓ " * 300}}))' > "$m1_dir/lone.jsonl"
+: > "$m1_dir/capture-errors.log"
+MNEMON_DIR="$m1_dir" bash -c '. "$1/lib/common.sh"; mnemon_digest_text "$2" "$3"' _ "$HOOKS_DIR" "$m1_dir/lone.jsonl" "$m1_dir/out2.json" >/dev/null
+assert_eq "$(jq -r 'type' "$m1_dir/out2.json" 2>/dev/null)" "array" "inline: one turn over max_digest_chars is cut, not broken"
+assert_eq "$(jq -r '(tojson | length <= 400) and (.[0].text | startswith("M1-LONE-START"))' "$m1_dir/out2.json" 2>/dev/null)" "true" \
+    "inline: the cut turn fits and keeps its start"
+grep -q 'was cut to fit max_digest_chars=400' "$m1_dir/capture-errors.log" 2>/dev/null \
+    && { PASS=$((PASS+1)); printf '  ok: inline: cutting a turn is logged\n'; } \
+    || { FAIL=$((FAIL+1)); printf '  FAIL: inline: cutting a turn was not logged\n'; }
+
+# A redaction pattern that fails keeps its text (the turn is not dropped), but
+# says so; and the private-key patterns fail closed: a text that still holds a
+# key is withheld. MNEMON_CLEAN_FAIL forces a named pattern to fail.
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"M2-WORDS eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXNlY3JldA"}}' > "$m1_dir/m2.jsonl"
+: > "$m1_dir/capture-errors.log"
+MNEMON_DIR="$m1_dir" MNEMON_CLEAN_FAIL=jwt bash -c '. "$1/lib/common.sh"; mnemon_digest_text "$2" "$3"' _ "$HOOKS_DIR" "$m1_dir/m2.jsonl" "$m1_dir/out3.json" >/dev/null
+assert_eq "$(jq -r '.[0].text | startswith("M2-WORDS")' "$m1_dir/out3.json" 2>/dev/null)" "true" "cleaner: a failed pattern keeps the turn"
+grep -q 'redaction pattern jwt failed' "$m1_dir/capture-errors.log" 2>/dev/null \
+    && { PASS=$((PASS+1)); printf '  ok: cleaner: a failed pattern is logged\n'; } \
+    || { FAIL=$((FAIL+1)); printf '  FAIL: cleaner: a failed pattern was not logged: %s\n' "$(head -c 200 "$m1_dir/capture-errors.log" 2>/dev/null)"; }
+python3 -c '
+import json
+key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun\n-----END RSA PRIVATE KEY-----"
+print(json.dumps({"type": "user", "message": {"role": "user", "content": "M2-PEM-WORDS " + key + " after"}}))' > "$m1_dir/m2pem.jsonl"
+m2_out=$(MNEMON_CLEAN_FAIL=pem bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2" 2>/dev/null' _ "$HOOKS_DIR" "$m1_dir/m2pem.jsonl")
+case "$m2_out" in
+    *MIIEow*|*"PRIVATE KEY-----"*) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: a failed private-key pattern let the key through\n';;
+    *) PASS=$((PASS+1)); printf '  ok: cleaner: a failed private-key pattern withholds the text\n';;
+esac
+case "$m1_dir" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${m1_dir:?}" ;; esac
+
+# A key with no END line whose body runs past the 32,000-character scan cut:
+# the start of the text is redacted from BEGIN on, and the end -- more key
+# body -- has to be as well. It kept 12,800 characters of it.
+m3_in="$MNEMON_DIR/transcript-pem-split.jsonl"
+python3 -c '
+import json
+line = "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun\n"
+text = "M3-PREFIX-KEEP -----BEGIN RSA PRIVATE KEY-----\n" + line * 750
+print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}))' > "$m3_in"
+m3_out=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$m3_in")
+case "$m3_out" in
+    *MIIEow*) FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: an END-less key split by the cut leaks its end\n';;
+    *M3-PREFIX-KEEP*) PASS=$((PASS+1)); printf '  ok: cleaner pem: an END-less key split by the cut is redacted on both sides\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner pem: lost the text before the key\n';;
+esac
+
 # End to end: what capture actually sends.
 CL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 CL_LOG="$MNEMON_DIR/requests-cl.log"
@@ -1502,6 +1575,27 @@ assert_eq "$il_sent" "$cleaned" "capture: an inline transcript is cleaned and se
 stop_server $IL_PID
 mv "$MNEMON_DIR/config.il.json" "$MNEMON_DIR/config.json"
 
+# Capture removes a pending range the pointer has passed, under the marker's
+# lock: the check and the removal used to run bare, so a worker adding a
+# later range in between lost it.
+tp_sp="$MNEMON_DIR/transcript-spent.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"one"}}' '{"type":"user","message":{"role":"user","content":"two"}}' > "$tp_sp"
+rm -rf "$MNEMON_DIR/sessions/s48".*
+printf '{"last_digest_turn":2,"recent_drawer_ids":[],"nomemo":false,"disabled":false}' > "$MNEMON_DIR/sessions/s48.json"
+printf '{"path":"%s","end":1}' "$tp_sp" > "$MNEMON_DIR/sessions/s48.digest.pending"
+mkdir "$MNEMON_DIR/sessions/s48.pending.lock.d"; echo "$$" > "$MNEMON_DIR/sessions/s48.pending.lock.d/pid"
+printf '{"session_id":"s48","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_sp" \
+  | "$HOOKS_DIR/mnemon-capture.sh" >/dev/null 2>&1 &
+sp_pid=$!
+sleep 0.5
+assert_eq "$([ -e "$MNEMON_DIR/sessions/s48.digest.pending" ] && echo kept || echo removed)" "kept" \
+    "capture: a spent pending range is not removed while its lock is held"
+rm -rf "$MNEMON_DIR/sessions/s48.pending.lock.d"
+wait "$sp_pid" 2>/dev/null
+assert_eq "$([ -e "$MNEMON_DIR/sessions/s48.digest.pending" ] && echo kept || echo removed)" "removed" \
+    "capture: ...and is removed once the lock is free"
+rm -rf "$MNEMON_DIR/sessions/s48".*
+
 # Test 10s: SessionStart says when sessions have turns undigested after
 # failures -- only ones with real work left -- and clears what can never be
 # retried, so the banner does not repeat for ever. Each session is retried by
@@ -1525,7 +1619,7 @@ sw_state spent1 2 0 "$sw_tp"; printf '{"path":"%s","end":1}' "$sw_tp" > "$SW_DIR
 sw_out=$(printf '{"session_id":"new1","cwd":"/tmp","hook_event_name":"SessionStart"}' \
     | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$SW_DIR" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
 case "$sw_out" in
-    *"Mnemon: 2 session(s) have undigested turns after failures"*) PASS=$((PASS+1)); printf '  ok: wake: counts only sessions with work left\n';;
+    *"Mnemon: 2 session(s) have undigested turns;"*) PASS=$((PASS+1)); printf '  ok: wake: counts only sessions with work left\n';;
     *) FAIL=$((FAIL+1)); printf '  FAIL: wake: wrong undigested banner, got: %s\n' "$(printf '%s' "$sw_out" | head -c 200)";;
 esac
 assert_eq "$([ -e "$SW_DIR/sessions/spent1.digest.pending" ] && echo kept || echo removed)" "removed" \
@@ -1540,6 +1634,29 @@ sw_out2=$(printf '{"session_id":"new2","cwd":"/tmp","hook_event_name":"SessionSt
 case "$sw_out2" in
     *"Mnemon: 2 session(s)"*) PASS=$((PASS+1)); printf '  ok: wake: the count is stable once tidied\n';;
     *) FAIL=$((FAIL+1)); printf '  FAIL: wake: second banner differs: %s\n' "$(printf '%s' "$sw_out2" | head -c 120)";;
+esac
+
+# Pending work is not always a failure: a run stops after ten chunks and leaves
+# the rest pending. The banner says "undigested", not "after failures".
+case "$sw_out" in
+    *"after failures"*) FAIL=$((FAIL+1)); printf '  FAIL: wake: the banner blames failures for pending work\n';;
+    *) PASS=$((PASS+1)); printf '  ok: wake: the banner does not blame failures for pending work\n';;
+esac
+# When the scan's time budget runs out the count is a lower bound, and says so.
+# A budget of 0 stops after the first candidate; both here count.
+SW3_DIR=$(mktemp -d)
+mkdir -p "$SW3_DIR/sessions"
+cp "$SW_DIR/config.json" "$SW_DIR/live.jsonl" "$SW3_DIR/"
+for sid in late1 late2; do
+    jq -n --arg t "$SW3_DIR/live.jsonl" '{last_digest_turn:0,recent_drawer_ids:[],nomemo:false,disabled:false,digest_failures:2,digest_retry_after:0,transcript_path:$t}' \
+        > "$SW3_DIR/sessions/$sid.json"
+done
+sw_out3=$(printf '{"session_id":"new3","cwd":"/tmp","hook_event_name":"SessionStart"}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$SW3_DIR" MNEMON_UNDIGESTED_SCAN_SECONDS=0 "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null)
+case "$SW3_DIR" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${SW3_DIR:?}" ;; esac
+case "$sw_out3" in
+    *"Mnemon: at least 1 session(s) have undigested turns"*) PASS=$((PASS+1)); printf '  ok: wake: a scan cut short says "at least"\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: wake: a scan cut short should say "at least 1", got: %s\n' "$(printf '%s' "$sw_out3" | head -c 160)";;
 esac
 
 # Cheap however many sessions a device has seen: one grep, not a fork each.
@@ -2346,6 +2463,10 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":"x"}}' > "$DR1/
 jq -n --arg t "$DR1/failed-transcript.jsonl" '{last_digest_turn:0,digest_failures:2,digest_retry_after:0,transcript_path:$t}' > "$DR1/sessions/failed.json"
 doc_run "$DR1"
 doc_line "warn" "1 session.*undigested" "doctor: reports sessions with undigested turns after failures"
+case "$DOC_OUT" in
+    *"after failures"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: blames failures for pending work\n';;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: the undigested line does not blame failures\n';;
+esac
 rm -f "$DR1/sessions/failed.json"
 rf_stop_all
 

@@ -284,6 +284,6 @@ while :; do
 done
 
 # After a failure the pointer has not moved and the marker is kept: the next
-# Stop resends the same chunk -- the same range, so the server recognises it if
-# it was in fact stored.
+# Stop resends from the same start, so the server recognises the slice by its
+# start (replay "by_start") if it was in fact stored.
 exit 0

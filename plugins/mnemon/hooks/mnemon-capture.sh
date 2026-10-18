@@ -45,10 +45,7 @@ IFS=$'\t' read -r nomemo disabled last_turn retry_after stored_path <<< \
 [ "$disabled" = "true" ] && exit 0
 
 # A range handed to a digest that has since moved past it is spent.
-pending="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
-if [ -e "$pending" ] && [ "$(jq -r '.end // 0' "$pending" 2>/dev/null)" -le "$last_turn" ] 2>/dev/null; then
-    rm -f "$pending"
-fi
+mnemon_digest_pending_drop_spent "$session_id" "$last_turn"
 
 [ "$turn_index" -le "$last_turn" ] && exit 0
 

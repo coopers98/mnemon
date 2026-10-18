@@ -276,6 +276,37 @@ class ContentSanitizerTest extends TestCase
         }
     }
 
+    /**
+     * A JSON transcript: a key header named in one turn and an END line in a
+     * later one must not be read as one key, swallowing the turns between.
+     */
+    public function test_a_key_does_not_span_turns_of_a_json_transcript(): void
+    {
+        $json = json_encode([
+            ['role' => 'user', 'text' => 'the -----BEGIN RSA PRIVATE KEY----- header goes first'],
+            ['role' => 'assistant', 'text' => 'MIDDLE-TURN-KEPT'],
+            ['role' => 'user', 'text' => 'and -----END RSA PRIVATE KEY----- goes last'],
+        ]);
+
+        $out = $this->sanitizer->sanitize($json);
+
+        $this->assertStringContainsString('MIDDLE-TURN-KEPT', $out);
+        $this->assertNotNull(json_decode($out), 'the transcript stays parseable');
+    }
+
+    public function test_a_key_inside_one_json_turn_is_still_redacted(): void
+    {
+        $key = "-----BEGIN RSA PRIVATE KEY-----\n".self::BODY_LINE."\n".self::BODY_LINE."\n-----END RSA PRIVATE KEY-----";
+        $json = json_encode([['role' => 'user', 'text' => "before {$key} after"], ['role' => 'assistant', 'text' => 'NEXT']]);
+
+        $out = $this->sanitizer->sanitize($json);
+
+        $this->assertStringNotContainsString('MIIEowIBAAKCAQEA', $out);
+        $this->assertStringContainsString('after', $out);
+        $this->assertStringContainsString('NEXT', $out);
+        $this->assertNotNull(json_decode($out));
+    }
+
     public function test_a_megabyte_after_a_begin_line_finishes_quickly_and_is_kept(): void
     {
         $prose = '-----BEGIN RSA PRIVATE KEY----- '.str_repeat('just some words ', 65536);

@@ -51,14 +51,16 @@ fi
 # session_id and so gets fresh defaults anyway.
 mnemon_session_state "$session_id" > /dev/null
 
-# Sessions left with turns undigested after failures. Each is retried by its
-# own next Stop -- for a session that has ended, when it is resumed. Say so
-# here rather than leave it to a log nobody reads; --tidy also clears what can
-# never be retried, so this does not repeat for ever.
+# Sessions left with undigested turns, after failures or because a run
+# stopped after its ten chunks. Each is sent by its own next Stop -- for a
+# session that has ended, when it is resumed. Say so here rather than leave it
+# to a log nobody reads; --tidy also clears what can never be retried, so this
+# does not repeat for ever. A scan that ran out of time says "at least".
 undigested=$(mnemon_undigested_sessions --tidy)
-if [ "${undigested:-0}" -gt 0 ]; then
-    printf 'Mnemon: %s session(s) have undigested turns after failures; each is retried the next time that session runs. See %s\n' \
-        "$undigested" "$MNEMON_ERROR_LOG"
+undigested_n="${undigested%+}"
+if [ "${undigested_n:-0}" -gt 0 ] 2>/dev/null; then
+    printf 'Mnemon: %s%s session(s) have undigested turns; each is sent the next time that session runs. See %s\n' \
+        "$([ "$undigested" != "$undigested_n" ] && printf 'at least ')" "$undigested_n" "$MNEMON_ERROR_LOG"
 fi
 
 if mnemon_refresh_available; then

@@ -18,11 +18,14 @@ class ContentSanitizer
         // leaves alone -- a token prefix named in prose, a comparison, a
         // host:port -- is not mangled here either.
         //
-        // PEM private keys. With an END line, everything from BEGIN to it,
-        // whatever lies between -- Proc-Type/DEK-Info headers of an encrypted
-        // key, line breaks escaped as a literal \n. Non-greedy and bounded,
-        // so a stray BEGIN cannot run away.
-        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----/', '[REDACTED:PRIVATE_KEY]'],
+        // PEM private keys. With an END line, everything from BEGIN to it --
+        // Proc-Type/DEK-Info headers of an encrypted key, line breaks escaped
+        // as a literal \n. Non-greedy and bounded, so a stray BEGIN cannot
+        // run away; and never across a double quote, which a key never holds:
+        // in a JSON transcript that is the end of the turn's string, and a
+        // header named in one turn with an END line in a later one swallowed
+        // every turn between.
+        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[^"]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----/', '[REDACTED:PRIVATE_KEY]'],
         // Without one (a key cut off), from BEGIN on when a body follows: a
         // 20+ character base64 run, after any header lines, with real or
         // escaped (\n, \r\n) line breaks. A header named in prose has no body

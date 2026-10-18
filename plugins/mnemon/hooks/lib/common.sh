@@ -670,6 +670,22 @@ _mnemon_digest_pending_add() {
     fi
 }
 
+# Remove a pending marker the pointer has passed, under its lock. Args:
+# <session_id> <pointer>. Checking and removing it bare raced a worker adding
+# a later range in between: the later range was removed with it.
+mnemon_digest_pending_drop_spent() {
+    [ -e "$MNEMON_SESSIONS_DIR/${1}.digest.pending" ] || return 0
+    mnemon_with_lock "$MNEMON_SESSIONS_DIR/${1}.pending.lock.d" _mnemon_digest_pending_drop_spent "$@"
+}
+
+_mnemon_digest_pending_drop_spent() {
+    local f="$MNEMON_SESSIONS_DIR/${1}.digest.pending" end
+    end=$(jq -r '.end // 0' "$f" 2>/dev/null)
+    case "$end" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$end" -le "$2" ] && rm -f "$f"
+    return 0
+}
+
 # Read the pending marker and remove it, under its lock. Args: <session_id>.
 # Echoes the marker JSON (empty when there is none).
 mnemon_digest_pending_take() {
@@ -682,21 +698,25 @@ _mnemon_digest_pending_take() {
     rm -f "$f"
 }
 
-# How many sessions have turns left undigested after failures. Args:
-# [--tidy]. Echoes the count.
+# How many sessions have turns left undigested -- after failures, or pending
+# because a run stopped after its ten chunks. Args: [--tidy]. Echoes the
+# count, with a "+" after it when the scan ran out of time before it had
+# looked at every candidate (the count is then a lower bound).
 #
 # A session counts only when it has real work: a pending range ending past its
 # pointer, or failed digests with transcript lines past its pointer -- and a
 # transcript that still exists, and no @nomemo. Candidates come from one grep
 # over the state directory and the pending markers, never a fork per state
-# file, and the scan stops after one to two seconds.
+# file, and the scan stops after one to two seconds
+# (MNEMON_UNDIGESTED_SCAN_SECONDS, default 2), having looked at one at least.
 #
 # --tidy (SessionStart) also clears what can never be retried: a marker at or
 # below the pointer is removed, and a session whose transcript is gone is
 # logged once and its failure state cleared. Without that the banner said
 # "undigested" for ever.
 mnemon_undigested_sessions() {
-    local tidy=false n=0 since=$SECONDS sid f fields nomemo ptr fails tp pend marker
+    local tidy=false n=0 since=$SECONDS sid f fields nomemo ptr fails tp pend marker looked=0 more=""
+    local budget="${MNEMON_UNDIGESTED_SCAN_SECONDS:-2}"
     [ "${1:-}" = "--tidy" ] && tidy=true
     local candidates=""
     for f in $(grep -lE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR"/*.json 2>/dev/null); do
@@ -710,7 +730,11 @@ mnemon_undigested_sessions() {
     for sid in $candidates; do
         # $SECONDS ticks on whole seconds: ">= 2" is a budget of 1-2s, where
         # ">= 1" could end the scan a few milliseconds in.
-        [ $(( SECONDS - since )) -ge 2 ] && break
+        if [ "$looked" -gt 0 ] && [ $(( SECONDS - since )) -ge "$budget" ]; then
+            more="+"
+            break
+        fi
+        looked=$((looked + 1))
         f="$MNEMON_SESSIONS_DIR/${sid}.json"
         marker="$MNEMON_SESSIONS_DIR/${sid}.digest.pending"
         [ -d "$MNEMON_SESSIONS_DIR/${sid}.digest.lock.d" ] && continue
@@ -735,7 +759,7 @@ mnemon_undigested_sessions() {
             n=$((n + 1))
         fi
     done
-    printf '%s' "$n"
+    printf '%s%s' "$n" "$more"
 }
 
 # Copy transcript lines (from, to] into a file, at most max_digest_bytes of
@@ -764,15 +788,18 @@ mnemon_slice_transcript() {
 # more than max_digest_chars), and the line its last turn ends on is echoed --
 # the caller advances only that far and carries the rest. Chunk boundaries are
 # a function of the file, the pointer and the constant alone, so a retry after
-# any failure sends exactly the same range, and the server's replay check
-# recognises it. "all" is echoed when the whole slice fit. Without <from> (an
-# inline transcript, which cannot be resumed part-way) the whole slice is sent.
+# any failure sends the same start (and the same end, unless the chunk was the
+# whole slice and the session has gone on since), and the server's replay
+# check -- by start, which the worker asks for -- recognises it. "all" is
+# echoed when the whole slice fit. Without <from> (an inline transcript, which
+# cannot be resumed part-way) as many whole turns as fit max_digest_chars are
+# sent, and any left over are logged as not sent.
 #
 # Returns 0 with the payload in <out>, 1 when the slice holds no conversation,
 # 2 when cleaning failed (logged). A cleaning failure used to be
 # indistinguishable from "no conversation": the slice was dropped silently.
 mnemon_digest_text() {
-    local in="$1" out="$2" from="${3:-}" err="$2.err" cleaned rc max_chars chunk size result end
+    local in="$1" out="$2" from="${3:-}" err="$2.err" cleaned rc max_chars chunk result end dropped cut
     cleaned=$(mnemon_clean_transcript --lines "$in" 2>"$err")
     rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -780,6 +807,9 @@ mnemon_digest_text() {
         rm -f "$err"
         return 2
     fi
+    # A redaction pattern that failed kept its text (or, for a private key,
+    # withheld it); the cleaner says so on stderr.
+    [ -s "$err" ] && mnemon_log_error "transcript cleaning: $(head -c 300 "$err" | tr '\r\n' '  ')"
     rm -f "$err"
     { [ -z "$cleaned" ] || [ "$cleaned" = "[]" ]; } && return 1
 
@@ -788,25 +818,36 @@ mnemon_digest_text() {
     [ "$chunk" -gt "$max_chars" ] && chunk="$max_chars"
     [ -z "$from" ] && chunk="$max_chars"
 
-    # Take turns while they fit; always at least one.
-    result=$(printf '%s' "$cleaned" | jq -c --argjson max "$chunk" '
-        reduce .[] as $t ({n: 0, size: 2, done: false, out: []};
+    # Take whole turns while they fit; always at least one. Sizes are in
+    # characters of the JSON sent, which is what the server's `transcript`
+    # => `max:200000` counts. Only a lone first turn can be over the limit
+    # (max_digest_chars lowered below one turn): its text is cut to fit,
+    # by character, so the payload stays valid JSON and valid UTF-8.
+    result=$(printf '%s' "$cleaned" | jq -c --argjson max "$chunk" --argjson cap "$max_chars" '
+        length as $total
+        | reduce .[] as $t ({n: 0, size: 2, done: false, out: []};
             if .done then .
             elif (.n > 0) and (.size + ($t | del(.ln) | tojson | length) + 1 > $max) then .done = true
             else .out += [$t] | .n += 1 | .size += ($t | del(.ln) | tojson | length) + 1 end)
-        | {end: (if .done then .out[-1].ln else "all" end), payload: (.out | map(del(.ln)))}')
-    end=$(printf '%s' "$result" | jq -r '.end')
+        | (.out | map(del(.ln))) as $payload
+        | ($payload | tojson | length) as $size
+        | {end: (if .done then .out[-1].ln else "all" end),
+           dropped: ($total - .n),
+           cut: (if $size > $cap then $size else 0 end),
+           payload: (if $size > $cap
+                     then $payload | .[0].text |= (.[0:([length - ($size - $cap) - 40, 0] | max)] + "\n[... cut]")
+                     else $payload end)}')
+    IFS=$'\t' read -r end dropped cut < <(printf '%s' "$result" | jq -r '[.end, .dropped, .cut] | @tsv')
     printf '%s' "$result" | jq -c '.payload' > "$out"
 
-    # The final guard: what the server accepts (`transcript` =>
-    # `required|string|max:200000`). A rejected digest never advances, so an
-    # oversized payload would fail identically for ever. One turn alone is
-    # capped well below this, so it only triggers for an inline transcript or
-    # a lowered max_digest_chars.
-    size=$(wc -c < "$out" | tr -d ' ')
-    if [ "$size" -gt "$max_chars" ]; then
-        head -c "$max_chars" "$out" > "$out.cap" && mv -f "$out.cap" "$out"
-        mnemon_log_error "digest payload of $size characters is over max_digest_chars=$max_chars; its end was cut"
+    # A rejected digest never advances, so a payload over the server's limit
+    # would fail identically for ever; and turns left out of an inline
+    # transcript are lost, since it has no file to resume from. Say so.
+    if [ "${cut:-0}" -gt 0 ]; then
+        mnemon_log_error "a digest turn of $cut characters was cut to fit max_digest_chars=$max_chars; its end was not sent"
+    fi
+    if [ -z "$from" ] && [ "${dropped:-0}" -gt 0 ]; then
+        mnemon_log_error "inline transcript: $dropped newest turn(s) over max_digest_chars=$max_chars were not sent; an inline transcript cannot be resumed"
     fi
 
     if [ -n "$from" ] && [ "$end" != "all" ]; then
@@ -963,7 +1004,8 @@ mnemon_clean_transcript() {
     # (for chunking, see mnemon_digest_text).
     local lines=false
     [ "${1:-}" = "--lines" ] && { lines=true; shift; }
-    jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" --argjson lines "$lines" '
+    jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" --argjson lines "$lines" \
+        --arg fail "${MNEMON_CLEAN_FAIL:-}" '
         def text_of:
             if type == "string" then .
             elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join("\n\n")
@@ -996,28 +1038,44 @@ mnemon_clean_transcript() {
             | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
         # A regex that fails (Oniguruma has a retry limit) keeps the text it
-        # was given; it never empties it or drops the turn.
-        def keep(f): . as $in | try f catch $in;
+        # was given -- it never empties it or drops the turn -- and says so on
+        # stderr, which the caller logs. $fail (MNEMON_CLEAN_FAIL) names a
+        # pattern to fail on purpose, for the tests.
+        def keep(f; $name):
+            . as $in
+            | try (if $fail == $name then error("forced by MNEMON_CLEAN_FAIL") else f end)
+              catch (("redaction pattern \($name) failed (\(.)); the text was kept" | debug) as $_ | $in);
+
+        # The private-key patterns fail closed instead: a text that still
+        # holds a key header after one of them failed is withheld whole.
+        def keep_pem(f):
+            . as $in
+            | try (if $fail == "pem" then error("forced by MNEMON_CLEAN_FAIL") else f end)
+              catch (("redaction pattern pem failed (\(.)); the text was withheld" | debug) as $_
+                     | if ($in | contains("PRIVATE KEY-----")) then "[REDACTED-PRIVATE-KEY: text withheld]" else $in end);
+
+        # A key with its END line, everything from BEGIN to it -- Proc-Type/
+        # DEK-Info headers of an encrypted key, line breaks escaped as a
+        # literal \n. Non-greedy and bounded, so a stray BEGIN cannot run away.
+        def pem_whole: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----";
+        # Without one (a key cut off), from BEGIN to the end of the text when
+        # a body follows: a 20+ character base64 run, after any header lines,
+        # with real or escaped (\n, \r\n) line breaks. A header named in
+        # prose has no body and is left alone.
+        def pem_open: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\\s|\\\\[rn])*(?:Proc-Type|DEK-Info):[^\\r\\n\\\\]*)*(?:\\s|\\\\[rn])*[A-Za-z0-9+/=]{20,}[\\s\\S]*\\z";
 
         def redact:
-            # PEM private keys. With an END line, everything from BEGIN to it,
-            # whatever lies between -- Proc-Type/DEK-Info headers of an
-            # encrypted key, line breaks escaped as a literal \n. Non-greedy
-            # and bounded, so a stray BEGIN cannot run away.
-            keep(gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))
-            # Without one (a key cut off), from BEGIN to the end of the text
-            # when a body follows: a 20+ character base64 run, after any
-            # header lines, with real or escaped (\n, \r\n) line breaks. A
-            # header named in prose has no body and is left alone.
-            | keep(sub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\\s|\\\\[rn])*(?:Proc-Type|DEK-Info):[^\\r\\n\\\\]*)*(?:\\s|\\\\[rn])*[A-Za-z0-9+/=]{20,}[\\s\\S]*\\z"; "[REDACTED-PRIVATE-KEY]"))
-            | keep(gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]"))
-            | keep(gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]"))
-            | keep(gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]"))
-            | keep(gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]"))
-            | keep(gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]"))
-            | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"))
-            | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"))
-            | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"))
+            # PEM private keys, whole and then cut off (pem_whole, pem_open).
+            keep_pem(gsub(pem_whole; "[REDACTED-PRIVATE-KEY]"))
+            | keep_pem(sub(pem_open; "[REDACTED-PRIVATE-KEY]"))
+            | keep(gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]"); "aws")
+            | keep(gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]"); "jwt")
+            | keep(gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]"); "bearer")
+            | keep(gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]"); "openai")
+            | keep(gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]"); "github_pat")
+            | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"); "github")
+            | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"); "slack")
+            | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"); "aiven")
             # Assignments, in any case: DB_PASSWORD=, password=, --password=,
             # PGPASSWORD=, MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=,
             # SECRET_KEY_BASE=, GITHUB_TOKEN=. The name starts a word or
@@ -1026,13 +1084,13 @@ mnemon_clean_transcript() {
             # working directory. PASSWORD==x is a comparison. An opening
             # quote is kept; the value stops at a quote or a backslash.
             # (\x27 is a single quote.)
-            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)\\s*=)(?<p>(?:[A-Za-z0-9]+_)*(?:PG)?)(?<k>(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\\s*=\\s*(?<q>\\\\?[\"\\x27]?)(?!\\[REDACTED)[^=\\s\"\\x27\\\\][^\\s\"\\x27\\\\]*"; "\(.p)\(.k)=\(.q)[REDACTED]"))
+            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)\\s*=)(?<p>(?:[A-Za-z0-9]+_)*(?:PG)?)(?<k>(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\\s*=\\s*(?<q>\\\\?[\"\\x27]?)(?!\\[REDACTED)[^=\\s\"\\x27\\\\][^\\s\"\\x27\\\\]*"; "\(.p)\(.k)=\(.q)[REDACTED]"); "assign")
             # The same names as JSON or YAML keys: "password": "...",
             # api_key: ...
-            | keep(gsub("(?<![A-Za-z0-9])(?<k>\\\\?\"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?\"?\\s*[:=]\\s*)(?<q>\\\\?\"?)(?!\\[REDACTED)[^=\"\\s,}\\\\][^\"\\s,}\\\\]*"; "\(.k)\(.q)[REDACTED]"))
+            | keep(gsub("(?<![A-Za-z0-9])(?<k>\\\\?\"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?\"?\\s*[:=]\\s*)(?<q>\\\\?\"?)(?!\\[REDACTED)[^=\"\\s,}\\\\][^\"\\s,}\\\\]*"; "\(.k)\(.q)[REDACTED]"); "keyvalue")
             # scheme://user:pass@ -- the scheme tells admin:123456@ (a
             # password) from a bare //host:8080@ or //TODO:fix@.
-            | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"));
+            | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"); "url");
 
         def turn:
             if .type == "attachment" then
@@ -1053,11 +1111,17 @@ mnemon_clean_transcript() {
             | (.role == "user") as $user
             | (.raw | split_at($scan)) as $p
             | ($p.t != "") as $cut
-            | ($p.h | if $user then unwrap_harness(true; $cut) else . end | redact) as $h
+            | ($p.h | if $user then unwrap_harness(true; $cut) else . end) as $hu
+            # The start ends inside a key with no END line before the cut:
+            # its body runs on into the end of the text.
+            | ($cut and ($hu | try (gsub(pem_whole; "") | test(pem_open)) catch true)) as $open
+            | ($hu | redact) as $h
             | ($p.t | if $user then unwrap_harness(false; true) else . end | redact
                     # The end of a key the cut split: body characters, header
-                    # lines and (escaped) line breaks up to its END line.
-                    | keep(sub("\\A[A-Za-z0-9+/=\\s\\\\:,-]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))) as $t
+                    # lines and (escaped) line breaks up to its END line...
+                    | keep_pem(sub("\\A[A-Za-z0-9+/=\\s\\\\:,-]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))
+                    # ...or, with none, the run of body characters it starts with.
+                    | if $open then keep_pem(sub("\\A[A-Za-z0-9+/=\\s\\\\]+"; "[REDACTED-PRIVATE-KEY]")) else . end) as $t
             | (if $user then $usermax else $scan end) as $max
             | ($max * 0.6 | floor) as $hn
             | (if $cut then {h: $h, t: $t}

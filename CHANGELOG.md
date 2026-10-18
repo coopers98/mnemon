@@ -17,7 +17,8 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   `key = value` without quotes, YAML quoted values, rule-C values inside
   backticks/brackets, `--api-key=`, `Authorization: Basic`, `.netrc`,
   `curl -u`, `APP_KEY=base64:`, `DB_PASS=`; values under 4 characters,
-  all-digit, or starting with `$ % { <` are left alone by design.
+  all-digit, or starting with `$ % { <` (or, for assignments and JSON keys,
+  with `, } ] :`) are left alone by design.
 - **A failed digest model call no longer loses the turns it was given.** A
   timeout, an OpenAI 429 or 5xx, a missing `OPENAI_API_KEY` and unparseable
   model output all came back as "no proposals", so `session_digest` recorded

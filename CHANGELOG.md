@@ -47,6 +47,23 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   session.** It made cleaning fail with no output, which read as "nothing to
   send"; the slice was never sent and nothing was logged. Such a record is now
   skipped, and a cleaning failure is logged. Plugin 0.3.11.
+- **Nothing is cut or dropped from a digest without a log line.** An inline
+  transcript (passed in the Stop payload rather than as a file) over
+  `max_digest_chars` lost its newest turns silently, and the final size guard
+  counted bytes and cut with `head -c`, which split multi-byte characters and
+  the JSON itself. Whole turns are now trimmed, measured in characters as the
+  server measures them, a lone turn over the limit has its text cut, and both
+  are logged. A redaction pattern that fails is logged; a private-key pattern
+  that fails withholds the text instead of keeping it. A key with no END line
+  whose body ran past the 32,000-character scan cut kept the end of its body;
+  that is redacted now too. Plugin 0.3.11.
+- **The server's private-key redaction no longer swallows turns.** In a JSON
+  transcript, a key header named in one turn and an END line in a later one
+  were redacted as one key, taking every turn between with them.
+- **A pending range is no longer lost to a race with capture.** Capture's
+  check for a spent pending range now runs under the marker's lock, so a
+  range a digest adds at the same moment is not removed with it.
+  Plugin 0.3.11.
 - **Messages typed while Claude was still working are digested.** Claude Code
   stores them as queued-command attachments, often with no user record, so
   they were dropped. Plugin 0.3.11.
@@ -87,7 +104,7 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   bounded by `max_digest_bytes`, now 2 MiB (was 256 KiB), and also keeps the
   oldest lines: before, both caps kept the newest turns and the older ones
   were never digested. Chunk boundaries depend only on the transcript, the
-  pointer and the chunk size, so a retry resends exactly the same range.
+  pointer and the chunk size, so a retry resends from the same start.
   Plugin 0.3.11.
 - **Repeated digest failures back off.** One failure is retried on the next
   Stop; after that the wait starts at 60 seconds and doubles to 30 minutes
@@ -102,11 +119,13 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   line. The kind of the last failure is kept in the session state
   (`digest_failed_kind`). A digest that finds no credentials when it runs
   keeps its range as pending, so an ended session still counts as
-  undigested. A Stop inside the wait records its range, so the turns are sent by a later Stop -- for a
-  session that has ended, when it is resumed. SessionStart says how many
-  sessions have turns undigested after failures (only those with work left,
-  a transcript that still exists and no `@nomemo`), and clears what can never
-  be retried; `/mnemon:doctor` reports the same count. A success resets it.
+  undigested. A Stop inside the wait records its range, so the turns are
+  sent by a later Stop -- for a session that has ended, when it is resumed.
+  SessionStart says how many sessions have undigested turns, after failures
+  or left pending when a run stopped after its ten chunks (only those with
+  work left, a transcript that still exists and no `@nomemo`), "at least" when
+  its one-to-two-second scan ran out of time, and clears what can never be
+  retried; `/mnemon:doctor` reports the same count. A success resets it.
   The client waits 90 seconds for a digest, above the server's 60.
   Plugin 0.3.11.
 - **A digest whose reply was lost is not digested again.** Plugin 0.3.11

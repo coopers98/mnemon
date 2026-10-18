@@ -14,6 +14,8 @@
 #      FAKE_STATUS (answer every /mcp call with this status),
 #      FAKE_TOOL_ERROR (answer /mcp with a tool-level error; any value other
 #                       than 1 is used as the error text),
+#      FAKE_NO_STRUCTURED (answer tools/call with a result that has no
+#                          structuredContent),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
 #                           this many characters, the way the real tool's
 #                           `max:200000` validation does),
@@ -248,6 +250,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if DELAY:
             time.sleep(DELAY)
+
+        if os.environ.get("FAKE_NO_STRUCTURED"):
+            self._reply(200, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}')
+            return
 
         # The version handshake rides on the wake reply, so the fixture has to be
         # able to claim any version -- including none, which is what an older

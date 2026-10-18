@@ -309,8 +309,12 @@ mnemon_call() {
     # exactly this shape. Checking only .error made an authorisation failure
     # indistinguishable from an empty palace, on every hook, logged nowhere.
     if [ "$(printf '%s' "$response" | jq -r '.result.isError // false' 2>/dev/null)" = "true" ]; then
-        mnemon_log_error "tool error from $endpoint: $(printf '%s' "$response" \
-            | jq -r '[.result.content[]?.text] | join(" ") // "(no message)"' 2>/dev/null | head -c 160)"
+        local tool_err
+        tool_err=$(printf '%s' "$response" | jq -r '[.result.content[]?.text] | join(" ") // "(no message)"' 2>/dev/null)
+        mnemon_log_error "tool error from $endpoint: $(printf '%s' "$tool_err" | head -c 160)"
+        # A caller that needs the reason (the digest worker, to tell a
+        # retryable failure from one that is not) names a file for it.
+        [ -n "${MNEMON_CALL_ERROR_FILE:-}" ] && printf '%s' "$tool_err" > "$MNEMON_CALL_ERROR_FILE"
         return 1
     fi
 
@@ -470,12 +474,15 @@ mnemon_session_state() {
 
 # Atomically write session state. Args: <session_id> <json>.
 #
+# Only a JSON object is written. An empty or unparseable value used to land as
+# an empty or garbage file, and the next read reinitialised the state --
+# rewinding last_digest_turn to 0 and clearing @nomemo. It is refused and
+# logged now, and the stored state kept.
+#
 # last_digest_turn only moves forward: the value written is the larger of the
-# one passed and the one on disk. Every writer works from a copy it read
-# earlier -- recall reads state before its server call, a worker before its
-# digest -- so an unconditional write let a stale copy rewind the pointer, and
-# the next Stop re-digested turns already stored. Enforced here, where every
-# write passes, rather than trusted to each caller.
+# one passed and the one on disk, so a writer holding an older copy cannot
+# rewind it and have turns digested twice. Prefer mnemon_session_state_update,
+# which applies a change to what is on disk rather than replacing it.
 mnemon_session_state_write() {
     local sid="$1"
     local json="$2"
@@ -484,12 +491,33 @@ mnemon_session_state_write() {
     local old
     old=$(jq -r '.last_digest_turn // 0' "$f" 2>/dev/null)
     case "$old" in ''|*[!0-9]*) old=0 ;; esac
-    printf '%s' "$json" | jq -c --argjson old "$old" '
+    if ! printf '%s' "$json" | jq -ce --argjson old "$old" '
         if type == "object"
         then .last_digest_turn = ([(.last_digest_turn // 0), $old] | max)
-        else . end' > "$tmp" 2>/dev/null \
-        || printf '%s' "$json" > "$tmp"
+        else error("not an object") end' > "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        mnemon_log_error "refusing to write session state for session=$sid that is not a JSON object; keeping the stored state"
+        return 1
+    fi
     mv -f "$tmp" "$f"
+}
+
+# Apply a jq filter to a session's stored state and write the result.
+# Args: <session_id> <filter> [jq args...], e.g.
+#   mnemon_session_state_update "$sid" '.last_recall_at = $n' --argjson n 5
+#
+# The change is applied to the state on disk at write time. Writing back a copy
+# read earlier -- before a server call that takes seconds -- undid whatever
+# another hook changed meanwhile: an @nomemo set, drawer ids a digest recorded.
+mnemon_session_state_update() {
+    local sid="$1" filter="$2" cur new
+    shift 2
+    cur=$(mnemon_session_state "$sid")
+    if ! new=$(printf '%s' "$cur" | jq -c "$@" "$filter" 2>/dev/null); then
+        mnemon_log_error "session state update failed for session=$sid: $filter"
+        return 1
+    fi
+    mnemon_session_state_write "$sid" "$new"
 }
 
 # Take a session's digest lock. Args: <session_id>. Returns 0 when this process
@@ -500,7 +528,7 @@ mnemon_session_state_write() {
 # could both find it absent and both digest the same turns.
 #
 # A lock is stale when its owner is gone, or when it is older than any digest
-# could take (the call itself times out at 60s) -- a recycled PID must not hold
+# could take (the call itself times out at 90s) -- a recycled PID must not hold
 # a session's capture hostage. A lock with no pid yet is one being taken right
 # now, so it is left alone until it ages out.
 MNEMON_DIGEST_LOCK_STALE_SECONDS="${MNEMON_DIGEST_LOCK_STALE_SECONDS:-600}"
@@ -510,7 +538,9 @@ mnemon_digest_lock() {
         [ "$tries" -ge 3 ] && return 1
         tries=$((tries + 1))
         pid=$(cat "$lock/pid" 2>/dev/null)
-        mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)
+        # A lock whose age cannot be read counts as new: reading it as 1970
+        # made any such lock stale at once, and a live worker's was taken.
+        mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || date +%s)
         if [ $(( $(date +%s) - mtime )) -ge "$MNEMON_DIGEST_LOCK_STALE_SECONDS" ] \
             || { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; }; then
             rm -rf "$lock"
@@ -525,6 +555,92 @@ mnemon_digest_lock() {
 # Release a lock taken by mnemon_digest_lock. Args: <session_id>.
 mnemon_digest_unlock() {
     rm -rf "$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
+}
+
+# Hand a range to the digest that is running for this session.
+# Args: <session_id> <transcript_path> <end>.
+#
+# A Stop that arrives while a digest runs cannot digest its turns itself (one
+# worker per session), and "the next Stop will cover it" is false when the
+# user quits after that reply. The running worker digests this range when it
+# finishes. Several Stops in a row keep the furthest end.
+mnemon_digest_pending_add() {
+    local f="$MNEMON_SESSIONS_DIR/${1}.digest.pending" path="$2" end="$3" old
+    old=$(jq -r '.end // 0' "$f" 2>/dev/null)
+    case "$old" in ''|*[!0-9]*) old=0 ;; esac
+    [ "$old" -gt "$end" ] && end="$old"
+    jq -cn --arg p "$path" --argjson e "$end" '{path: $p, end: $e}' > "$f.tmp.$$" 2>/dev/null \
+        && mv -f "$f.tmp.$$" "$f"
+}
+
+# Copy transcript lines (from, to] into a file, keeping at most
+# max_digest_bytes of the newest whole records. Args: <path> <from> <to> <out>.
+#
+# The cap bounds the work on a long first run. Cleaning keeps a few percent of
+# a raw slice, so it is sized for the work, not for the server's limit (that is
+# max_digest_chars, in mnemon_digest_text). Records it drops are never
+# digested, so dropping them is logged.
+mnemon_slice_transcript() {
+    local path="$1" from="$2" to="$3" out="$4" max_bytes size
+    tail -n +"$((from + 1))" "$path" 2>/dev/null | head -n "$((to - from))" > "$out"
+    [ -s "$out" ] || return 1
+    max_bytes=$(mnemon_config_value 'max_digest_bytes' 2097152)
+    size=$(wc -c < "$out" | tr -d ' ')
+    if [ "$size" -gt "$max_bytes" ]; then
+        # Trim whole records from the front: tail -c can land mid-line, and the
+        # leading partial is dropped so the slice stays valid JSONL.
+        tail -c "$max_bytes" "$out" | tail -n +2 > "$out.cap" && mv -f "$out.cap" "$out"
+        mnemon_log_error "digest slice $from-$to is $size bytes, over max_digest_bytes=$max_bytes; its oldest records were not digested"
+    fi
+    return 0
+}
+
+# Clean a transcript slice into the payload a digest sends.
+# Args: <in.jsonl> <out>. Returns 0 with the payload in <out>, 1 when the slice
+# holds no conversation, 2 when cleaning failed (logged).
+#
+# A cleaning failure used to be indistinguishable from "no conversation": the
+# slice was dropped silently and its turns were never sent.
+mnemon_digest_text() {
+    local in="$1" out="$2" err="$2.err" text rc max_chars size trimmed
+    text=$(mnemon_clean_transcript "$in" 2>"$err")
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        mnemon_log_error "transcript cleaning failed (jq exit $rc): $(head -c 160 "$err" 2>/dev/null | tr -d '\r\n')"
+        rm -f "$err"
+        return 2
+    fi
+    rm -f "$err"
+    { [ -z "$text" ] || [ "$text" = "[]" ]; } && return 1
+
+    # The final guard: what the server accepts. `session_digest` validates the
+    # payload it receives (`transcript` => `required|string|max:200000`), and a
+    # rejected digest never advances last_digest_turn, so the next Stop would
+    # re-send the same oversized slice and fail identically, forever. With
+    # cleaning this rarely triggers.
+    max_chars=$(mnemon_config_value 'max_digest_chars' 190000)
+    size=$(printf '%s' "$text" | wc -c | tr -d ' ')
+    if [ "$size" -gt "$max_chars" ]; then
+        # Drop whole leading turns first, so what is sent stays parseable and
+        # the turns that survive are the most recent ones.
+        trimmed=$(printf '%s' "$text" | jq -c --argjson max "$max_chars" '
+            if type == "array"
+            then until((tojson | length) <= $max or length <= 1; .[1:])
+            else . end
+        ' 2>/dev/null)
+        [ -n "$trimmed" ] && text="$trimmed"
+
+        # One turn can still exceed the budget alone. The tool takes
+        # `transcript` as a string and sanitizes it as text rather than parsing
+        # it as JSON, so a character truncation is safe here and strictly
+        # better than the whole digest being refused.
+        if [ "$(printf '%s' "$text" | wc -c)" -gt "$max_chars" ]; then
+            text=$(printf '%s' "$text" | head -c "$max_chars")
+        fi
+        mnemon_log_error "digest payload of $size characters is over max_digest_chars=$max_chars; its oldest turns were not digested"
+    fi
+
+    printf '%s' "$text" > "$out"
 }
 
 # The directory a Claude Code scratchpad belongs to, or nothing for any other
@@ -626,35 +742,60 @@ mnemon_project_name() {
 # files, toolUseResult, and hook output, including Mnemon's own recall and wake
 # text, which the digest then filed back into the palace as new drawers.
 #
-# Kept: user and assistant records that are not meta, compact summaries,
-# sidechains or synthetic API errors; of those, only the text of `text` blocks
-# (string content counts as one). Harness-injected wrappers are cut from the
-# text, secrets are redacted, empty turns are dropped, and consecutive turns of
-# one role are merged -- an assistant reply split around tool calls reads as
-# one reply. The result is still JSON, so the server's "Read a Claude Code
-# transcript" prompt and its string-level sanitizer keep working.
+# Kept:
+#   - user and assistant records that are not meta, compact summaries,
+#     sidechains, synthetic API errors or other `<synthetic>` replies; of
+#     those, only the text of `text` blocks (string content counts as one);
+#   - messages the user typed while the assistant was still working, which
+#     Claude Code stores as a queued_command attachment (origin human, mode
+#     prompt) and often never as a user record. One that is delivered again as
+#     a user record is kept once.
+# In user text, harness-injected wrappers are cut (<system-reminder>, command
+# output, task notifications, a Mnemon block opening the text) and a slash
+# command reads as "/name args". Assistant text is left as written: it may
+# quote those tags. Secrets are redacted in both; empty turns are dropped and
+# consecutive turns of one role merged -- an assistant reply split around tool
+# calls reads as one reply. The result is still JSON, so the server's "Read a
+# Claude Code transcript" prompt and its string-level sanitizer keep working.
+#
+# Each text is capped at MNEMON_CLEAN_TEXT_MAX characters (16000) before any
+# regex runs: jq's gsub is quadratic in the number of matches, and one hostile
+# text of 50,000 closed tags took minutes -- longer than the Stop hook may
+# run, which would wedge that slice for good. A cut text says so.
 #
 # One jq process for the whole slice: a fork costs 20-60ms on Git Bash, so
 # per-record work outside jq would scale with the transcript. A line that does
-# not parse -- the record being written as the hook runs -- is skipped.
+# not parse (the record being written as the hook runs) and a record of a shape
+# the filter does not expect are skipped, never fatal: one bad record used to
+# empty the whole slice.
 #
 # The redaction set is the union of the earlier client set and the server's
 # ContentSanitizer, plus GitHub fine-grained and app tokens, Slack tokens and
-# PEM private keys. The server still sanitizes what arrives.
+# PEM private keys, with minimum lengths so a prefix mentioned in prose stays.
+# The server still sanitizes what arrives.
+MNEMON_CLEAN_TEXT_MAX="${MNEMON_CLEAN_TEXT_MAX:-16000}"
 mnemon_clean_transcript() {
-    jq -nRc '
-        def unwrap_harness:
-            # Context the harness or a hook injected, not anything typed.
+    jq -nRc --argjson max "$MNEMON_CLEAN_TEXT_MAX" '
+        def text_of:
+            if type == "string" then .
+            elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join("\n\n")
+            else "" end;
+
+        def capped:
+            if length > $max then {t: .[0:$max], cut: (length - $max)} else {t: ., cut: 0} end;
+
+        # Context the harness or a hook injected into a user turn, not typed.
+        def unwrap_harness($cut):
             gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
-            | gsub("<(command-name|command-message|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr|task-notification|user-prompt-submit-hook)>[\\s\\S]*?</\\1>"; "")
-            # Mnemon recall/wake blocks that arrive without a wrapper: the
-            # header line and the indented lines under it.
-            | gsub("(^|\\n)Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "")
-            # What the user typed for a slash command or a ! shell line stays.
-            | gsub("</?(command-args|bash-input)>"; "")
-            | gsub("\\[Request interrupted by user[^\\]]*\\]"; "")
-            | gsub("\\n{3,}"; "\n\n")
-            | sub("^\\s+"; "") | sub("\\s+$"; "");
+            | if $cut > 0 then gsub("<system-reminder>[\\s\\S]*\\z"; "") else . end
+            | gsub("<(command-message|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr|task-notification|user-prompt-submit-hook)>[\\s\\S]*?</\\1>"; "")
+            | gsub("<command-name>(?<n>[^<]*)</command-name>\\s*<command-args>(?<a>[\\s\\S]*?)</command-args>"; "\(.n) \(.a)")
+            | gsub("<command-args>(?<a>[\\s\\S]*?)</command-args>\\s*<command-name>(?<n>[^<]*)</command-name>"; "\(.n) \(.a)")
+            | gsub("</?(command-name|command-args|bash-input)>"; "")
+            # A Mnemon recall/wake block that arrives without a wrapper opens
+            # the text: its header and the indented lines under it.
+            | sub("\\A\\s*Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "")
+            | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
         def redact:
             gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|\\z)"; "[REDACTED-PRIVATE-KEY]")
@@ -662,35 +803,54 @@ mnemon_clean_transcript() {
             | gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]")
             | gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]")
             | gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]")
-            | gsub("\\bgithub_pat_[A-Za-z0-9_]+"; "[REDACTED-GITHUB-TOKEN]")
-            | gsub("\\bgh[pousr]_[A-Za-z0-9]+"; "[REDACTED-GITHUB-TOKEN]")
-            | gsub("\\bxox[abprs]-[A-Za-z0-9-]+"; "[REDACTED-SLACK-TOKEN]")
+            | gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]")
+            | gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]")
+            | gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]")
             | gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]")
-            | gsub("(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*\\S+"; "\(.k)=[REDACTED]")
-            | gsub("//[^\\s/@:]+:[^\\s/@]+@"; "//[REDACTED-CREDENTIALS]@");
+            | gsub("(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.k)=[REDACTED]")
+            # user:password@ -- a password that is all digits is a port.
+            | gsub("//[^\\s/@:]+:(?=[^\\s/@]*[^\\s/@0-9])[^\\s/@]+@"; "//[REDACTED-CREDENTIALS]@");
 
-        def text_of:
-            if type == "string" then .
-            elif type == "array" then [.[] | select(type == "object" and .type == "text") | .text | strings] | join("\n\n")
-            else "" end;
+        def turn:
+            if .type == "attachment" then
+                .timestamp as $ts
+                | .attachment | objects
+                | select(.type == "queued_command" and .commandMode == "prompt"
+                         and ((.origin | objects | .kind) == "human") and (.isMeta != true))
+                | {role: "user", ts: ($ts // .timestamp), raw: (.prompt | text_of), queued: true}
+            else
+                (.type // (.message | objects | .role) // .role) as $role
+                | select($role == "user" or $role == "assistant")
+                | select((.isMeta != true) and (.isCompactSummary != true)
+                         and (.isSidechain != true) and (.isApiErrorMessage != true))
+                | select((.message | objects | .model) != "<synthetic>")
+                | {role: $role, ts: .timestamp,
+                   raw: ((if (.message | type) == "object" then .message.content else .content end) | text_of)}
+            end
+            | (.raw | capped) as $c
+            | .role as $role
+            | .text = ($c.t
+                | if $role == "user" then unwrap_harness($c.cut) else . end
+                | redact
+                | gsub("\\n{3,}"; "\n\n") | sub("^\\s+"; "") | sub("\\s+$"; "")
+                | if $c.cut > 0 and . != "" then . + "\n[... \($c.cut) characters cut]" else . end)
+            | del(.raw)
+            | .ts |= (if type == "string" then sub("\\.[0-9]+Z$"; "Z") else null end)
+            | select(.text != "");
 
         [ inputs
           | fromjson?
           | if type == "array" then .[] else . end
-          | select(type == "object")
-          | ((.type // .message.role // .role) as $role
-             | select($role == "user" or $role == "assistant")
-             | select((.isMeta != true) and (.isCompactSummary != true)
-                      and (.isSidechain != true) and (.isApiErrorMessage != true))
-             | {role: $role,
-                ts: ((.timestamp // null) | if type == "string" then sub("\\.[0-9]+Z$"; "Z") else null end),
-                text: ((.message.content // .content) | text_of | unwrap_harness | redact)})
-          | select(.text != "")
+          | objects
+          | try turn catch empty
         ]
+        # A queued message is often delivered again as the user turn itself.
+        | ([.[] | select(.role == "user" and .queued != true) | .text]) as $delivered
+        | map(select(.queued != true or (.text as $t | $delivered | index([$t]) | not)))
         | reduce .[] as $r ([];
             if length > 0 and .[-1].role == $r.role
             then .[-1].text += "\n\n" + $r.text
-            else . + [$r] end)
+            else . + [$r | del(.queued)] end)
         | map(if .ts == null then del(.ts) else . end)
     ' ${1:+"$1"}
 }

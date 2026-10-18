@@ -21,8 +21,7 @@ state=$(mnemon_session_state "$session_id")
 
 # @nomemo toggle: case-insensitive, must START the prompt.
 if printf '%s' "$prompt" | grep -qiE '^[[:space:]]*@nomemo\b'; then
-    state=$(printf '%s' "$state" | jq '.nomemo=true')
-    mnemon_session_state_write "$session_id" "$state"
+    mnemon_session_state_update "$session_id" '.nomemo = true'
     exit 0
 fi
 
@@ -53,8 +52,9 @@ if [ "$((now - last))" -lt 30 ]; then
 fi
 
 # Update recall timestamp.
-state=$(printf '%s' "$state" | jq --arg n "$now" '.last_recall_at=($n|tonumber)')
-mnemon_session_state_write "$session_id" "$state"
+# Applied to the state on disk rather than written back from the copy read
+# above, so a digest that finished in between keeps what it recorded.
+mnemon_session_state_update "$session_id" '.last_recall_at = $n' --argjson n "$now"
 
 # One recall per prompt, however many copies of the hook are registered. Claimed
 # here rather than at the top so every gate above behaves exactly as before; only

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services;
 
+use App\Contracts\EmbeddingDriverInterface;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\SessionDigest;
@@ -640,6 +641,108 @@ class SessionDigestServiceTest extends TestCase
 
         $this->assertCount(1, $result['persisted']);
         $this->assertSame(1, Drawer::count());
+    }
+
+    /**
+     * The client's call times out after the server committed 0-8. The retry
+     * must not digest those turns again, whatever end it now asks for.
+     */
+    public function test_a_retry_from_a_recorded_start_is_a_replay_that_says_where_it_ended(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $driver = new class
+        {
+            public int $calls = 0;
+
+            public function digest(string $transcript, array $context): array
+            {
+                $this->calls++;
+
+                return [['content' => 'from 0-8', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                    'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false]];
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        $first = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
+        $same = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 8], 't', [], null);
+        $later = $service->run('sess-t', 'claude-code', ['start' => 0, 'end' => 12], 't', [], null);
+
+        $this->assertSame(1, $driver->calls, 'neither retry may reach the model');
+        $this->assertSame(1, Drawer::count());
+        $this->assertTrue($same['replayed']);
+        $this->assertSame(8, $same['turn_end']);
+        $this->assertTrue($later['replayed']);
+        $this->assertSame(8, $later['turn_end'], 'the client advances to what was recorded, and carries the rest');
+        $this->assertSame(collect($first['persisted'])->pluck('id')->all(), collect($later['persisted'])->pluck('id')->all());
+        $this->assertSame(8, $first['turn_end']);
+    }
+
+    public function test_a_wiki_counter_failure_after_commit_does_not_fail_the_digest(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $this->app->instance(DrawerObserver::class, new class(app(EmbeddingManager::class)) extends DrawerObserver
+        {
+            protected function countForWikiPages(Drawer $drawer): void
+            {
+                throw new \RuntimeException('wiki counter failed');
+            }
+        });
+
+        $result = $this->makeServiceWithMockLlm([
+            ['content' => 'stored', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ])->run('sess-wiki', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+
+        $this->assertCount(1, $result['persisted']);
+        $this->assertSame(1, Drawer::count());
+    }
+
+    /**
+     * The real embedStored path: the embedding driver is called after commit,
+     * and a failure writing it (here SQLite has no embedding column) is
+     * logged, not raised.
+     */
+    public function test_the_real_embedding_path_runs_after_commit_and_cannot_fail_the_digest(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $fake = new class implements EmbeddingDriverInterface
+        {
+            public array $levels = [];
+
+            public function embed(string $text): ?array
+            {
+                $this->levels[] = DB::transactionLevel();
+
+                return array_fill(0, 3, 0.1);
+            }
+
+            public function dimensions(): int
+            {
+                return 3;
+            }
+        };
+        $manager = \Mockery::mock(EmbeddingManager::class);
+        $manager->shouldReceive('driver')->andReturn($fake);
+        $this->app->instance(DrawerObserver::class, new class($manager) extends DrawerObserver
+        {
+            protected function shouldEmbed(): bool
+            {
+                return true;
+            }
+        });
+        $baseline = DB::transactionLevel();
+
+        $result = $this->makeServiceWithMockLlm([
+            ['content' => 'embedded later', 'wing_slug' => 'work', 'room_slug' => 'notes', 'confidence' => 0.9,
+                'propose_new_wing' => false, 'propose_new_room' => false],
+        ])->run('sess-real-embed', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+
+        $this->assertSame([$baseline], $fake->levels);
+        $this->assertCount(1, $result['persisted']);
     }
 
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService

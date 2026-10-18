@@ -258,6 +258,7 @@ class SessionDigestService
             'queued_for_review' => [],
             'pending_wings' => $pendingWings,
             'dropped_outside_wings' => $dropped,
+            'turn_end' => (int) $turnRange['end'],
         ];
     }
 
@@ -396,17 +397,23 @@ class SessionDigestService
     }
 
     /**
-     * The result of a slice that has already been digested, or null.
+     * The result of a slice already digested from this start, or null.
      *
      * @param  array{start: int, end: int}  $turnRange
      * @return array<string, mixed>|null
      */
     private function replayFor(string $sessionId, array $turnRange, ?array $allowedWingPatterns): ?array
     {
+        // Keyed on the start. A client whose call timed out after the server
+        // committed retries from the same start -- with the same end, or a
+        // later one if the session went on. Either way those turns are done;
+        // the reply says where the recorded slice ended so the client
+        // advances there and carries the rest. An exact match is the same
+        // case. The furthest recorded end wins.
         $digest = SessionDigest::query()
             ->where('session_id', $sessionId)
             ->where('turn_start', $turnRange['start'])
-            ->where('turn_end', $turnRange['end'])
+            ->orderByDesc('turn_end')
             ->first();
 
         if ($digest === null) {
@@ -438,6 +445,7 @@ class SessionDigestService
             'pending_wings' => [],
             'dropped_outside_wings' => 0,
             'replayed' => true,
+            'turn_end' => (int) $digest->turn_end,
         ];
     }
 

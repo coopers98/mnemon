@@ -39,7 +39,16 @@ class DrawerObserver
                 }
             }
 
-            $this->countForWikiPages($drawer);
+            // The drawer is committed by now: a failure here must not reach
+            // the caller as "Nothing was stored".
+            try {
+                $this->countForWikiPages($drawer);
+            } catch (Throwable $e) {
+                Log::error('mnemon: counting a stored drawer for its wiki pages failed', [
+                    'drawer_id' => $drawer->id,
+                    'message' => $e->getMessage(),
+                ]);
+            }
         });
     }
 
@@ -56,7 +65,7 @@ class DrawerObserver
         $drawer->saveQuietly();
     }
 
-    private function countForWikiPages(Drawer $drawer): void
+    protected function countForWikiPages(Drawer $drawer): void
     {
         $drawer->load('room.wing');
         $wing = $drawer->room?->wing;
@@ -74,26 +83,23 @@ class DrawerObserver
 
     public function updating(Drawer $drawer): void
     {
-        if ($drawer->isDirty('content')) {
+        if (! $drawer->isDirty('content') || config('database.default') !== 'pgsql') {
+            return;
+        }
+
+        if ($this->shouldEmbed()) {
             $this->embedContent($drawer);
+        } else {
+            // The 'none' driver: an embedding of the old content is wrong.
+            $drawer->embedding = null;
         }
     }
 
+    /**
+     * Callers decide whether to embed at all (shouldEmbed).
+     */
     protected function embedContent(Drawer $drawer): void
     {
-        // Skip if not using PostgreSQL (embedding column only exists in pgsql)
-        if (config('database.default') !== 'pgsql') {
-            return;
-        }
-
-        $driver = config('mnemon.embedding.driver');
-
-        if ($driver === 'none') {
-            $drawer->embedding = null;
-
-            return;
-        }
-
         $embedding = $this->embeddingManager
             ->driver()
             ->embed($drawer->content ?? '');

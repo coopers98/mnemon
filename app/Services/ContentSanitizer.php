@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
+
 class ContentSanitizer
 {
     /**
@@ -17,7 +19,10 @@ class ContentSanitizer
         // host:port -- is not mangled here either.
         //
         // PEM private keys, through the END line or, cut off, to the end.
-        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)/s', '[REDACTED:PRIVATE_KEY]'],
+        // A header alone (a note that mentions one) is left alone: there has
+        // to be a base64 body, a run of 40+ characters first, then any
+        // further lines, then the END line if it is there.
+        ['/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\s*[A-Za-z0-9+\/=]{40,}(?:\s+[A-Za-z0-9+\/=]+)*+(?:\s*-----END [A-Z0-9 ]*PRIVATE KEY-----)?/', '[REDACTED:PRIVATE_KEY]'],
         // AWS access key ids.
         ['/AKIA[0-9A-Z]{16}/', '[REDACTED:AWS_KEY]'],
         // JWTs.
@@ -39,10 +44,13 @@ class ContentSanitizer
         ['/\bAVNS_[a-zA-Z0-9]+/', '[REDACTED:API_KEY]'],
         // Env-style password/secret assignments (redact value only). A value
         // is required: PASSWORD==expected is a comparison.
-        ['/(PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\s*=\s*[^=\s]\S*/', '$1=[REDACTED]'],
-        // Credentials in URLs: user:pass@host. A "password" of digits only
-        // is a port.
-        ['/\/\/[^\s\/@:]+:(?=[^\s\/@]*[^\s\/@0-9])[^\s\/@]+@/', '//[REDACTED:CREDENTIALS]@'],
+        // The name starts a word, or follows a prefix ending in "_"
+        // (DB_PASSWORD): NOSECRET= is not a secret.
+        ['/(?<![A-Za-z0-9])((?:[A-Za-z0-9]+_)*)(PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\s*=\s*[^=\s]\S*/', '$1$2=[REDACTED]'],
+        // Credentials in a URL: scheme://user:pass@. The scheme is what tells
+        // admin:123456@ (a password, redacted) from a bare //host:8080@ or
+        // //TODO:fix@ (not a URL credential, left alone).
+        ['/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^\s\/@:]+:[^\s\/@]+@/', '$1://[REDACTED:CREDENTIALS]@'],
     ];
 
     /**
@@ -51,7 +59,20 @@ class ContentSanitizer
     public function sanitize(string $content): string
     {
         foreach (self::PATTERNS as [$pattern, $replacement]) {
-            $content = preg_replace($pattern, $replacement, $content);
+            $next = preg_replace($pattern, $replacement, $content);
+
+            // null is a PCRE failure, not "nothing matched". Assigning it
+            // stored an empty string.
+            if ($next === null) {
+                Log::warning('mnemon: sanitizer pattern failed; keeping the text it was given', [
+                    'pattern' => $pattern,
+                    'error' => preg_last_error_msg(),
+                ]);
+
+                continue;
+            }
+
+            $content = $next;
         }
 
         return $content;

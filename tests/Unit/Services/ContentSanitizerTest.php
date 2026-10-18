@@ -106,7 +106,7 @@ class ContentSanitizerTest extends TestCase
             'ghs_'.str_repeat('b', 36),
             'github_pat_11'.str_repeat('C', 80),
             'xoxb-1234-SECRETxoxb',
-            "-----BEGIN RSA PRIVATE KEY-----\nSECRETpem\n-----END RSA PRIVATE KEY-----",
+            "-----BEGIN RSA PRIVATE KEY-----\nSECRETpem".str_repeat('Ab9+', 16)."\nTail==\n-----END RSA PRIVATE KEY-----",
         ];
 
         foreach ($secrets as $secret) {
@@ -115,5 +115,58 @@ class ContentSanitizerTest extends TestCase
             $this->assertStringStartsWith('before ', $out);
             $this->assertStringEndsWith(' after', $out);
         }
+    }
+
+    public function test_a_note_that_mentions_a_pem_header_is_left_alone(): void
+    {
+        $text = 'Paste the key that starts with -----BEGIN RSA PRIVATE KEY----- into the vault, not here.';
+
+        $this->assertSame($text, $this->sanitizer->sanitize($text));
+    }
+
+    public function test_a_pem_key_with_a_body_is_redacted_whole(): void
+    {
+        $body = implode("\n", [str_repeat('MIIEow', 10).'AbCd', str_repeat('Qx9+', 16), 'shortTail==']);
+        $out = $this->sanitizer->sanitize("before\n-----BEGIN RSA PRIVATE KEY-----\n{$body}\n-----END RSA PRIVATE KEY-----\nafter");
+
+        $this->assertStringNotContainsString('MIIEow', $out);
+        $this->assertStringNotContainsString('shortTail', $out);
+        $this->assertStringNotContainsString('END RSA', $out);
+        $this->assertStringStartsWith('before', $out);
+        $this->assertStringEndsWith('after', $out);
+    }
+
+    public function test_a_digit_only_password_in_a_url_is_redacted_but_a_port_is_not(): void
+    {
+        $this->assertStringNotContainsString('123456', $this->sanitizer->sanitize('mysql://admin:123456@db.internal/app'));
+        $this->assertSame('connect to //host:8080@x', $this->sanitizer->sanitize('connect to //host:8080@x'));
+        $this->assertSame('see //TODO:fix@later', $this->sanitizer->sanitize('see //TODO:fix@later'));
+    }
+
+    public function test_a_key_name_inside_a_longer_word_is_left_alone(): void
+    {
+        $this->assertSame('NOSECRET=visible', $this->sanitizer->sanitize('NOSECRET=visible'));
+        $this->assertStringContainsString('DB_PASSWORD=[REDACTED]', $this->sanitizer->sanitize('DB_PASSWORD=hunter2'));
+    }
+
+    /**
+     * preg_replace returns null on a PCRE failure. Assigning that back stored
+     * an empty drawer.
+     */
+    public function test_a_regex_failure_keeps_the_text_rather_than_emptying_it(): void
+    {
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $out = $this->sanitizer->sanitize('some text with sk-'.str_repeat('a', 40).' in it');
+        } finally {
+            ini_set('pcre.jit', (string) $jit);
+            ini_set('pcre.backtrack_limit', (string) $limit);
+        }
+
+        $this->assertNotSame('', $out);
     }
 }

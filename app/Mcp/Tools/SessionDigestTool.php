@@ -74,13 +74,10 @@ class SessionDigestTool extends Tool
             // An error, not an empty success: the client keeps its place.
             BrainSessionLogger::logFailure($request, 'session_digest', $audit, $e->getMessage());
 
-            return Response::error(sprintf(
-                'The digest did not run: %s. Nothing was stored. %s',
-                $e->getMessage(),
-                $e->retryable
-                    ? 'This is retryable: send the same turn range again.'
-                    : 'This is not retryable until the server is fixed.',
-            ));
+            // The verdict leads: the hooks keep the first 160 characters.
+            return Response::error($e->retryable
+                ? "Retryable: the digest did not run ({$e->getMessage()}). Nothing was stored; send the same start again, with the same or a later end."
+                : "Not retryable: the digest did not run ({$e->getMessage()}). Nothing was stored; retrying fails the same way until the server is fixed.");
         }
 
         BrainSessionLogger::log($request, 'session_digest', $audit, count($result['persisted']));

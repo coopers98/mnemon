@@ -60,7 +60,9 @@ class OpenAiDigestDriver
                 'reason' => $e->getMessage(),
             ]);
 
-            throw new DigestUnavailable('the model call could not complete: '.$e->getMessage(), retryable: true);
+            // The transport's own message (a cURL error and its timings) goes
+            // to the log, not to the client.
+            throw new DigestUnavailable('the model call timed out or could not connect', retryable: true);
         }
 
         if (! $response->successful()) {
@@ -84,6 +86,14 @@ class OpenAiDigestDriver
             throw new DigestUnavailable('the model answered with content that is not a proposals list', retryable: true);
         }
 
-        return $parsed['proposals'];
+        // Only what the service can persist. One proposal it cannot -- no
+        // content, content that is not text -- used to throw mid-loop after
+        // earlier drawers were written, and the client's retry wrote them again.
+        return array_values(array_filter(
+            $parsed['proposals'],
+            fn ($p) => is_array($p)
+                && is_string($p['content'] ?? null) && trim($p['content']) !== ''
+                && (is_int($p['confidence'] ?? null) || is_float($p['confidence'] ?? null)),
+        ));
     }
 }

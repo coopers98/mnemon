@@ -167,6 +167,40 @@ class OpenAiDigestDriverTest extends TestCase
         Http::assertNothingSent();
     }
 
+    /**
+     * A proposal the service cannot persist threw mid-loop after earlier
+     * drawers were written; the client retried and they were written again.
+     */
+    public function test_keeps_only_proposals_with_text_content_and_a_numeric_confidence(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => json_encode(['proposals' => [
+            ['content' => 'kept', 'wing_slug' => 'work', 'confidence' => 0.8],
+            ['wing_slug' => 'work', 'confidence' => 0.9],
+            ['content' => '', 'wing_slug' => 'work', 'confidence' => 0.9],
+            ['content' => ['not', 'text'], 'wing_slug' => 'work', 'confidence' => 0.9],
+            ['content' => 'no confidence', 'wing_slug' => 'work'],
+            ['content' => 'worded confidence', 'wing_slug' => 'work', 'confidence' => 'high'],
+            'not even an object',
+        ]])]]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $result = (new OpenAiDigestDriver)->digest('t', []);
+
+        $this->assertSame(['kept'], array_column($result, 'content'));
+    }
+
+    public function test_the_failure_reason_does_not_carry_the_raw_transport_error(): void
+    {
+        Http::fake(function () {
+            throw new ConnectionException('cURL error 28: Operation timed out after 20002 milliseconds with 0 bytes received');
+        });
+        config(['services.openai.api_key' => 'sk-test']);
+
+        $e = $this->failureOf(fn () => (new OpenAiDigestDriver)->digest('t', []));
+
+        $this->assertStringNotContainsString('cURL', $e->getMessage());
+    }
+
     private function failureOf(callable $call): DigestUnavailable
     {
         try {

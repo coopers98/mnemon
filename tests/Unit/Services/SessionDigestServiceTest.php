@@ -458,6 +458,68 @@ class SessionDigestServiceTest extends TestCase
         $this->assertArrayNotHasKey('replayed', $retry);
     }
 
+    public function test_a_proposal_that_cannot_be_persisted_leaves_nothing_behind(): void
+    {
+        $work = Wing::factory()->create(['slug' => 'work']);
+        Room::factory()->create(['slug' => 'notes', 'wing_id' => $work->id]);
+        $service = $this->makeServiceWithMockLlm([
+            ['content' => 'written first', 'wing_slug' => 'work', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+            ['content' => ['not', 'text'], 'wing_slug' => 'work', 'room_slug' => 'notes',
+                'confidence' => 0.9, 'propose_new_wing' => false, 'propose_new_room' => false],
+        ]);
+
+        try {
+            $service->run('sess-half', 'claude-code', ['start' => 0, 'end' => 4], 't', [], null);
+            $this->fail('a proposal that cannot be persisted must fail the digest');
+        } catch (\Throwable) {
+        }
+
+        // The client retries a failed digest. A drawer committed before the
+        // failure would be written a second time by that retry.
+        $this->assertSame(0, Drawer::count());
+        $this->assertSame(0, SessionDigest::count());
+    }
+
+    /**
+     * Devices still on plugin 0.3.10 send hook output, Mnemon's own recall and
+     * wake text among it, inside the transcript. Stripped here, it is not
+     * digested back into the palace whatever the client sends.
+     */
+    public function test_strips_mnemon_recall_and_wake_text_before_the_model_sees_it(): void
+    {
+        $driver = new class
+        {
+            public string $seen = '';
+
+            public function digest(string $transcript, array $context): array
+            {
+                $this->seen = $transcript;
+
+                return [];
+            }
+        };
+        $service = new SessionDigestService($driver, app(DrawerWriteService::class));
+
+        $stale = json_encode([
+            ['type' => 'attachment', 'attachment' => ['type' => 'hook_success',
+                'stdout' => "<system-reminder>\nMnemon palace state:\n  Recent drawers:\n    1) WAKE-LEAK (w/r)\n</system-reminder>"]],
+            ['type' => 'attachment', 'attachment' => ['type' => 'hook_additional_context',
+                'content' => ["Mnemon recall:\n  Drawers:\n    1) RECALL-LEAK \"quoted\" (w/r)"]]],
+            ['type' => 'user', 'message' => ['role' => 'user', 'content' => 'USER-WORDS stay']],
+        ]);
+        $raw = "Mnemon recall:\n  Drawers:\n    1) RAW-RECALL-LEAK (w/r)\nUSER-RAW-WORDS stay";
+
+        $service->run('sess-stale', 'claude-code', ['start' => 0, 'end' => 3], $stale, [], null);
+        $this->assertStringNotContainsString('LEAK', $driver->seen);
+        $this->assertStringContainsString('USER-WORDS stay', $driver->seen);
+        $this->assertNotNull(json_decode($driver->seen), 'stripping must leave a JSON transcript parseable');
+
+        $service->run('sess-stale', 'claude-code', ['start' => 3, 'end' => 4], $raw, [], null);
+        $this->assertStringNotContainsString('LEAK', $driver->seen);
+        $this->assertStringContainsString('USER-RAW-WORDS stay', $driver->seen);
+    }
+
     private function makeServiceWithMockLlm(array $proposals): SessionDigestService
     {
         $driver = new class($proposals)

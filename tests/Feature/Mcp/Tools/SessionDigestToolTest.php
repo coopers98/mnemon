@@ -235,8 +235,11 @@ class SessionDigestToolTest extends TestCase
         $response->assertStatus(200);
         $this->assertTrue($response->json('result.isError'), 'a failed digest must be a tool error');
         $text = collect($response->json('result.content'))->pluck('text')->join(' ');
+        // The client keeps the first 160 characters of a tool error, so the
+        // verdict leads.
+        $this->assertStringStartsWith('Retryable:', $text);
         $this->assertStringContainsString('did not run', $text);
-        $this->assertStringContainsString('retryable', $text);
+        $this->assertStringNotContainsString('cURL', $text);
         $this->assertSame(0, SessionDigest::count(), 'a failed digest must not be recorded as digested');
         $this->assertSame(0, Drawer::count());
     }
@@ -250,7 +253,7 @@ class SessionDigestToolTest extends TestCase
 
         $this->assertTrue($response->json('result.isError'));
         $text = collect($response->json('result.content'))->pluck('text')->join(' ');
-        $this->assertStringContainsString('not retryable', $text);
+        $this->assertStringStartsWith('Not retryable:', $text);
         $this->assertSame(0, SessionDigest::count());
     }
 

@@ -9,6 +9,7 @@ use App\Models\WikiPendingWing;
 use App\Models\Wing;
 use App\Support\WingPatterns;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SessionDigestService
@@ -61,6 +62,8 @@ class SessionDigestService
 
         $floor = (float) config('mnemon.digest.confidence_floor', 0.5);
 
+        $transcript = $this->withoutMnemonContext($transcript);
+
         $existingWings = $this->wingsForToken($allowedWingPatterns);
         $existingRooms = Room::query()
             ->whereIn('wing_id', collect($existingWings)->pluck('id'))
@@ -92,6 +95,33 @@ class SessionDigestService
             'session_wing' => $sessionWingSlug,
         ]);
 
+        // One transaction for every write and the slice record. A proposal that
+        // fails mid-loop used to leave the drawers before it committed; the
+        // client, seeing an error, retried the range and wrote them again.
+        return DB::transaction(fn () => $this->persist(
+            $proposals, $floor, $sessionId, $harness, $turnRange,
+            $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug,
+        ));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $proposals
+     * @param  array{start: int, end: int}  $turnRange
+     * @param  array<int, Wing>  $existingWings
+     * @param  array<string>|null  $allowedWingPatterns
+     * @return array<string, mixed>
+     */
+    private function persist(
+        array $proposals,
+        float $floor,
+        string $sessionId,
+        string $harness,
+        array $turnRange,
+        array $existingWings,
+        ?array $allowedWingPatterns,
+        ?string $sessionWingSlug,
+        ?string $unfiledWingSlug,
+    ): array {
         $persisted = [];
         $pendingWings = [];
         $dropped = 0;
@@ -158,7 +188,7 @@ class SessionDigestService
             }
 
             // Existing-wing path. Wing must already exist — digest never auto-creates wings.
-            $wing = Wing::where('slug', $p['wing_slug'])->first();
+            $wing = Wing::where('slug', $p['wing_slug'] ?? '')->first();
             if (! $wing) {
                 continue;
             }
@@ -213,6 +243,27 @@ class SessionDigestService
             'pending_wings' => $pendingWings,
             'dropped_outside_wings' => $dropped,
         ];
+    }
+
+    /**
+     * The transcript without Mnemon's own context in it.
+     *
+     * Clients from plugin 0.3.11 send only the conversation. Older ones send
+     * hook output too, and that includes the recall and wake blocks Mnemon
+     * itself injected -- which the model then filed back into the palace as
+     * new drawers. Two shapes reach here: <system-reminder> spans, and a JSON
+     * string that opens with a Mnemon block (a hook's additionalContext). The
+     * second is cut to the end of that JSON string, so the transcript stays
+     * parseable. Plain text gets the same treatment for a line-led block.
+     */
+    private function withoutMnemonContext(string $transcript): string
+    {
+        return preg_replace([
+            // `<\/` too: a JSON encoder may escape the slash.
+            '#<system-reminder>.*?<\\\\?/system-reminder>#s',
+            '#(?<=")Mnemon (?:recall|palace state):(?:[^"\\\\]|\\\\.)*#',
+            '#(?<=^|\n)Mnemon (?:recall|palace state):[^\n]*(?:\n  [^\n]*)*\n?#',
+        ], '', $transcript) ?? $transcript;
     }
 
     /**
@@ -365,12 +416,14 @@ class SessionDigestService
     private function recordSlice(string $sessionId, array $turnRange, array $persisted): void
     {
         try {
-            SessionDigest::create([
+            // A savepoint: inside the caller's transaction a failed insert
+            // would otherwise abort the whole of it on PostgreSQL.
+            DB::transaction(fn () => SessionDigest::create([
                 'session_id' => $sessionId,
                 'turn_start' => $turnRange['start'],
                 'turn_end' => $turnRange['end'],
                 'drawer_ids' => collect($persisted)->pluck('id')->all(),
-            ]);
+            ]));
         } catch (QueryException) {
             // A concurrent worker recorded the same slice first. The unique
             // index is the arbiter; losing the race is not an error.

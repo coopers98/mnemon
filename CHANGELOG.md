@@ -69,23 +69,33 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
   Aiven, `PASSWORD=`-style assignments, credentials in URLs and PEM private
   keys. Plugin 0.3.11.
-- **`max_digest_bytes` defaults to 2 MiB** (was 256 KiB). It bounds the raw
-  slice cleaned on each Stop; since cleaning keeps a few percent of it, the old
-  default left a long slice with only a few KB of conversation to digest.
-  `max_digest_chars` (190000) still caps what is sent. Trimming to either cap
-  is now logged. Plugin 0.3.11.
-- **Repeated digest failures back off, and a session that ends while backing
-  off is still digested.** One failure is retried on the next Stop; after that
-  the wait starts at 60 seconds and doubles to 30 minutes
+- **Long stretches are digested in chunks, oldest first, and none of them is
+  dropped.** Each digest sends the oldest part of what is undigested, up to
+  `digest_chunk_chars` (60,000), and advances only to the transcript line that
+  part ends on; the rest is carried forward and sent next, by the same worker
+  (up to ten chunks a run) or the next Stop. The raw slice read per pass is
+  bounded by `max_digest_bytes`, now 2 MiB (was 256 KiB), and also keeps the
+  oldest lines: before, both caps kept the newest turns and the older ones
+  were never digested. Chunk boundaries depend only on the transcript, the
+  pointer and the chunk size, so a retry resends exactly the same range.
+  Plugin 0.3.11.
+- **Repeated digest failures back off.** One failure is retried on the next
+  Stop; after that the wait starts at 60 seconds and doubles to 30 minutes
   (`digest_backoff_base_seconds`, `digest_backoff_seconds`). A failure the
   server reports as not retryable (a missing API key) waits the full 30
-  minutes at once. A timeout or an unreadable model answer also halves the
-  next slice, so a slice that times out every time still makes progress from
-  its oldest turns. A Stop inside the wait records its range, and
-  SessionStart says how many sessions have turns undigested after failures
-  and retries those whose wait is over (up to three at a time);
-  `/mnemon:doctor` reports the same count. A success resets all of it. The
-  client waits 90 seconds for a digest, above the server's 60. Plugin 0.3.11.
+  minutes at once. A one-line chunk that fails three times in a row is
+  skipped and logged, so one bad line cannot hold up the rest. A Stop inside
+  the wait records its range, so the turns are sent by a later Stop -- for a
+  session that has ended, when it is resumed. SessionStart says how many
+  sessions have turns undigested after failures (only those with work left,
+  a transcript that still exists and no `@nomemo`), and clears what can never
+  be retried; `/mnemon:doctor` reports the same count. A success resets it.
+  The client waits 90 seconds for a digest, above the server's 60.
+  Plugin 0.3.11.
+- **A digest whose reply was lost is not digested again.** The server
+  recognises a range it already stored by its start, whatever end the retry
+  asks for, and says where the stored range ended; the plugin advances there
+  and sends the rest.
 - **Turns are no longer digested twice when two digests overlap.** A digest
   that starts after another has finished now sends from where that one left
   off, rather than from where its own Stop read the pointer. Plugin 0.3.11.
@@ -97,9 +107,14 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   error, and a digest that loses a race to another for the same range leaves
   nothing behind.
 - **The server's secret redaction matches the plugin's.** Token prefixes in
-  prose, comparisons such as `PASSWORD==x` and `host:port@` are no longer
-  redacted; AWS key ids, JWTs, GitHub fine-grained and Slack tokens and PEM
-  private keys now are.
+  prose, comparisons such as `PASSWORD==x`, names such as `NOSECRET=`, a bare
+  `//host:8080@` and a PEM header mentioned without a key are no longer
+  redacted; AWS key ids, JWTs, GitHub fine-grained and Slack tokens, PEM
+  private keys with their body, and `scheme://user:password@` (digits-only
+  passwords included) are. A pattern that fails keeps the text rather than
+  storing it empty. Drawers are de-duplicated by a hash of their redacted
+  content, so text redacted differently now hashes differently: a drawer
+  stored before this change is not matched by an identical one stored after.
 
 ## [1.0.0] — 2026-10-18
 

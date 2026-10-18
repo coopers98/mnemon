@@ -252,6 +252,8 @@ Three hooks:
 - `mnemon-recall.sh` (UserPromptSubmit) — injects relevant wiki + drawer context per prompt, gated to skip chitchat.
 - `mnemon-capture.sh` (Stop) — digests the session transcript to drawer proposals; high-confidence ones auto-persist, filed under the wing of the repository the session ran in.
 
+To check that a device is connected, and why not if it isn't, run `/mnemon:doctor` in Claude Code.
+
 See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#automatic-memory-in-claude-code) for the full walkthrough.
 
 ---

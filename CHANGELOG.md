@@ -10,6 +10,15 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 ## [1.0.0] — 2026-10-15
 
 ### Added
+- **`/mnemon:doctor`** (`plugins/mnemon/scripts/mnemon-doctor.sh`) says
+  whether this device's connection works and, if not, why not: tools, plugin
+  version, config and credential source, token lifetime, reachability (DNS,
+  connection and TLS failures named apart from an HTTP answer), a real
+  `palace_wake_up` call listing the reachable wings, and the last day's
+  errors. One `ok` / `warn` / `FAIL` line per check, each problem with its fix;
+  exits 0 iff nothing failed; never prints a token or secret. Runs on Linux,
+  macOS and Git Bash on Windows. The "not connected" and "authorization is
+  dead" session-start banners now point at it. Plugin 0.3.10.
 - **A public, read-only demo** (`MNEMON_DEMO=true`). The app serves only GET
   and HEAD requests for the landing page, `/how-it-works`, `/wiki*`, `/palace*`
   and `/up`; everything else, including `/admin`, `/mcp` and `/oauth`, gets a

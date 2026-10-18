@@ -589,6 +589,40 @@ From then on the device refreshes its own access token: the session-start hook
 renews it a few minutes before it expires, and any call that still gets a 401
 refreshes and retries once.
 
+#### Check the connection
+
+To find out whether a device is connected, and if not why not, run this inside
+Claude Code:
+
+```
+/mnemon:doctor
+```
+
+or, from any shell on the device (Git Bash on Windows):
+
+```bash
+bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-doctor.sh"
+```
+
+It checks the tools the hooks need, the plugin version, the config and where
+its credentials come from, the access token's remaining life, whether the
+instance answers at all, and then makes a real `palace_wake_up` call and lists
+the wings this device can reach. Each line is `ok`, `warn` or `FAIL`, every
+problem comes with the command that fixes it, and it never prints a token or
+secret. It exits 0 when nothing failed:
+
+```
+Mnemon doctor
+ok    tools: bash 5.2.21, curl, jq 1.7
+ok    plugin: version 0.3.10
+ok    config: endpoint https://mnemon.example.com/mcp, credentials from /home/me/.mnemon/config.json; can self-renew
+ok    token: access token valid for 49 minute(s)
+ok    reach: https://mnemon.example.com answered HTTP 200
+ok    tool call: palace_wake_up succeeded; wings this device can reach: research, project-atlas
+ok    recent errors: none in the last 24h
+All checks passed.
+```
+
 #### Staying current
 
 Claude Code caches a copy of the hooks per version and refreshes it only when the
@@ -778,6 +812,9 @@ For new-wing proposals: `/admin` → Access Control → Pending Wings.
 
 ### Troubleshooting
 
+- **Start with `/mnemon:doctor`.** It says whether the device is connected and,
+  if not, which part is broken (tools, config, token, network or the server)
+  and the command that fixes it. See [Check the connection](#check-the-connection).
 - **No recall is firing.** Check `~/.mnemon/sessions/<session_id>.json` exists. If `nomemo: true` or `disabled: true`, that session is suppressed. Start a new Claude Code session.
 - **Capture isn't producing drawers.** Tail `~/.mnemon/capture-errors.log`. Common: `OPENAI_API_KEY` missing or rate-limited.
 - **`HTTP 401 ... token rejected or expired` in the capture log.** Mint a fresh

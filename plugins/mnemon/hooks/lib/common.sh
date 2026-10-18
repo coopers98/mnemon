@@ -128,8 +128,8 @@ mnemon_refresh() (
     # device outright.
     #
     # mkdir is atomic everywhere these hooks run (jq + curl + coreutils; macOS
-    # has no flock). Deliberately not the digest worker's check-then-write PID
-    # file, which has a TOCTOU race. Stale locks are recovered by liveness check;
+    # has no flock). The digest worker's lock uses the same primitive
+    # (mnemon_digest_lock). Stale locks are recovered by liveness check;
     # waiters give up after ~5s and fail only this one call.
     waited=0
     while ! mkdir "$lock" 2>/dev/null; do
@@ -469,12 +469,62 @@ mnemon_session_state() {
 }
 
 # Atomically write session state. Args: <session_id> <json>.
+#
+# last_digest_turn only moves forward: the value written is the larger of the
+# one passed and the one on disk. Every writer works from a copy it read
+# earlier -- recall reads state before its server call, a worker before its
+# digest -- so an unconditional write let a stale copy rewind the pointer, and
+# the next Stop re-digested turns already stored. Enforced here, where every
+# write passes, rather than trusted to each caller.
 mnemon_session_state_write() {
     local sid="$1"
     local json="$2"
     local f="$MNEMON_SESSIONS_DIR/${sid}.json"
     local tmp="${f}.tmp.$$"
-    printf '%s' "$json" > "$tmp" && mv -f "$tmp" "$f"
+    local old
+    old=$(jq -r '.last_digest_turn // 0' "$f" 2>/dev/null)
+    case "$old" in ''|*[!0-9]*) old=0 ;; esac
+    printf '%s' "$json" | jq -c --argjson old "$old" '
+        if type == "object"
+        then .last_digest_turn = ([(.last_digest_turn // 0), $old] | max)
+        else . end' > "$tmp" 2>/dev/null \
+        || printf '%s' "$json" > "$tmp"
+    mv -f "$tmp" "$f"
+}
+
+# Take a session's digest lock. Args: <session_id>. Returns 0 when this process
+# now holds it, 1 when a live worker does.
+#
+# mkdir is atomic, the same primitive as the refresh lock. The lock before this
+# was a PID file checked and then written, so two workers started together
+# could both find it absent and both digest the same turns.
+#
+# A lock is stale when its owner is gone, or when it is older than any digest
+# could take (the call itself times out at 60s) -- a recycled PID must not hold
+# a session's capture hostage. A lock with no pid yet is one being taken right
+# now, so it is left alone until it ages out.
+MNEMON_DIGEST_LOCK_STALE_SECONDS="${MNEMON_DIGEST_LOCK_STALE_SECONDS:-600}"
+mnemon_digest_lock() {
+    local lock="$MNEMON_SESSIONS_DIR/${1}.digest.lock.d" pid mtime tries=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        [ "$tries" -ge 3 ] && return 1
+        tries=$((tries + 1))
+        pid=$(cat "$lock/pid" 2>/dev/null)
+        mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)
+        if [ $(( $(date +%s) - mtime )) -ge "$MNEMON_DIGEST_LOCK_STALE_SECONDS" ] \
+            || { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; }; then
+            rm -rf "$lock"
+            continue
+        fi
+        return 1
+    done
+    echo "$$" > "$lock/pid"
+    return 0
+}
+
+# Release a lock taken by mnemon_digest_lock. Args: <session_id>.
+mnemon_digest_unlock() {
+    rm -rf "$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
 }
 
 # The directory a Claude Code scratchpad belongs to, or nothing for any other

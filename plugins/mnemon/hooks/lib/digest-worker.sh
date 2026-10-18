@@ -10,22 +10,16 @@ text_file="$4"
 project="${5:-}"
 filing="${6:-}"
 
-LOCK="$MNEMON_SESSIONS_DIR/${session_id}.digest.lock"
 PENDING="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
 
-# Stale-lock recovery via PID liveness.
-if [ -f "$LOCK" ]; then
-    pid=$(cat "$LOCK" 2>/dev/null)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        # Live worker: leave a pending-rerun marker and exit.
-        : > "$PENDING"
-        rm -f "$text_file"
-        exit 0
-    fi
-    rm -f "$LOCK"
+# One worker per session at a time (see mnemon_digest_lock).
+if ! mnemon_digest_lock "$session_id"; then
+    # Live worker: leave a pending-rerun marker and exit.
+    : > "$PENDING"
+    rm -f "$text_file"
+    exit 0
 fi
-echo "$$" > "$LOCK"
-trap 'rm -f "$LOCK"' EXIT
+trap 'mnemon_digest_unlock "$session_id"' EXIT
 
 run_once() {
     local sstart="$1" send="$2" tfile="$3"
@@ -57,6 +51,8 @@ run_once() {
     payload=$(printf '%s' "$result" | jq -c '.structuredContent // empty')
     persisted_ids=$(printf '%s' "$payload" | jq -c '[.persisted[]?.id]')
 
+    # last_digest_turn is written as max(old, new) by mnemon_session_state_write,
+    # so a worker for an earlier range cannot rewind it.
     state=$(mnemon_session_state "$session_id")
     state=$(printf '%s' "$state" | jq \
         --argjson new_ids "$persisted_ids" \

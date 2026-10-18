@@ -669,6 +669,91 @@ assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s20.json")" "4" \
 kill $DE_PID 2>/dev/null
 mv "$MNEMON_DIR/config.de.json" "$MNEMON_DIR/config.json"
 
+# Test 10h: the digest pointer only moves forward. It was written unconditionally,
+# so anything holding an older copy of the state -- a recall that read it before
+# a digest finished, a worker for an earlier range, SessionStart before its fix
+# -- could rewind it, and the next Stop re-digested turns already stored.
+bash -c '. "$1/lib/common.sh"
+    mnemon_session_state_write mono "{\"last_digest_turn\":50,\"recent_drawer_ids\":[]}"
+    mnemon_session_state_write mono "{\"last_digest_turn\":30,\"recent_drawer_ids\":[9]}"' _ "$HOOKS_DIR"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/mono.json")" "50" \
+    "state: writing a lower last_digest_turn does not rewind it"
+assert_eq "$(jq -c '.recent_drawer_ids' "$MNEMON_DIR/sessions/mono.json")" "[9]" \
+    "state: the rest of a lower-pointer write still lands"
+bash -c '. "$1/lib/common.sh"
+    mnemon_session_state_write mono "{\"last_digest_turn\":70,\"recent_drawer_ids\":[]}"' _ "$HOOKS_DIR"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/mono.json")" "70" \
+    "state: a higher last_digest_turn still advances"
+
+# Test 10i: two workers for one session make one digest call. The lock was a
+# PID file checked and then written -- two workers started together both saw no
+# lock, both wrote one, and both digested. mkdir is atomic.
+WK_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+WK_LOG="$MNEMON_DIR/requests-wk.log"
+: > "$WK_LOG"
+FAKE_PORT="$WK_PORT" FAKE_REQUEST_LOG="$WK_LOG" FAKE_DELAY=1 "$THIS_DIR/fixtures/server.sh" &
+WK_PID=$!
+sleep 0.5
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.wk.json"
+jq --arg e "http://127.0.0.1:$WK_PORT/mcp" '.endpoint=$e' "$MNEMON_DIR/config.json" > "$MNEMON_DIR/c.tmp" \
+  && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/config.json"
+rm -rf "$MNEMON_DIR/sessions/s21".*
+# Started one after another they rarely collide, which is how the race went
+# unnoticed. Each waits on a FIFO instead, and closing it releases all at once.
+wk_gate="$MNEMON_DIR/wk.gate"
+rm -f "$wk_gate"; mkfifo "$wk_gate"
+wk_pids=""
+for i in 1 2 3 4 5 6; do
+    printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s21.in.$i"
+    bash -c 'read -r _ < "$1"; shift; exec "$@"' _ "$wk_gate" \
+        "$HOOKS_DIR/lib/digest-worker.sh" s21 0 4 "$MNEMON_DIR/sessions/s21.in.$i" "" "" >/dev/null 2>&1 &
+    wk_pids="$wk_pids $!"
+done
+sleep 0.5
+: > "$wk_gate"
+for p in $wk_pids; do wait "$p" 2>/dev/null; done
+rm -f "$wk_gate"
+assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
+    "worker: six workers started together for one session make one digest call"
+assert_eq "$(ls -d "$MNEMON_DIR/sessions/s21.digest.lock"* 2>/dev/null | wc -l | tr -d ' ')" "0" \
+    "worker: the lock is released when the worker exits"
+
+# A live worker's lock is honoured: a second worker leaves a pending marker and
+# makes no call of its own.
+: > "$WK_LOG"
+mkdir -p "$MNEMON_DIR/sessions/s24.digest.lock.d"
+echo "$$" > "$MNEMON_DIR/sessions/s24.digest.lock.d/pid"
+printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s24.in"
+"$HOOKS_DIR/lib/digest-worker.sh" s24 0 4 "$MNEMON_DIR/sessions/s24.in" "" "" >/dev/null 2>&1
+assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "0" \
+    "worker: a lock held by a live worker stops a second digest"
+assert_eq "$([ -e "$MNEMON_DIR/sessions/s24.in" ] && echo kept || echo removed)" "removed" \
+    "worker: the losing worker discards its staged input"
+rm -rf "$MNEMON_DIR/sessions/s24.digest.lock.d" "$MNEMON_DIR/sessions/s24.digest.pending"
+
+# A lock left by a worker that died is recovered rather than blocking capture
+# for that session forever.
+: > "$WK_LOG"
+mkdir -p "$MNEMON_DIR/sessions/s22.digest.lock.d"
+sh -c 'exit 0' & dead_pid=$!; wait "$dead_pid"
+echo "$dead_pid" > "$MNEMON_DIR/sessions/s22.digest.lock.d/pid"
+printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s22.in"
+"$HOOKS_DIR/lib/digest-worker.sh" s22 0 4 "$MNEMON_DIR/sessions/s22.in" "" "" >/dev/null 2>&1
+assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
+    "worker: a lock whose owner is gone is recovered"
+
+# So is one too old to belong to a live digest, whoever holds the PID now.
+: > "$WK_LOG"
+mkdir -p "$MNEMON_DIR/sessions/s23.digest.lock.d"
+echo "$$" > "$MNEMON_DIR/sessions/s23.digest.lock.d/pid"
+touch -d '30 minutes ago' "$MNEMON_DIR/sessions/s23.digest.lock.d"
+printf '[{"role":"user","text":"turn"}]' > "$MNEMON_DIR/sessions/s23.in"
+"$HOOKS_DIR/lib/digest-worker.sh" s23 0 4 "$MNEMON_DIR/sessions/s23.in" "" "" >/dev/null 2>&1
+assert_eq "$(grep -c '"session_digest"' "$WK_LOG" 2>/dev/null)" "1" \
+    "worker: a lock older than the stale limit is recovered"
+kill $WK_PID 2>/dev/null
+mv "$MNEMON_DIR/config.wk.json" "$MNEMON_DIR/config.json"
+
 # --- Refresh tests -----------------------------------------------------------
 # A device enrolled through the device grant holds a one-hour access token and a
 # 90-day refresh token. Nothing renews it interactively -- there is no browser on

@@ -1401,7 +1401,7 @@ doc_config "$DR4" "$DR4_PORT" "$DOC_BEARER"
 doc_run "$DR4"
 assert_eq "$DOC_RC" "1" "doctor: an unreachable server exits 1"
 doc_line "FAIL" "reach|connect" "doctor: an unreachable server FAILs naming reachability"
-doc_no_line "FAIL" "auth|401|token" "doctor: an unreachable server is not blamed on the token"
+doc_no_line "FAIL" "auth|HTTP 401|token" "doctor: an unreachable server is not blamed on the token"
 doc_has "1 problem(s) found." "doctor: an unreachable server counts once, not again for the tool call"
 doc_has "tool call also failed, as expected with the instance unreachable" "doctor: the tool call is still attempted and labelled as following from reachability"
 

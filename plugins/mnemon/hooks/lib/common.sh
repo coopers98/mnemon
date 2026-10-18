@@ -1018,9 +1018,18 @@ mnemon_clean_transcript() {
             | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"))
             | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"))
             | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"))
-            # The name starts a word or follows a prefix ending in "_"
-            # (DB_PASSWORD); NOSECRET= is not a secret.
-            | keep(gsub("(?<![A-Za-z0-9])(?<p>(?:[A-Za-z0-9]+_)*)(?<k>PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\\s*=\\s*[^=\\s]\\S*"; "\(.p)\(.k)=[REDACTED]"))
+            # Assignments, in any case: DB_PASSWORD=, password=, --password=,
+            # PGPASSWORD=, MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=,
+            # SECRET_KEY_BASE=, GITHUB_TOKEN=. The name starts a word or
+            # follows a prefix ending in "_" or the glued PG, and may carry
+            # suffixes: NOSECRET= is not a secret, and a bare PWD= is the
+            # working directory. PASSWORD==x is a comparison. An opening
+            # quote is kept; the value stops at a quote or a backslash.
+            # (\x27 is a single quote.)
+            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)\\s*=)(?<p>(?:[A-Za-z0-9]+_)*(?:PG)?)(?<k>(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\\s*=\\s*(?<q>\\\\?[\"\\x27]?)(?!\\[REDACTED)[^=\\s\"\\x27\\\\][^\\s\"\\x27\\\\]*"; "\(.p)\(.k)=\(.q)[REDACTED]"))
+            # The same names as JSON or YAML keys: "password": "...",
+            # api_key: ...
+            | keep(gsub("(?<![A-Za-z0-9])(?<k>\\\\?\"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?\"?\\s*[:=]\\s*)(?<q>\\\\?\"?)(?!\\[REDACTED)[^=\"\\s,}\\\\][^\"\\s,}\\\\]*"; "\(.k)\(.q)[REDACTED]"))
             # scheme://user:pass@ -- the scheme tells admin:123456@ (a
             # password) from a bare //host:8080@ or //TODO:fix@.
             | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"));

@@ -69,6 +69,16 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   GitHub (`ghp_`, `gho_`, `ghs_`, `github_pat_` …), Slack (`xoxb-`, `xoxp-` …),
   Aiven, `PASSWORD=`-style assignments, credentials in URLs and PEM private
   keys. Plugin 0.3.11.
+- **Secret assignments are redacted in the forms they actually take**, on the
+  plugin and the server alike: any case (`password=`), a flag
+  (`--password=`), a suffix after the name (`AWS_SECRET_ACCESS_KEY=`,
+  `SECRET_KEY_BASE=`), a prefix glued to it (`PGPASSWORD=`), the names
+  `TOKEN`, `ACCESS_KEY`, `PWD` and `PASSWD` (`GITHUB_TOKEN=`, `MYSQL_PWD=`),
+  and JSON or YAML keys (`"password": "…"`, `api_key: …`, `token: …`).
+  `NOSECRET=`, a bare `PWD=` (the working directory) and `PASSWORD==x` are
+  left alone. On the server, a redacted value no longer runs on past the end
+  of its JSON string and swallows the rest of the transcript up to the next
+  space. Plugin 0.3.11.
 - **Long stretches are digested in chunks, oldest first, and none of them is
   dropped.** Each digest sends the oldest part of what is undigested, up to
   `digest_chunk_chars` (60,000), and advances only to the transcript line that

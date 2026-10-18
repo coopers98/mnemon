@@ -48,11 +48,20 @@ class ContentSanitizer
         ['/\bxox[abprs]-[A-Za-z0-9-]{10,}/', '[REDACTED:SLACK_TOKEN]'],
         // Aiven-style tokens (AVNS_...)
         ['/\bAVNS_[a-zA-Z0-9]+/', '[REDACTED:API_KEY]'],
-        // Env-style password/secret assignments (redact value only). A value
-        // is required: PASSWORD==expected is a comparison.
-        // The name starts a word, or follows a prefix ending in "_"
-        // (DB_PASSWORD): NOSECRET= is not a secret.
-        ['/(?<![A-Za-z0-9])((?:[A-Za-z0-9]+_)*)(PASSWORD|SECRET|API_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY)\s*=\s*[^=\s]\S*/', '$1$2=[REDACTED]'],
+        // Env-style password/secret assignments (redact the value only), in
+        // any case: DB_PASSWORD=, password=, --password=, PGPASSWORD=,
+        // MYSQL_PWD=, AWS_SECRET_ACCESS_KEY=, SECRET_KEY_BASE=,
+        // GITHUB_TOKEN=. The name starts a word, or follows a prefix ending
+        // in "_" or the glued PG, and may carry suffixes (_ACCESS_KEY,
+        // _KEY_BASE): NOSECRET= is not a secret, and a bare PWD= is the
+        // working directory. A value is required: PASSWORD==expected is a
+        // comparison. An opening quote (or an escaped one, in a JSON
+        // transcript) is kept, and the value stops at a quote or a
+        // backslash, so a JSON string around it stays intact.
+        ['/(?<![A-Za-z0-9])(?!(?i:pwd)\s*=)((?:[A-Za-z0-9]+_)*(?:PG)?)((?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?:_[A-Za-z0-9]+)*)\s*=\s*(\\\\?["\']?)(?!\[REDACTED)[^=\s"\'\\\\][^\s"\'\\\\]*/', '$1$2=$3[REDACTED]'],
+        // The same names as JSON or YAML keys: "password": "...",
+        // api_key: ..., quoted or not, escaped or not.
+        ['/(?<![A-Za-z0-9])(\\\\?"?(?i:password|passwd|secret|token|api[_-]?key)\\\\?"?\s*[:=]\s*)(\\\\?"?)(?!\[REDACTED)[^="\s,}\\\\][^"\s,}\\\\]*/', '$1$2[REDACTED]'],
         // Credentials in a URL: scheme://user:pass@. The scheme is what tells
         // admin:123456@ (a password, redacted) from a bare //host:8080@ or
         // //TODO:fix@ (not a URL credential, left alone).

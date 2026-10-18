@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Services\ContentSanitizer;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -151,6 +152,74 @@ class ContentSanitizerTest extends TestCase
     }
 
     /**
+     * Common shapes a secret takes in a shell session or a config file. Each
+     * passed both sanitizers: the name list was short, a suffix after the
+     * keyword (SECRET_KEY_BASE) or a prefix glued to it (PGPASSWORD) did not
+     * match, the match was case-sensitive, and a JSON or YAML key was never
+     * looked at.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function secretAssignments(): array
+    {
+        return [
+            'export AWS_SECRET_ACCESS_KEY' => ['export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYzzSECRET1', 'wJalrXUtnFEMI'],
+            'PGPASSWORD' => ['PGPASSWORD=pgS3cretValue psql -h db', 'pgS3cretValue'],
+            'MYSQL_PWD' => ['MYSQL_PWD=myS3cretValue mysql', 'myS3cretValue'],
+            'SECRET_KEY_BASE' => ['SECRET_KEY_BASE=a1b2c3d4e5f6railsSecret', 'a1b2c3d4e5f6railsSecret'],
+            'GITHUB_TOKEN, not ghp_' => ['GITHUB_TOKEN=v1.0123456789abcdefInstallTok', 'v1.0123456789abcdefInstallTok'],
+            'lowercase password=' => ['password=lowerS3cret', 'lowerS3cret'],
+            '--password=' => ['mysqldump --password=dashS3cret db', 'dashS3cret'],
+            'quoted value' => ['DB_PASSWORD="quotedS3cret"', 'quotedS3cret'],
+            'JSON password' => ['{"password": "jsonS3cret", "user": "x"}', 'jsonS3cret'],
+            'JSON api_key' => ['{"api_key":"jsonKeyS3cret"}', 'jsonKeyS3cret'],
+            'YAML token' => ["auth:\n  token: yamlTokS3cret\n", 'yamlTokS3cret'],
+            'YAML Secret' => ['Secret: yamlS3cret', 'yamlS3cret'],
+            'JSON-escaped in a transcript' => ['{"text":"set {\\"passwd\\": \\"escS3cret\\"} now"}', 'escS3cret'],
+        ];
+    }
+
+    #[DataProvider('secretAssignments')]
+    public function test_a_secret_assignment_is_redacted(string $text, string $secret): void
+    {
+        $out = $this->sanitizer->sanitize("before {$text} after");
+
+        $this->assertStringNotContainsString($secret, $out);
+        $this->assertStringContainsString('[REDACTED', $out);
+        $this->assertStringStartsWith('before ', $out);
+        $this->assertStringEndsWith(' after', $out);
+    }
+
+    public function test_a_redacted_value_in_a_json_transcript_does_not_swallow_what_follows(): void
+    {
+        // The value ran to the next whitespace, so in a JSON transcript it
+        // took the closing quote and the next record's fields with it.
+        $json = json_encode([['role' => 'user', 'text' => 'DB_PASSWORD=hunter2'], ['role' => 'assistant', 'text' => 'NEXT-TURN kept']]);
+
+        $out = $this->sanitizer->sanitize($json);
+
+        $this->assertStringNotContainsString('hunter2', $out);
+        $this->assertNotNull(json_decode($out), 'the transcript stays parseable');
+        $this->assertStringContainsString('NEXT-TURN kept', $out);
+    }
+
+    public function test_more_lookalikes_are_left_alone(): void
+    {
+        foreach ([
+            'NOSECRET=visible',
+            'PWD=/root/projects/mnemon',
+            'OLDPWD=/tmp',
+            'max_tokens: 4096',
+            '"token_type": "Bearer"',
+            'see //TODO:fix@later',
+            'assert PASSWORD==expected',
+            'connect to //host:8080@x',
+        ] as $text) {
+            $this->assertSame($text, $this->sanitizer->sanitize($text), $text);
+        }
+    }
+
+    /**
      * preg_replace returns null on a PCRE failure. Assigning that back stored
      * an empty drawer.
      */
@@ -160,6 +229,9 @@ class ContentSanitizerTest extends TestCase
         $limit = ini_get('pcre.backtrack_limit');
         ini_set('pcre.jit', '0');
         ini_set('pcre.backtrack_limit', '1');
+        // The logger's own formatter runs a regex too, which this limit
+        // would break; what matters here is that the failure is reported.
+        Log::shouldReceive('warning')->atLeast()->once();
 
         try {
             $out = $this->sanitizer->sanitize('some text with sk-'.str_repeat('a', 40).' in it');

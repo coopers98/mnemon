@@ -837,6 +837,43 @@ assert_eq "$(printf '%s' "$cleaned" | jq -c '[.[] | .role]' 2>/dev/null)" \
     '["user","assistant","user","assistant","user","assistant","user"]' \
     "cleaner: consecutive turns of one role are merged; empty ones dropped"
 
+# Common secret forms that passed both sides: a suffix after the keyword, a
+# prefix glued to it, lowercase, --flag=, and JSON or YAML keys. The server's
+# ContentSanitizer has the same patterns (ContentSanitizerTest).
+sa_in="$MNEMON_DIR/transcript-assignments.jsonl"
+python3 -c '
+import json
+texts = [
+    "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYzzSECRET1 now",
+    "PGPASSWORD=pgS3cretValue psql -h db",
+    "MYSQL_PWD=myS3cretValue mysql",
+    "SECRET_KEY_BASE=a1b2c3d4e5f6railsSecret",
+    "GITHUB_TOKEN=v1.0123456789abcdefInstallTok",
+    "password=lowerS3cret",
+    "mysqldump --password=dashS3cret db",
+    "DB_PASSWORD=\"quotedS3cret\"",
+    "{\"password\": \"jsonS3cret\", \"user\": \"x\"}",
+    "{\"api_key\":\"jsonKeyS3cret\"}",
+    "auth:\n  token: yamlTokS3cret\n",
+    "Secret: yamlS3cret",
+    "KEEP-LOOKALIKES NOSECRET=visible PWD=/root/projects/mnemon OLDPWD=/tmp max_tokens: 4096 \"token_type\": \"Bearer\"",
+]
+for t in texts:
+    print(json.dumps({"type": "user", "message": {"role": "user", "content": "SA-BEFORE " + t}}))
+    print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}}))' > "$sa_in"
+sa_out=$(bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$sa_in")
+sa_left=$(printf '%s' "$sa_out" | grep -oE 'wJalrXUtnFEMI|pgS3cretValue|myS3cretValue|a1b2c3d4e5f6railsSecret|v1\.0123456789abcdefInstallTok|lowerS3cret|dashS3cret|quotedS3cret|jsonS3cret|jsonKeyS3cret|yamlTokS3cret|yamlS3cret' | sort -u | tr '\n' ' ')
+assert_eq "$sa_left" "" "cleaner: suffixed, glued, lowercase, --flag, JSON and YAML secrets are redacted"
+assert_eq "$(printf '%s' "$sa_out" | jq '[.[] | select(.role == "user") | .text | test("^SA-BEFORE ")] | all')" "true" \
+    "cleaner: redacting an assignment keeps the text around it"
+for kept in AWS_SECRET_ACCESS_KEY= PGPASSWORD= MYSQL_PWD= SECRET_KEY_BASE= GITHUB_TOKEN= '--password=' '"password": "' \
+    'NOSECRET=visible' 'PWD=/root/projects/mnemon' 'OLDPWD=/tmp' 'max_tokens: 4096' '"token_type": "Bearer"'; do
+    case "$(printf '%s' "$sa_out" | jq -r '.[].text')" in
+        *"$kept"*) PASS=$((PASS+1)); printf '  ok: cleaner: keeps %s\n' "$kept";;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: cleaner: lost %s\n' "$kept";;
+    esac
+done
+
 # Stdin works too, and a line cut off mid-record (a transcript still being
 # written) is skipped rather than failing the whole slice.
 partial=$( { cat "$SHAPES"; printf '{"type":"user","message":{"role":"us'; } \

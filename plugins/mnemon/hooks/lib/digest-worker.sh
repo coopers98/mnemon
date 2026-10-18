@@ -22,8 +22,14 @@ PENDING="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
 # Chunks sent per worker run. What is left stays in the pending marker for the
 # next Stop.
 MAX_PASSES=10
-# Failures in a row at the same one-line chunk before that line is skipped.
+# Failures in a row at the same one-line chunk, each one the payload could have
+# caused, before that line is skipped.
 SKIP_AFTER=3
+# The kind of the last failure run_once recorded, empty when it recorded none.
+LAST_FAIL_KIND=""
+# The range being worked on, for a pass that fails before it is sent.
+CUR_PATH=""
+CUR_END=""
 
 # One worker per session at a time (see mnemon_digest_lock). The loser hands
 # its range to the winner rather than dropping it: when the user sends one
@@ -39,27 +45,58 @@ if ! mnemon_digest_lock "$session_id"; then
 fi
 trap 'mnemon_digest_unlock "$session_id"' EXIT
 
-# Count a failed digest and set when the next attempt may run. Args: <tool
-# error text, or "" when the call itself failed> <start of the range>.
+# What kind of failure a failed call was. Args: <what mnemon_call reported>.
+#
+#   payload       -- something in what was sent may be the cause, so sending
+#                    the same line again can fail the same way for ever: the
+#                    server rejected it (HTTP 413, a validation error) or its
+#                    model answered it with output that is not a proposals list.
+#   not_retryable -- the server says retrying cannot help (no API key).
+#   transient     -- everything else: the network, the proxy, a 401, a 429 or
+#                    5xx, the model timing out. It says nothing about the line.
+#
+# Only payload failures count towards skipping a line: an outage must never
+# cost a line of the conversation.
+failure_kind() {
+    case "$1" in
+        "HTTP 413"*) printf 'payload' ;;
+        "Not retryable:"*) printf 'not_retryable' ;;
+        "Retryable:"*"not a proposals list"*) printf 'payload' ;;
+        "Retryable:"*) printf 'transient' ;;
+        "The "*" field "*) printf 'payload' ;;
+        *) printf 'transient' ;;
+    esac
+}
+
+# Count a failed digest and set when the next attempt may run. Args: <what
+# mnemon_call reported, or ""> <start of the range>.
 #
 # One failure is retried on the next Stop; after that the wait starts at
 # digest_backoff_base_seconds (60) and doubles to digest_backoff_seconds (1800).
 # A failure the server leads with "Not retryable:" waits the full 1800 at once.
+# The kind is recorded as digest_failed_kind; digest_payload_failures counts
+# the payload failures in a row at this start (see failure_kind).
 record_failure() {
-    local err="$1" start="$2" base cap nr=false n wait
+    local err="$1" start="$2" base cap nr=false n wait kind
     base=$(mnemon_config_value 'digest_backoff_base_seconds' 60)
     cap=$(mnemon_config_value 'digest_backoff_seconds' 1800)
-    case "$err" in "Not retryable:"*) nr=true ;; esac
+    kind=$(failure_kind "$err")
+    LAST_FAIL_KIND="$kind"
+    [ "$kind" = not_retryable ] && nr=true
     mnemon_session_state_update "$session_id" \
-        '.digest_failures = ((.digest_failures // 0) + 1)
+        '.digest_payload_failures = (if $kind != "payload" then (.digest_payload_failures // 0)
+                                     elif .digest_failed_start == $start then (.digest_payload_failures // 0) + 1
+                                     else 1 end)
+         | .digest_failures = ((.digest_failures // 0) + 1)
          | .digest_failed_at = (now | floor)
          | .digest_failed_start = $start
+         | .digest_failed_kind = $kind
          | (if $nr then $cap
             elif .digest_failures < 2 then 0
             else ([$base * pow(2; ([.digest_failures - 2, 20] | min)), $cap] | min) end) as $wait
          | .digest_retry_after = ((now | floor) + $wait)
          | .digest_wait = $wait' \
-        --argjson nr "$nr" --argjson base "$base" --argjson cap "$cap" --argjson start "$start"
+        --argjson nr "$nr" --argjson base "$base" --argjson cap "$cap" --argjson start "$start" --arg kind "$kind"
     read -r n wait < <(mnemon_session_state "$session_id" | jq -r '"\(.digest_failures // 0) \(.digest_wait // 0 | floor)"')
     if [ "${wait:-0}" -gt 0 ]; then
         mnemon_log_error "digest for session=$session_id failed $n time(s) in a row; retrying in ${wait}s"
@@ -71,10 +108,18 @@ record_failure() {
 # Send one slice. Args: <start> <end> <text_file>. Returns 0 when the digest ran.
 run_once() {
     local sstart="$1" send="$2" tfile="$3" pair recent_ids params result persisted_ids errf err done_to
+    LAST_FAIL_KIND=""
     mnemon_digest_lock_touch "$session_id"
     if ! pair=$(mnemon_token); then
-        mnemon_log_error "digest for session=$session_id range=$sstart-$send: no credentials; not sent"
         rm -f "$tfile"
+        # Left in the pending marker, so an ended session still shows as
+        # undigested and its next Stop -- or resume -- sends the range.
+        if [ -n "$CUR_PATH" ]; then
+            mnemon_log_error "digest for session=$session_id range=$sstart-$send: no credentials; not sent, kept as pending up to line $CUR_END"
+            mnemon_digest_pending_add "$session_id" "$CUR_PATH" "$CUR_END"
+        else
+            mnemon_log_error "digest for session=$session_id range=$sstart-$send: no credentials; not sent"
+        fi
         return 1
     fi
     recent_ids=$(mnemon_session_state "$session_id" | jq -c '.recent_drawer_ids // []' 2>/dev/null)
@@ -136,7 +181,8 @@ run_once() {
     mnemon_session_state_update "$session_id" \
         '.last_digest_turn = $t
          | .digest_failures = 0
-         | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_failed_start)
+         | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_failed_start,
+               .digest_failed_kind, .digest_payload_failures)
          | .recent_drawer_ids = (((.recent_drawer_ids // []) + $ids) | unique | .[-50:])' \
         --argjson t "$done_to" --argjson ids "$persisted_ids"
     return 0
@@ -148,14 +194,12 @@ run_once() {
 # when it failed. Whatever lies past the chunk goes into the pending marker in
 # the same step, so it is always carried forward.
 digest_from_pointer() {
-    local path="$1" end="$2" what="$3" state start fails failed_start slice out sliced_to chunk_to rc
+    local path="$1" end="$2" what="$3" start fails slice out sliced_to chunk_to rc
     if [ -z "$path" ] || [ ! -r "$path" ]; then
         mnemon_log_error "$what for session=$session_id up to line $end: transcript ${path:-(none)} is not readable; skipped"
         return 0
     fi
-    state=$(mnemon_session_state "$session_id")
-    IFS=$'\t' read -r start fails failed_start <<< \
-        "$(printf '%s' "$state" | jq -r '[(.last_digest_turn // 0), (.digest_failures // 0), (.digest_failed_start // -1)] | @tsv')"
+    start=$(mnemon_session_state "$session_id" | jq -r '.last_digest_turn // 0')
     [ "$end" -gt "$start" ] || return 0
 
     slice="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
@@ -173,18 +217,22 @@ digest_from_pointer() {
 
     case "$rc" in
         0)
-            # One line that has failed again and again is skipped, so the rest
-            # of the session is not held behind it for ever.
-            if [ "$chunk_to" -eq $((start + 1)) ] && [ "$failed_start" = "$start" ] && [ "$fails" -ge "$SKIP_AFTER" ]; then
-                rm -f "$out"
-                mnemon_log_error "digest for session=$session_id: line $chunk_to failed $fails times in a row; skipping it"
-                mnemon_session_state_update "$session_id" \
-                    '.last_digest_turn = $t | .digest_failures = 0
-                     | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_failed_start)' \
-                    --argjson t "$chunk_to"
-                return 0
-            fi
-            run_once "$start" "$chunk_to" "$out"
+            CUR_PATH="$path" CUR_END="$end"
+            run_once "$start" "$chunk_to" "$out" && return 0
+            # One line that the server keeps rejecting is skipped, so the rest
+            # of the session is not held behind it for ever. Only after it was
+            # tried again and failed, and only for failures the line itself
+            # may cause (failure_kind): an outage never costs a line.
+            [ "$LAST_FAIL_KIND" = payload ] && [ "$chunk_to" -eq $((start + 1)) ] || return 1
+            fails=$(mnemon_session_state "$session_id" | jq -r '.digest_payload_failures // 0')
+            [ "$fails" -ge "$SKIP_AFTER" ] || return 1
+            mnemon_log_error "digest for session=$session_id: line $chunk_to failed $fails times in a row on what it holds; skipping it"
+            mnemon_session_state_update "$session_id" \
+                '.last_digest_turn = $t | .digest_failures = 0
+                 | del(.digest_failed_at, .digest_retry_after, .digest_wait, .digest_failed_start,
+                       .digest_failed_kind, .digest_payload_failures)' \
+                --argjson t "$chunk_to"
+            return 0
             ;;
         # Nothing to digest, and this worker holds the lock: move past it.
         1) mnemon_session_state_update "$session_id" '.last_digest_turn = $t' --argjson t "$chunk_to" ;;

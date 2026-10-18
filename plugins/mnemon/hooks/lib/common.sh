@@ -215,6 +215,17 @@ mnemon_refresh() (
 # JSON-RPC POST to the MCP endpoint.
 # Args: <method> <params_json> <timeout_ms> [<endpoint>] [<token>]
 # Echoes the result field on success, empty on error/timeout.
+#
+# A caller that needs to know why a call failed (the digest worker, to tell a
+# failure the payload caused from one that retrying fixes) names a file in
+# MNEMON_CALL_ERROR_FILE. Each failure writes one line there, led by what
+# failed: "transport: ...", "HTTP <status>: ...", "non-JSON ...", "rpc error:
+# ...", or a tool error's own text.
+_mnemon_call_failed() {
+    [ -n "${MNEMON_CALL_ERROR_FILE:-}" ] && printf '%s' "$*" > "$MNEMON_CALL_ERROR_FILE"
+    return 1
+}
+
 mnemon_call() {
     local method="$1"
     local params="$2"
@@ -254,12 +265,14 @@ mnemon_call() {
     # Accept is required by MCP Streamable HTTP, and it is what makes a Laravel
     # instance answer an auth failure with a 401 instead of a 302 redirect to an
     # HTML login page -- without it the token-expired branch below never fires.
+    local rc=0
     raw=$(curl -s -m "$timeout_s" -w '\n%{http_code}' -X POST "$endpoint" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json, text/event-stream" \
-        --data-binary @"$body" 2>/dev/null) || { rm -f "$body"; return 1; }
+        --data-binary @"$body" 2>/dev/null) || rc=$?
     rm -f "$body"
+    [ "$rc" -eq 0 ] || { _mnemon_call_failed "transport: curl exit $rc"; return 1; }
 
     status="${raw##*$'\n'}"
     response="${raw%$'\n'*}"
@@ -285,6 +298,7 @@ mnemon_call() {
             413)     mnemon_log_error "HTTP $status from $endpoint - request too large for the server or its proxy" ;;
             *)       mnemon_log_error "HTTP $status from $endpoint: $(printf '%s' "$response" | head -c 80 | tr -d '\r\n')" ;;
         esac
+        _mnemon_call_failed "HTTP $status"
         return 1
     fi
 
@@ -293,6 +307,7 @@ mnemon_call() {
     # went wrong -- so say it here instead.
     if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
         mnemon_log_error "non-JSON response (HTTP $status) from $endpoint: $(printf '%s' "$response" | head -c 80 | tr -d '\r\n')"
+        _mnemon_call_failed "non-JSON response (HTTP $status)"
         return 1
     fi
 
@@ -301,6 +316,7 @@ mnemon_call() {
     err=$(printf '%s' "$response" | jq -r '.error.message // .error // empty' 2>/dev/null)
     if [ -n "$err" ]; then
         mnemon_log_error "rpc error from $endpoint: $(printf '%s' "$err" | head -c 160)"
+        _mnemon_call_failed "rpc error: $err"
         return 1
     fi
 
@@ -312,9 +328,7 @@ mnemon_call() {
         local tool_err
         tool_err=$(printf '%s' "$response" | jq -r '[.result.content[]?.text] | join(" ") // "(no message)"' 2>/dev/null)
         mnemon_log_error "tool error from $endpoint: $(printf '%s' "$tool_err" | head -c 160)"
-        # A caller that needs the reason (the digest worker, to tell a
-        # retryable failure from one that is not) names a file for it.
-        [ -n "${MNEMON_CALL_ERROR_FILE:-}" ] && printf '%s' "$tool_err" > "$MNEMON_CALL_ERROR_FILE"
+        _mnemon_call_failed "$tool_err"
         return 1
     fi
 

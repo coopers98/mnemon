@@ -1208,8 +1208,9 @@ esac
 assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s34.digest.pending" 2>/dev/null)" "8" \
     "retry: the rest of the range is carried in the pending marker"
 
-# One line that fails again and again is skipped after three tries, logged,
-# so the rest of the session is not held behind it for ever.
+# A one-line chunk that fails only because the server or the model is down is
+# never skipped: an outage must not cost a line of the conversation. Three
+# timeouts in a row, then the server recovers: the line is sent.
 : > "$MNEMON_DIR/capture-errors.log"
 tp_one="$MNEMON_DIR/transcript-one-bad-line.jsonl"
 {
@@ -1222,6 +1223,10 @@ for _ in 1 2 3; do
     bo_stop s35 "$tp_one"
     jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s35.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s35.json"
 done
+assert_eq "$(jq -r '.digest_failed_kind' "$MNEMON_DIR/sessions/s35.json")" "transient" \
+    "skip: a model timeout is recorded as a transient failure"
+assert_eq "$(jq -r '.digest_payload_failures // 0' "$MNEMON_DIR/sessions/s35.json")" "0" \
+    "skip: a transient failure does not count towards skipping the line"
 kill $BO_PID 2>/dev/null
 : > "$BO_LOG"
 FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
@@ -1230,13 +1235,73 @@ sleep 0.5
 bo_stop s35 "$tp_one"
 for _ in $(seq 1 40); do [ "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s35.json")" = "2" ] && break; sleep 0.1; done
 skip_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
-assert_eq "$skip_sent" "1-2" "skip: after three failures the one-line chunk is skipped and the next is sent"
-if grep -q 'line 1 failed 3 times in a row; skipping it' "$MNEMON_DIR/capture-errors.log"; then
+assert_eq "$skip_sent" "0-1,1-2" "skip: a line that failed only in an outage is sent, not skipped"
+if grep -q 'skipping it' "$MNEMON_DIR/capture-errors.log"; then
+    FAIL=$((FAIL+1)); printf '  FAIL: skip: a line was skipped after transient failures\n'
+else
+    PASS=$((PASS+1)); printf '  ok: skip: nothing is skipped after transient failures\n'
+fi
+kill $BO_PID 2>/dev/null
+
+# A line the server keeps failing on for what it holds -- here the model's
+# answer to it is not a proposals list -- is skipped, logged, once it has been
+# tried a third time and failed again. The rest is sent.
+: > "$BO_LOG"
+: > "$MNEMON_DIR/capture-errors.log"
+FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" \
+  FAKE_TOOL_ERROR="Retryable: the digest did not run (the model answered with content that is not a proposals list). Nothing was stored; send the same start again, with the same or a later end." \
+  "$THIS_DIR/fixtures/server.sh" &
+BO_PID=$!
+sleep 0.5
+rm -f "$MNEMON_DIR/sessions/s45".*
+for _ in 1 2; do
+    bo_stop s45 "$tp_one"
+    jq '.digest_retry_after = 0' "$MNEMON_DIR/sessions/s45.json" > "$MNEMON_DIR/c.tmp" && mv "$MNEMON_DIR/c.tmp" "$MNEMON_DIR/sessions/s45.json"
+done
+pl_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
+assert_eq "$pl_sent" "0-1,0-1" "skip: a payload failure is retried before anything is skipped"
+assert_eq "$(jq -r '.digest_failed_kind' "$MNEMON_DIR/sessions/s45.json")" "payload" \
+    "skip: unparseable model output is recorded as a payload failure"
+bo_stop s45 "$tp_one"
+pl_sent=$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$BO_LOG")
+assert_eq "$pl_sent" "0-1,0-1,0-1,1-2" "skip: the third payload failure skips the line, and the next is sent"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s45.json")" "1" "skip: the pointer moves past the skipped line only"
+if grep -q 'line 1 failed 3 times in a row on what it holds; skipping it' "$MNEMON_DIR/capture-errors.log"; then
     PASS=$((PASS+1)); printf '  ok: skip: the skipped line is logged\n'
 else
     FAIL=$((FAIL+1)); printf '  FAIL: skip: the skipped line was not logged\n'
 fi
 kill $BO_PID 2>/dev/null
+
+# Which failures the payload can cause. A 413 and a validation error can; a
+# 5xx, a 401 and a "Not retryable:" cannot.
+for kc in "FAKE_STATUS=413|payload" "FAKE_STATUS=503|transient" "FAKE_STATUS=401|transient" \
+    "FAKE_TOOL_ERROR=The transcript field must not be greater than 200000 characters.|payload" \
+    "FAKE_TOOL_ERROR=Not retryable: the digest did not run (OPENAI_API_KEY is not set on the server).|not_retryable"; do
+    : > "$BO_LOG"
+    env "${kc%|*}" FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" "$THIS_DIR/fixtures/server.sh" &
+    BO_PID=$!
+    sleep 0.5
+    rm -f "$MNEMON_DIR/sessions/s46".*
+    bo_stop s46 "$tp_one"
+    assert_eq "$(jq -r '.digest_failed_kind' "$MNEMON_DIR/sessions/s46.json")" "${kc##*|}" \
+        "skip: $(printf '%s' "${kc%|*}" | cut -c1-48) is a ${kc##*|} failure"
+    kill $BO_PID 2>/dev/null
+done
+
+# A digest that finds no credentials once the worker runs leaves its range in
+# the pending marker, so an ended session still shows as undigested and is
+# sent when it is resumed.
+rm -f "$MNEMON_DIR/sessions/s47".*
+mv "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.nc.json"
+mkdir -p "$MNEMON_DIR/nc-home"
+env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+    HOME="$MNEMON_DIR/nc-home" "$HOOKS_DIR/lib/digest-worker.sh" s47 0 2 "" "" "" "$tp_one" >/dev/null 2>&1
+mv "$MNEMON_DIR/config.nc.json" "$MNEMON_DIR/config.json"
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/s47.digest.pending" 2>/dev/null)" "2" \
+    "worker: a range with no credentials is kept as pending"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s47.json")" "0" \
+    "worker: a range with no credentials does not advance"
 
 # A replay says where the stored slice ended. The client advances there and
 # carries the rest: the server committed 0-2 while this client timed out, and

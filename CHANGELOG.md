@@ -83,9 +83,16 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   Stop; after that the wait starts at 60 seconds and doubles to 30 minutes
   (`digest_backoff_base_seconds`, `digest_backoff_seconds`). A failure the
   server reports as not retryable (a missing API key) waits the full 30
-  minutes at once. A one-line chunk that fails three times in a row is
-  skipped and logged, so one bad line cannot hold up the rest. A Stop inside
-  the wait records its range, so the turns are sent by a later Stop -- for a
+  minutes at once. A one-line chunk that fails three times in a row for
+  something it may itself cause -- the server rejects it (HTTP 413, a
+  validation error) or the model's answer to it is not a proposals list -- is
+  skipped and logged after the third attempt, so one bad line cannot hold up
+  the rest. A network failure, a 401, a 429 or 5xx, a model timeout or a "not
+  retryable" answer never counts towards that: an outage does not cost a
+  line. The kind of the last failure is kept in the session state
+  (`digest_failed_kind`). A digest that finds no credentials when it runs
+  keeps its range as pending, so an ended session still counts as
+  undigested. A Stop inside the wait records its range, so the turns are sent by a later Stop -- for a
   session that has ended, when it is resumed. SessionStart says how many
   sessions have turns undigested after failures (only those with work left,
   a transcript that still exists and no `@nomemo`), and clears what can never

@@ -6,6 +6,10 @@ set -uo pipefail
 # Claude Code's relocation of ~/.claude. Inherited, it would point the setup
 # script and the doctor at a real config directory instead of the sandboxes.
 unset CLAUDE_CONFIG_DIR
+# Credentials in the environment win over the sandboxed config.json
+# (mnemon_token), so inherited ones -- a plugin session sets them -- would send
+# the hooks under test to a real server.
+unset MNEMON_ENDPOINT MNEMON_TOKEN CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOKS_DIR="$(cd "$THIS_DIR/../../plugins/mnemon/hooks" && pwd)"
 # Pick a free port rather than hardcoding one: a collision makes the hooks talk
@@ -53,20 +57,38 @@ assert_eq() {
 # made the suite flaky under load: a worker that had not finished, or a fake
 # server not yet listening, read as a failure.
 wait_until() {
-    local end=$((SECONDS + $1))
+    local secs="$1" end=$((SECONDS + $1))
     shift
     until "$@"; do
-        [ "$SECONDS" -ge "$end" ] && return 1
+        if [ "$SECONDS" -ge "$end" ]; then
+            printf '  note: timed out after %ss waiting for: %s\n' "$secs" "$*"
+            return 1
+        fi
         sleep 0.05
     done
 }
+# Whether a jq filter is true of a file. Args: <filter> <file>.
+jq_true() { jq -e "$1" "$2" >/dev/null 2>&1; }
 # Wait for a fake server to answer. Args: <port>.
-wait_server() { wait_until 10 curl -s -o /dev/null "http://127.0.0.1:$1/"; }
+wait_server() { wait_until 10 curl -s -m 2 -o /dev/null "http://127.0.0.1:$1/"; }
 # Stop a fake server and wait until it has exited, so the next one can bind
 # its port.
 stop_server() { kill "$@" 2>/dev/null; wait "$@" 2>/dev/null; return 0; }
 # Wait until a session has no digest worker running. Args: <session_id>.
-_no_worker() { ! pgrep -f "digest-worker.sh $1 " >/dev/null 2>&1; }
+#
+# Capture starts the worker with nohup ... &, and for a moment after capture
+# exits the forked child has not yet exec'd: its command line is still
+# capture's, so looking for the worker alone could find nothing and return
+# early. A process that still runs mnemon-capture.sh with this suite's
+# MNEMON_DIR is that child (Linux /proc; elsewhere only the worker is seen).
+_suite_procs() {
+    local p
+    for p in $(pgrep -f "$1" 2>/dev/null); do
+        tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qxF "MNEMON_DIR=$MNEMON_DIR" && return 0
+    done
+    return 1
+}
+_no_worker() { ! pgrep -f "digest-worker.sh $1 " >/dev/null 2>&1 && ! _suite_procs mnemon-capture.sh; }
 wait_worker() { wait_until 30 _no_worker "$1"; }
 
 # Start the fake server in the background.
@@ -1069,10 +1091,9 @@ rm -f "$MNEMON_DIR/sessions/s25.json"
 printf '{"session_id":"s25","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$SHAPES" \
   | "$HOOKS_DIR/mnemon-capture.sh" || true
 wait_worker s25
-for _ in $(seq 1 40); do
-    grep -q 'session_digest' "$CL_LOG" 2>/dev/null && break
-    sleep 0.25
-done
+# The state itself, not the request: the worker writes the pointer only once
+# the reply is in.
+wait_until 30 jq_true ".last_digest_turn == $(wc -l < "$SHAPES" | tr -d ' ')" "$MNEMON_DIR/sessions/s25.json"
 sent=$(jq -rs '[.[] | select(.params.name? == "session_digest")][0].params.arguments.transcript // ""' "$CL_LOG" 2>/dev/null)
 assert_eq "$sent" "$cleaned" "capture: sends exactly the cleaned transcript"
 assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s25.json")" "$(wc -l < "$SHAPES" | tr -d ' ')" \
@@ -3000,7 +3021,10 @@ done
 
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
-out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' | "$HOOKS_DIR/mnemon-capture.sh" || true)
+# A HOME of its own: mnemon_token falls back to ~/.claude.json.
+mkdir -p "$MNEMON_DIR/nohome"
+out=$(printf '{"session_id":"s4","transcript":[],"turn_index":1}' \
+    | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN HOME="$MNEMON_DIR/nohome" "$HOOKS_DIR/mnemon-capture.sh" || true)
 assert_eq "$out" "" "capture: no token → silent no-op"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

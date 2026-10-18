@@ -983,6 +983,10 @@ mnemon_project_name() {
 #     the user's own words out. Assistant text is only redacted and keeps the
 #     scan limit (3 of 12,179 real assistant texts exceed it).
 # A wrapper or a private key that a cut splits is removed from both sides.
+# Other secrets are not: a token the cut lands inside can survive as two
+# pieces, each too short to match its pattern. That is accepted -- it needs a
+# text over 32,000 characters with a token at exactly the cut -- and the
+# server sanitizes what arrives as well.
 #
 # A queued message is de-duplicated by exact text within one slice. One
 # delivered again in a later slice is kept twice.

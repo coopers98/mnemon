@@ -50,6 +50,7 @@ class DrawerGetTool extends Tool
             'metadata' => $drawer->metadata,
             'tier' => $drawer->tier,
             'created_at' => $drawer->created_at?->toIso8601String(),
+            'occurred_at' => $drawer->occurred_at?->toIso8601String(),
         ];
 
         BrainSessionLogger::log($request, 'drawer_get', $params, 1);

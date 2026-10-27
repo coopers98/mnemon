@@ -154,7 +154,7 @@ class WingIsolationTest extends TestCase
             'context_set' => ['tool', 'context_set', 'name', 'personal', 'personal-ghost', ['content' => 'overwrite']],
             'context_set conflict' => ['tool', 'context_set', 'name', 'personal', 'personal-ghost', ['content' => 'x', 'expected_revision' => 1]],
             'context_set trashed' => ['tool', 'context_set', 'name', 'personal:trashed', 'personal:ghost', ['content' => 'x']],
-            'drawer_add' => ['tool', 'drawer_add', 'wing', 'personal', 'personal-ghost', ['room' => 'diary', 'content' => 'x']],
+            'drawer_add' => ['tool', 'drawer_add', 'wing', 'personal', 'personal-ghost', ['room' => 'diary', 'content' => 'x', 'occurred_at' => '2026-01-01T00:00:00Z']],
             'resource drawer' => ['resource', 'mnemon://drawer/{arg}', null, '{personal_drawer}', 999999, []],
             'resource wiki' => ['resource', 'mnemon://wiki/{arg}', null, 'personal', 'personal-ghost', []],
             'resource wing' => ['resource', 'mnemon://wing/{arg}', null, 'personal', 'personal-ghost', []],

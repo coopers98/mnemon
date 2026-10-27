@@ -54,6 +54,7 @@ class DrawerSearchService
             'metadata' => $r->metadata,
             'tier' => $r->tier ?? 'raw',
             'created_at' => $r->created_at,
+            'occurred_at' => $r->occurred_at ?? null,
             'score' => $r->score,
         ])->all();
     }

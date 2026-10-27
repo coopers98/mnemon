@@ -8,6 +8,7 @@ use App\Mcp\Concerns\ResolvesAgentSource;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Wing;
 use App\Services\DrawerWriteService;
+use Carbon\Carbon;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -36,6 +37,7 @@ class DrawerAddTool extends Tool
             'content' => 'required|string',
             'source' => 'nullable|string',
             'metadata' => 'nullable|array',
+            'occurred_at' => 'nullable|date',
         ]);
 
         // Slugged the way Wing's creating event slugs a name, so the stored
@@ -56,6 +58,7 @@ class DrawerAddTool extends Tool
             content: $params['content'],
             source: $this->agentSource($request, $params['source'] ?? null),
             metadata: $params['metadata'] ?? null,
+            occurredAt: isset($params['occurred_at']) ? Carbon::parse($params['occurred_at']) : null,
         );
 
         BrainSessionLogger::log($request, 'drawer_add', $params, 1);
@@ -71,6 +74,7 @@ class DrawerAddTool extends Tool
             'content' => $s->string()->required()->description('Verbatim drawer content.'),
             'source' => $s->string()->description('Optional source override; defaults to OAuth client name.'),
             'metadata' => $s->object()->description('Optional JSON metadata.'),
+            'occurred_at' => $s->string()->description('Optional ISO-8601 time the content originally happened; a later time is clamped to now.'),
         ];
     }
 }

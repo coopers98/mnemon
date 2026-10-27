@@ -30,6 +30,7 @@ class Drawer extends Model
         'access_count',
         'retention_score',
         'last_accessed_at',
+        'occurred_at',
     ];
 
     protected $casts = [
@@ -38,6 +39,7 @@ class Drawer extends Model
         'access_count' => 'integer',
         'retention_score' => 'float',
         'last_accessed_at' => 'datetime',
+        'occurred_at' => 'datetime',
     ];
 
     /**

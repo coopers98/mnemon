@@ -63,7 +63,7 @@ class WikiCompileTool extends Tool
             $roomIds = Room::where('wing_id', $wing->id)->pluck('id');
 
             $drawerModels = Drawer::whereIn('room_id', $roomIds)
-                ->orderByDesc('created_at')
+                ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
                 ->take($limit)
                 ->lockForUpdate()
                 ->get();
@@ -80,6 +80,7 @@ class WikiCompileTool extends Tool
                 'source' => $d->source,
                 'tier' => $d->tier,
                 'created_at' => $d->created_at->toIso8601String(),
+                'occurred_at' => $d->occurred_at?->toIso8601String(),
             ])->values()->all();
 
             // Lock the wiki page row to prevent concurrent reads of stale state

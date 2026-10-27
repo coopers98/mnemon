@@ -8,6 +8,7 @@ use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
 use App\Support\WingPatterns;
+use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -58,6 +59,7 @@ class SessionDigestService
         ?string $project = null,
         ?string $projectFiling = null,
         bool $replayByStart = false,
+        ?CarbonInterface $occurredAt = null,
     ): array {
         // A slice already digested is returned as-is rather than digested again.
         // The capture hook can dispatch the same range twice -- two workers
@@ -108,7 +110,7 @@ class SessionDigestService
         try {
             return DB::transaction(fn () => $this->persist(
                 $proposals, $floor, $sessionId, $harness, $turnRange,
-                $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug,
+                $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug, $occurredAt,
             ));
         } catch (QueryException $e) {
             // Another worker recorded this range while the model ran. This
@@ -144,6 +146,7 @@ class SessionDigestService
         ?array $allowedWingPatterns,
         ?string $sessionWingSlug,
         ?string $unfiledWingSlug,
+        ?CarbonInterface $occurredAt = null,
     ): array {
         $persisted = [];
         $pendingWings = [];
@@ -248,6 +251,7 @@ class SessionDigestService
                     // The model's guess, kept so an unfiled drawer can be moved by hand.
                     'suggested_wing' => $suggestedWing,
                 ], fn ($v) => $v !== null),
+                occurredAt: $occurredAt,
             );
 
             $persisted[] = [

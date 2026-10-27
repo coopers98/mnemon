@@ -106,6 +106,7 @@ class PalaceSearchService
                 drawers.tier,
                 drawers.retention_score,
                 drawers.created_at,
+                drawers.occurred_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
                 rooms.name AS room,
@@ -179,6 +180,7 @@ class PalaceSearchService
                 drawers.tier,
                 drawers.retention_score,
                 drawers.created_at,
+                drawers.occurred_at,
                 wings.name AS wing,
                 wings.slug AS wing_slug,
                 rooms.name AS room,
@@ -239,7 +241,7 @@ class PalaceSearchService
                 $ftScore = $ft ? (float) $ft->score : 0.0;
                 $semScore = $sem ? (float) $sem->score : 0.0;
 
-                $temporal = $this->temporalBoost($base->created_at, $boostDays);
+                $temporal = $this->temporalBoost($base->occurred_at ?? $base->created_at, $boostDays);
 
                 $combinedScore = ($semScore * $semanticWeight)
                     + ($ftScore * $fulltextWeight)
@@ -260,6 +262,7 @@ class PalaceSearchService
                     'tier' => $base->tier ?? 'raw',
                     'retention_score' => $retention,
                     'created_at' => $base->created_at,
+                    'occurred_at' => $base->occurred_at,
                     'score' => round($finalScore, 6),
                 ];
             });
@@ -271,7 +274,7 @@ class PalaceSearchService
 
             $combined = $fulltextResults->map(function ($row) use ($fulltextWeight, $temporalWeight, $boostDays) {
                 $ftScore = (float) $row->score;
-                $temporal = $this->temporalBoost($row->created_at, $boostDays);
+                $temporal = $this->temporalBoost($row->occurred_at ?? $row->created_at, $boostDays);
 
                 $combinedScore = ($ftScore * $fulltextWeight) + ($temporal * $temporalWeight);
 
@@ -290,6 +293,7 @@ class PalaceSearchService
                     'tier' => $row->tier ?? 'raw',
                     'retention_score' => $retention,
                     'created_at' => $row->created_at,
+                    'occurred_at' => $row->occurred_at,
                     'score' => round($finalScore, 6),
                 ];
             });
@@ -387,6 +391,7 @@ class PalaceSearchService
                 'tier' => $row->tier ?? 'raw',
                 'retention_score' => isset($row->retention_score) ? (float) $row->retention_score : 1.0,
                 'created_at' => $row->created_at,
+                'occurred_at' => $row->occurred_at ?? null,
                 'score' => round($normalized, 6),
             ];
         });

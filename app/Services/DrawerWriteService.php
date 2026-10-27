@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\Wing;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Str;
 
 class DrawerWriteService
@@ -22,6 +23,7 @@ class DrawerWriteService
      * @param  string  $content  Verbatim drawer content
      * @param  string  $source  Source attribution (token name or explicit override)
      * @param  array|null  $metadata  Optional JSON metadata
+     * @param  CarbonInterface|null  $occurredAt  When the conversation happened; a later time is clamped to now
      */
     public function createDrawer(
         string $wingSlug,
@@ -29,6 +31,7 @@ class DrawerWriteService
         string $content,
         string $source,
         ?array $metadata = null,
+        ?CarbonInterface $occurredAt = null,
     ): Drawer {
         $wing = Wing::firstOrCreate(
             ['slug' => $wingSlug],
@@ -62,6 +65,7 @@ class DrawerWriteService
             'source' => $source,
             'metadata' => $metadata,
             'tier' => 'raw',
+            'occurred_at' => $occurredAt !== null && $occurredAt->isFuture() ? now() : $occurredAt,
         ]);
     }
 }

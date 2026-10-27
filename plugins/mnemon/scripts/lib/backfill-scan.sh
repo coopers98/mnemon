@@ -156,7 +156,10 @@ backfill_parse_args() {
 # One pass over a transcript, in jq: whether a record's sessionId differs from
 # the file name, the first cwd and entrypoint, the last timestamp, whether any
 # human user record starts a line with @nomemo, and the first human prompt
-# (wrappers dropped, whitespace collapsed) with its hash.
+# with its hash. The hash is of the prompt normalised (system-reminders
+# dropped, whitespace collapsed); the prompt itself is kept as typed, its first
+# 4000 characters JSON-encoded, so that it is redacted before anything else
+# touches it (backfill_display_prompt).
 #
 # A human user record is what mnemon_clean_transcript keeps as a user turn: a
 # user record that is not meta, a compact summary, a sidechain, an API error or
@@ -195,7 +198,7 @@ def hex8:
     [recurse(if . >= 16 then (. / 16 | floor) else empty end) | . - ((. / 16 | floor) * 16)]
     | reverse | map("0123456789abcdef"[.:. + 1]) | join("") | ("0000000" + .)[-8:];
 reduce (inputs | fromjson? | if type == "array" then .[] else . end | objects) as $r
-    ({mm: false, cwd: "", ep: "", ts: "", nomemo: false, first: ""};
+    ({mm: false, cwd: "", ep: "", ts: "", nomemo: false, first: "", raw: ""};
      ($r | try human_raw catch null) as $h
      | .mm = (.mm or ((($r.sessionId | type) == "string") and $r.sessionId != $sid))
      | (if .cwd == "" and ($r.cwd | type) == "string" then .cwd = $r.cwd else . end)
@@ -203,17 +206,18 @@ reduce (inputs | fromjson? | if type == "array" then .[] else . end | objects) a
      | (if ($r.timestamp | type) == "string" then .ts = $r.timestamp else . end)
      | (if ($h | type) == "string" then
             .nomemo = (.nomemo or ($h | nomemo))
-            | (if .first == "" then .first = ($h | norm) else . end)
+            | (if .first == "" then .first = ($h | norm) | .raw = $h else . end)
         else . end))
 | (.first | if . == "" then "" else (modhash(31; 2147483647) | hex8) + (modhash(131; 2147483629) | hex8) end) as $hash
-| [(.mm | tostring), .cwd, .ep, .ts, (.nomemo | tostring), $hash, .first[0:500]]
-| map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")
+| ([(.mm | tostring), .cwd, .ep, .ts, (.nomemo | tostring), $hash] | map(gsub("[[:cntrl:]]"; " ")))
+  + [.raw[0:4000] | tojson]
+| join("\u001f")
 '
 
 # Pass 1, once per run: every transcript at exactly <root>/<dir>/<id>.jsonl,
 # never deeper (a subagent's file carries its parent's sessionId). Writes
 # $BACKFILL_TMP/meta, one line per file:
-#   sid path dir lines mtime bytes mismatch cwd entrypoint last_ts nomemo hash repo project first_prompt
+#   sid path dir lines mtime bytes mismatch cwd entrypoint last_ts nomemo hash repo project first_prompt_json
 backfill_collect() {
     local root="$1" meta="$BACKFILL_TMP/meta" f dir sid lines mtime bytes out
     local mm cwd ep ts nomemo hash first repo="" project="" last_cwd="" seen=0
@@ -247,11 +251,21 @@ backfill_collect() {
 # figures, and which of the scan's projects have a visible wing. Cached in
 # $BACKFILL_TMP, so the scan and the notes share it.
 backfill_resolve() {
-    local status="$BACKFILL_TMP/status.json" names params result
+    local status="$BACKFILL_TMP/status.json" names params result sid mm cwd nomemo repo project _
     [ -e "$status" ] && return 0
-    # The server takes up to 500 names of up to 100 characters; a name left
-    # out is answered by no one, and counts as new.
-    names=$(awk -F "$BACKFILL_US" '$14 != "" { print $14 }' "$BACKFILL_TMP/meta" 2>/dev/null \
+    # Only the names of projects that could be imported: never one from a
+    # capture_ignore repository, a mismatched file, or an @nomemo or disabled
+    # session, which live capture would never name either. The server takes
+    # up to 500 names of up to 100 characters; a name left out is answered by
+    # no one, and counts as new.
+    names=$(
+        while IFS="$BACKFILL_US" read -r sid _ _ _ _ _ mm cwd _ _ nomemo _ repo project _ <&3; do
+            [ -n "$project" ] && [ "$mm" != true ] && [ "$nomemo" != true ] || continue
+            _backfill_ignored "$repo" "$cwd" && continue
+            _backfill_read_state "$sid"
+            [ "$BACKFILL_ROW_NOMEMO" = true ] || [ "$BACKFILL_ROW_DISABLED" = true ] && continue
+            printf '%s\n' "$project"
+        done 3< "$BACKFILL_TMP/meta" \
         | LC_ALL=C sort -u | awk 'length($0) <= 100' | head -n 500 | jq -Rnc '[inputs]')
     params=$(jq -nc --argjson p "${names:-[]}" '{name: "brain_status", arguments: {projects: $p}}')
     result=$(mnemon_call "tools/call" "$params" 15000) || result=""
@@ -336,6 +350,36 @@ backfill_simulate() {
     done
     rm -f "$slice" "$out"
     printf '%s %s' "$calls" "$chars"
+}
+
+# Whether a session's repository is in capture_ignore. Args: <repo> <cwd>.
+# When the repository cannot be resolved (its checkout is gone), the cwd's own
+# name is the repository name live capture would have used, and is checked
+# instead: --include must not bring back a repository the user opted out.
+_backfill_ignored() {
+    local repo="$1" name="${2%/}"
+    if [ -n "$repo" ]; then
+        mnemon_capture_ignored "$repo"
+        return
+    fi
+    name="${name%\\}"
+    name="${name##*[/\\]}"
+    mnemon_capture_ignored "$name"
+}
+
+# A session's stored state, read with jq and never created. Args: <sid>.
+# Sets BACKFILL_ROW_POINTER, BACKFILL_ROW_NOMEMO, BACKFILL_ROW_DISABLED.
+_backfill_read_state() {
+    local fields
+    BACKFILL_ROW_POINTER=0 BACKFILL_ROW_NOMEMO=false BACKFILL_ROW_DISABLED=false
+    [ -f "$BACKFILL_STATE_DIR/$1.json" ] || return 0
+    fields=$(jq -r '[((.last_digest_turn // 0) | if type == "number" then floor else 0 end),
+                     (.nomemo == true), (.disabled == true)] | map(tostring) | join(" ")' \
+        "$BACKFILL_STATE_DIR/$1.json" 2>/dev/null)
+    fields="${fields//$'\r'/}"
+    read -r BACKFILL_ROW_POINTER BACKFILL_ROW_NOMEMO BACKFILL_ROW_DISABLED <<< "$fields"
+    case "$BACKFILL_ROW_POINTER" in ''|*[!0-9]*) BACKFILL_ROW_POINTER=0 ;; esac
+    return 0
 }
 
 # Whether an entrypoint starts with one of --skip-entrypoint's prefixes.
@@ -424,7 +468,7 @@ _backfill_simulate_all() {
 backfill_scan() {
     local root="$1" meta cls="$BACKFILL_TMP/cls" elig="$BACKFILL_TMP/elig" auto now since_cut
     local sid path dir lines mtime bytes mm cwd ep ts nomemo hash repo project first
-    local status reason ptr st_nomemo st_disabled fields include_name
+    local status reason ptr st_nomemo st_disabled include_name
     backfill_collect "$root"
     backfill_resolve
     backfill_load_status
@@ -438,15 +482,9 @@ backfill_scan() {
     since_cut=$((now - BACKFILL_QUIET_MINUTES * 60))
     : > "$cls"; : > "$elig"
     while IFS="$BACKFILL_US" read -r sid path dir lines mtime bytes mm cwd ep ts nomemo hash repo project first <&3; do
-        status=skip reason="" ptr=0 st_nomemo=false st_disabled=false
-        if [ -f "$BACKFILL_STATE_DIR/$sid.json" ]; then
-            fields=$(jq -r '[((.last_digest_turn // 0) | if type == "number" then floor else 0 end),
-                             (.nomemo == true), (.disabled == true)] | map(tostring) | join(" ")' \
-                "$BACKFILL_STATE_DIR/$sid.json" 2>/dev/null)
-            fields="${fields//$'\r'/}"
-            read -r ptr st_nomemo st_disabled <<< "$fields"
-            case "$ptr" in ''|*[!0-9]*) ptr=0 ;; esac
-        fi
+        status=skip reason=""
+        _backfill_read_state "$sid"
+        ptr="$BACKFILL_ROW_POINTER" st_nomemo="$BACKFILL_ROW_NOMEMO" st_disabled="$BACKFILL_ROW_DISABLED"
         # An unresolved directory comes in under the name --include gives it.
         include_name="${dir#-}"
         if [ -z "$repo" ] && backfill_listed "$BACKFILL_INCLUDES" "$include_name"; then
@@ -458,7 +496,7 @@ backfill_scan() {
         elif [ -d "$BACKFILL_STATE_DIR/$sid.digest.lock.d" ]; then reason=busy
         elif [ "$st_disabled" = true ]; then reason=disabled
         elif [ "$st_nomemo" = true ] || [ "$nomemo" = true ]; then reason=nomemo
-        elif [ -n "$repo" ] && mnemon_capture_ignored "$repo"; then reason=capture_ignore
+        elif _backfill_ignored "$repo" "$cwd"; then reason=capture_ignore
         elif [ -z "$repo" ] && [ -z "$project" ]; then reason=unresolved
         elif [ "$BACKFILL_MEMORY_ONLY" = 1 ] \
             || { [ -n "$BACKFILL_PROJECT" ] && [ "$project" != "$BACKFILL_PROJECT" ]; } \
@@ -494,12 +532,16 @@ backfill_scan() {
 # project_ignore (a note has no model to file it), is unresolved unless
 # --include names it. --since and --memory-only concern sessions only.
 backfill_notes() {
-    local root="$1" dirs="$BACKFILL_TMP/dirs" f dir mtime bytes repo project status reason since_cut row
+    local root="$1" dirs="$BACKFILL_TMP/dirs" f dir mtime bytes repo project cwd status reason since_cut row _
     backfill_collect "$root"
     backfill_resolve
     backfill_load_status
-    awk -F "$BACKFILL_US" -v OFS="$BACKFILL_US" '$13 != "" && !($3 in seen) { seen[$3] = 1; print $3, $13, $14 }' \
-        "$BACKFILL_TMP/meta" > "$dirs"
+    # Per directory: the first session whose repository resolves, else the
+    # first with a cwd (whose name _backfill_ignored checks).
+    awk -F "$BACKFILL_US" -v OFS="$BACKFILL_US" '
+        $13 != "" && !($3 in r) { r[$3] = $13; p[$3] = $14; c[$3] = $8; d[$3] = 1 }
+        $8 != "" && !($3 in d) { c[$3] = $8; d[$3] = 1 }
+        END { for (k in d) print k, r[k], p[k], c[k] }' "$BACKFILL_TMP/meta" > "$dirs"
     since_cut=$(( $(date +%s) - BACKFILL_QUIET_MINUTES * 60 ))
     for f in "$root"/*/memory/*.md; do
         [ -f "$f" ] || continue
@@ -508,14 +550,14 @@ backfill_notes() {
         mtime=$(mnemon_mtime "$f" 0)
         bytes=$(wc -c < "$f" | tr -d ' ')
         row=$(awk -F "$BACKFILL_US" -v d="$dir" '$1 == d { print; exit }' "$dirs")
-        repo=""; project=""
-        [ -n "$row" ] && IFS="$BACKFILL_US" read -r _ repo project <<< "$row"
+        repo=""; project=""; cwd=""
+        [ -n "$row" ] && IFS="$BACKFILL_US" read -r _ repo project cwd <<< "$row"
         if [ -z "$project" ] && backfill_listed "$BACKFILL_INCLUDES" "${dir#-}"; then
             project="${dir#-}"; repo=""
         fi
         status=skip reason=""
         if [ "$mtime" -gt "$since_cut" ]; then reason=recent
-        elif [ -n "$repo" ] && mnemon_capture_ignored "$repo"; then reason=capture_ignore
+        elif [ -n "$repo$cwd" ] && _backfill_ignored "$repo" "$cwd"; then reason=capture_ignore
         elif [ -z "$project" ]; then reason=unresolved
         elif [ -n "$BACKFILL_PROJECT" ] && [ "$project" != "$BACKFILL_PROJECT" ]; then reason=not_included
         elif [ -n "$repo" ] && ! backfill_listed "$BACKFILL_KNOWN_PROJECTS" "$project" \
@@ -552,9 +594,22 @@ _backfill_duration() {
     awk -v s="$1" 'BEGIN { if (s < 3600) printf "%d min", int((s + 59) / 60); else printf "%.1f hours", s / 3600 }'
 }
 
-# Text from a transcript, safe to print: redacted, then cut to 60 characters.
+# Text from a transcript, safe to print. Args: <the text, JSON-encoded>.
+# Redacted as typed, then system-reminders dropped, whitespace collapsed and
+# cut to 60 characters. Fails closed: when redaction fails or says a pattern
+# failed, "[withheld]" is printed instead.
 backfill_display_prompt() {
-    printf '%s' "$1" | mnemon_redact_text 2>/dev/null | jq -Rrs '.[0:60] | gsub("[[:cntrl:]]"; " ")' | tr -d '\r'
+    local err="$BACKFILL_TMP/redact.err" text rc
+    text=$(printf '%s' "$1" | jq -j '.' 2>/dev/null | mnemon_redact_text 2>"$err")
+    rc=$?
+    if [ "$rc" -ne 0 ] || [ -s "$err" ]; then
+        rm -f "$err"
+        printf '[withheld]'
+        return 0
+    fi
+    rm -f "$err"
+    printf '%s' "$text" | jq -Rrs 'gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
+        | gsub("[[:space:]]+"; " ") | sub("^ "; "") | .[0:60]' | tr -d '\r'
 }
 
 # The scan report. Args: <scan-tsv-file> <notes-tsv-file>. Needs
@@ -604,7 +659,8 @@ backfill_print_scan() {
     echo "Repeated first prompts (${BACKFILL_AUTOMATION_MIN}+ sessions are skipped as automation; --include-automation <hash> brings one back)"
     printf '  %5s  %-12s  %-16s  %-30s  %s\n' "count" "status" "hash" "projects" "first prompt"
     local clusters
-    clusters=$(awk -F'\t' "$label_awk"'$11 != "" { n[$11]++; k = label($3, $4, $2)
+    # A session that opted out (@nomemo, capture_ignore) is never listed.
+    clusters=$(awk -F'\t' "$label_awk"'$11 != "" && $6 != "nomemo" && $6 != "capture_ignore" { n[$11]++; k = label($3, $4, $2)
             if (index(SUBSEP p[$11] SUBSEP, SUBSEP k SUBSEP) == 0) p[$11] = (p[$11] == "") ? k : p[$11] SUBSEP k }
         END { for (h in n) if (n[h] >= 2) { gsub(SUBSEP, ",", p[h]); printf "%d\t%s\t%s\n", n[h], h, p[h] } }' "$scan" \
         | LC_ALL=C sort -t "$(printf '\t')" -k1,1nr -k2,2)
@@ -653,7 +709,18 @@ backfill_print_scan() {
     if [ -s "$MNEMON_ERROR_LOG" ]; then
         echo
         echo "Notes from the scan"
-        head -n 20 "$MNEMON_ERROR_LOG" | mnemon_redact_text 2>/dev/null | awk '{ print "  " substr($0, 1, 240) }'
+        # The log's own timestamp is dropped; what follows is redacted
+        # (withheld whole if redaction fails) and cut to 60 characters.
+        local notes_text rc
+        notes_text=$(head -n 20 "$MNEMON_ERROR_LOG" | sed 's/^\[[^]]*\] //' \
+            | mnemon_redact_text 2>"$BACKFILL_TMP/redact.err")
+        rc=$?
+        if [ "$rc" -ne 0 ] || [ -s "$BACKFILL_TMP/redact.err" ]; then
+            echo "  [withheld] (redaction failed)"
+        else
+            printf '%s\n' "$notes_text" | tr -d '\r' | awk '{ print "  " substr($0, 1, 60) }'
+        fi
+        rm -f "$BACKFILL_TMP/redact.err"
         local more
         more=$(( $(wc -l < "$MNEMON_ERROR_LOG") - 20 ))
         [ "$more" -gt 0 ] && echo "  ... and $more more"

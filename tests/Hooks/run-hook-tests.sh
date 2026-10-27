@@ -3302,7 +3302,7 @@ BF_SECRET="sk-bfSECRETabcdefghijklmnop0123"
 
 # Repositories the sessions ran in. atlas has a remote, so its name comes from
 # the remote; the others are named for their directory.
-for r in atlas cron heart beacon ignoredrepo; do git init -q "$BF/work/$r"; done
+for r in atlas cron heart beacon ignoredrepo hushed; do git init -q "$BF/work/$r"; done
 git -C "$BF/work/atlas" remote add origin "https://example.com/me/atlas.git"
 
 # Args: <file> <session_id> <cwd> <entrypoint> <text>... One record per text,
@@ -3358,6 +3358,13 @@ done
 bf_session "$BF_ROOT/-tmp-my dir/$(bf_id 31).jsonl" "$(bf_id 31)" "$BF/gone/my dir" cli "Work in a dir that is gone" "Ok."
 bf_session "$BF_ROOT/-work-beacon/$(bf_id 41).jsonl" "$(bf_id 41)" "$BF/work/beacon" cli "A beacon session" "Ok."
 bf_session "$BF_ROOT/-work-ignoredrepo/$(bf_id 51).jsonl" "$(bf_id 51)" "$BF/work/ignoredrepo" cli "An ignored repo" "Ok."
+# A capture_ignore repository whose checkout is gone: its name is all that is
+# left to match, and --include must not bring it back.
+bf_session "$BF_ROOT/-gone-ignoredrepo/$(bf_id 52).jsonl" "$(bf_id 52)" "$BF/gone/ignoredrepo" cli "An ignored repo, moved away" "Ok."
+mkdir -p "$BF_ROOT/-gone-ignoredrepo/memory"
+printf '# Ignored\nNot to be imported.\n' > "$BF_ROOT/-gone-ignoredrepo/memory/note-c.md"
+# A project whose only session asked for @nomemo: its name is never sent.
+bf_session "$BF_ROOT/-work-hushed/$(bf_id 61).jsonl" "$(bf_id 61)" "$BF/work/hushed" cli "@nomemo private matter" "Understood."
 # Everything is old except the one file modified now.
 find "$BF_ROOT" -type f -exec touch -t 202601010000 {} +
 bf_session "$A/$(bf_id 4).jsonl" "$(bf_id 4)" "$BF/work/atlas" cli "A live session" "Still going."
@@ -3515,8 +3522,37 @@ bf_run_sampled
 bf_has "sampled" "backfill scan: a slow scan samples and says so"
 
 # A cleaning error in the simulation is printed, not logged under ~/.mnemon.
-MNEMON_CLEAN_FAIL=aws bf_run
-bf_has "redaction pattern aws failed" "backfill scan: a simulated cleaning error is printed"
+MNEMON_CLEAN_SCAN_MAX=bogus bf_run
+bf_has "transcript cleaning failed" "backfill scan: a simulated cleaning error is printed"
+if printf '%s\n' "$BF_OUT" | sed -n '/^Notes from the scan/,$p' | tail -n +2 | awk 'length($0) > 62 { f = 1 } END { exit !f }'; then
+    FAIL=$((FAIL+1)); printf '  FAIL: backfill scan: a note line is longer than 60 characters\n'; bf_show
+else
+    PASS=$((PASS+1)); printf '  ok: backfill scan: note lines are cut to 60 characters\n'
+fi
+
+# Redaction fails closed: whichever pattern fails, no prompt text is shown.
+bf_leaks=""
+for p in pem aws jwt bearer openai github_pat github slack aiven assign jsonkey keyvalue url; do
+    MNEMON_CLEAN_FAIL=$p bf_run
+    case "$BF_OUT" in *Heartbeat*|*"overnight logs"*) bf_leaks="$bf_leaks $p" ;; esac
+    case "$BF_OUT" in *"[withheld]"*) ;; *) bf_leaks="$bf_leaks $p(no-withheld)" ;; esac
+done
+assert_eq "$bf_leaks" "" "backfill scan: a failed redaction pattern withholds every prompt"
+
+# What the server is told: only the names of projects that could be imported.
+: > "$BF_LOG"
+bf_run
+bf_lacks "An ignored repo, moved away" "backfill scan: a capture_ignore session's prompt is not shown"
+assert_eq "$(grep -c 'ignoredrepo' "$BF_LOG")" "0" "backfill scan: a capture_ignore repository is never named to the server"
+assert_eq "$(grep -c 'hushed' "$BF_LOG")" "0" "backfill scan: a project with only @nomemo sessions is never named to the server"
+assert_eq "$(grep -c '"atlas"' "$BF_LOG")/$(grep -c '"heart"' "$BF_LOG")/$(grep -c '"beacon"' "$BF_LOG")" "1/1/1" \
+    "backfill scan: the names of importable projects are still sent"
+# A capture_ignore repository that is gone stays ignored, --include or not.
+BF_TSV4=$(BF_ARGS="--include gone-ignoredrepo" bf_lib backfill_scan)
+assert_eq "$(bf_status "$BF_TSV4" "$(bf_id 52)")" "skip capture_ignore" "backfill scan: --include cannot bring in a gone capture_ignore repository"
+BF_NOTES4=$(BF_ARGS="--include gone-ignoredrepo" bf_lib backfill_notes)
+assert_eq "$(awk -F'\t' '$1 ~ /note-c\.md$/ { print $3 " " $4 }' <<< "$BF_NOTES4")" "skip capture_ignore" \
+    "backfill notes: --include cannot bring in a gone capture_ignore repository's notes"
 
 bf_run --bogus
 assert_eq "$BF_RC" "2" "backfill scan: an unknown option exits 2"

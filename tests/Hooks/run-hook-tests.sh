@@ -1522,6 +1522,20 @@ esac
 rp_modes=$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.replay // "none"] | unique | join(",")' "$BO_LOG")
 assert_eq "$rp_modes" "by_start" "replay: every digest opts in to replay by start"
 stop_server $BO_PID
+# A replay that claims an end past the one sent (a slice recorded under this
+# session id by someone else) cannot move the pointer past turns this client
+# never sent.
+: > "$BO_LOG"
+FAKE_PORT="$BO_PORT" FAKE_REQUEST_LOG="$BO_LOG" FAKE_REPLAY_END=99 "$THIS_DIR/fixtures/server.sh" &
+BO_PID=$!
+wait_server "$BO_PORT"
+rm -f "$MNEMON_DIR/sessions/s36b".*
+printf '{"session_id":"s36b","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_rp" \
+  | "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker s36b
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s36b.json")" "4" \
+    "replay: an end past the one sent advances only to the end sent"
+stop_server $BO_PID
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
 
 # Test 10p: a worker that takes the lock after another finished sends from the

@@ -169,9 +169,12 @@ run_once() {
 
     # A replay says where the slice the server already holds from this start
     # ended -- after a call that timed out here but committed there. Advance
-    # to that end; anything past it is carried forward.
+    # to that end; anything past it is carried forward. Never past the end
+    # sent: session ids are the caller's to choose, so a slice recorded under
+    # this one by another device must not skip turns this client never sent.
     done_to=$(printf '%s' "$result" | jq -r '.structuredContent.turn_end // empty | numbers' 2>/dev/null)
     case "$done_to" in ''|*[!0-9]*) done_to="$send" ;; esac
+    [ "$done_to" -gt "$send" ] && done_to="$send"
     if [ "$done_to" -lt "$send" ] && [ -n "$transcript_path" ]; then
         mnemon_digest_pending_add "$session_id" "$transcript_path" "$send"
     fi

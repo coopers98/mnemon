@@ -63,6 +63,17 @@ if [ "${undigested_n:-0}" -gt 0 ] 2>/dev/null; then
         "$([ "$undigested" != "$undigested_n" ] && printf 'at least ')" "$undigested_n" "$MNEMON_ERROR_LOG"
 fi
 
+# Old sessions a backfill started and did not finish are the backfill's to
+# resume, not live capture's. And a device that has never run one is offered it
+# once: the flag file is the "once", the state file the "never run".
+bf_unfinished=$(mnemon_backfill_unfinished)
+if [ "${bf_unfinished:-0}" -gt 0 ] 2>/dev/null; then
+    printf 'Mnemon: %s old session(s) partly imported; run mnemon-backfill to continue.\n' "$bf_unfinished"
+elif [ ! -e "$MNEMON_DIR/backfill/state.json" ] && [ ! -e "$MNEMON_DIR/backfill/offered" ]; then
+    printf "Mnemon: bring in this device's past history with /mnemon:backfill (a free scan; nothing is spent).\n"
+    mkdir -p "$MNEMON_DIR/backfill" 2>/dev/null && : > "$MNEMON_DIR/backfill/offered" 2>/dev/null
+fi
+
 if mnemon_refresh_available; then
     # Session start is the one place a ~1s refresh is invisible, so spend it
     # here rather than inside the tight per-prompt recall budget. Ten minutes

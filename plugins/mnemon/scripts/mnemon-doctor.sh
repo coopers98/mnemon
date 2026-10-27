@@ -410,5 +410,12 @@ if [ "${undigested_n:-0}" -gt 0 ] 2>/dev/null; then
     warn "recent errors: $([ "$undigested" != "$undigested_n" ] && printf 'at least ')$undigested_n session(s) have undigested turns; each is sent the next time that session runs" \
         "see $MNEMON_ERROR_LOG for any digests that failed"
 fi
+# Old sessions a backfill started and did not finish: its to resume, not live
+# capture's, so they are reported apart from the undigested ones above.
+bf_unfinished=$(mnemon_backfill_unfinished)
+if [ "${bf_unfinished:-0}" -gt 0 ] 2>/dev/null; then
+    warn "backfill: $bf_unfinished old session(s) partly imported" \
+        "run mnemon-backfill to continue"
+fi
 
 finish

@@ -174,3 +174,6 @@ if [ -n "$old_token" ] && [ -f "$CLAUDE_JSON" ]; then
 fi
 
 echo "Done. This device now renews itself; no more 90-day token ritual."
+echo "To bring in this device's past history, first run a free scan (nothing is spent), then a trial on one project:"
+echo "  bash \"$SCRIPT_DIR/mnemon-backfill.sh\" --dry-run"
+echo "  bash \"$SCRIPT_DIR/mnemon-backfill.sh\" --project <name>"

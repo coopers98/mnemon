@@ -738,6 +738,25 @@ _mnemon_digest_pending_take() {
     rm -f "$f"
 }
 
+# The sessions a backfill started and did not finish (done:false in
+# ~/.mnemon/backfill/state.json), one id per line. Nothing when there is no
+# state file or it cannot be read: the hooks must never fail over it, and a
+# missing file costs no process at all.
+_mnemon_backfill_unfinished_ids() {
+    local f="$MNEMON_DIR/backfill/state.json"
+    [ -r "$f" ] || return 0
+    jq -r '(.sessions // {}) | to_entries[] | select(.value.done == false) | .key' "$f" 2>/dev/null || true
+}
+
+# How many sessions a backfill left part-way. These are not "undigested": live
+# capture never sends them (the backfill owns their pointer), mnemon-backfill
+# resumes them.
+mnemon_backfill_unfinished() {
+    local ids
+    ids=$(_mnemon_backfill_unfinished_ids)
+    if [ -z "$ids" ]; then printf '0'; else printf '%s\n' "$ids" | grep -c .; fi
+}
+
 # How many sessions have turns left undigested -- after failures, or pending
 # because a run stopped after its ten chunks. Args: [--tidy]. Echoes the
 # count, with a "+" after it when the scan ran out of time before it had
@@ -750,6 +769,9 @@ _mnemon_digest_pending_take() {
 # file, and the scan stops after one to two seconds
 # (MNEMON_UNDIGESTED_SCAN_SECONDS, default 2), having looked at one at least.
 #
+# Sessions a backfill left unfinished are not counted here; see
+# mnemon_backfill_unfinished.
+#
 # --tidy (SessionStart) also clears what can never be retried: a marker at or
 # below the pointer is removed, and a session whose transcript is gone is
 # logged once and its failure state cleared. Without that the banner said
@@ -758,13 +780,17 @@ mnemon_undigested_sessions() {
     local tidy=false n=0 since=$SECONDS sid f fields nomemo ptr fails tp pend marker looked=0 more=""
     local budget="${MNEMON_UNDIGESTED_SCAN_SECONDS:-2}"
     [ "${1:-}" = "--tidy" ] && tidy=true
-    local candidates=""
+    local candidates="" skip
+    skip=" $(_mnemon_backfill_unfinished_ids | tr '\n' ' ') "
     for f in $(grep -lE '"digest_failures": *[1-9]' "$MNEMON_SESSIONS_DIR"/*.json 2>/dev/null); do
-        sid="${f##*/}"; candidates="$candidates ${sid%.json}"
+        sid="${f##*/}"; sid="${sid%.json}"
+        case "$skip" in *" $sid "*) continue ;; esac
+        candidates="$candidates $sid"
     done
     for f in "$MNEMON_SESSIONS_DIR"/*.digest.pending; do
         [ -e "$f" ] || continue
         sid="${f##*/}"; sid="${sid%.digest.pending}"
+        case "$skip" in *" $sid "*) continue ;; esac
         case " $candidates " in *" $sid "*) ;; *) candidates="$candidates $sid" ;; esac
     done
     for sid in $candidates; do

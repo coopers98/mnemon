@@ -1956,6 +1956,62 @@ else
 fi
 case "$SW_DIR" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${SW_DIR:?}" ;; esac
 
+# A backfill session that stopped part-way is not "undigested": live capture
+# would never send it (its transcript is old and its pointer is the backfill's),
+# so the banner points at mnemon-backfill instead, and the history offer is
+# made once per device while no backfill has run.
+BB_DIR=$(mktemp -d)
+mkdir -p "$BB_DIR/sessions" "$BB_DIR/backfill"
+jq -n '{endpoint:"http://127.0.0.1:1/mcp", bearer_token:"t", recall_timeout_ms:300}' > "$BB_DIR/config.json"
+bb_tp="$BB_DIR/old.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"one"}}' '{"type":"user","message":{"role":"user","content":"two"}}' > "$bb_tp"
+for bb_sid in half1 half2 live1; do
+    jq -n --arg t "$bb_tp" '{last_digest_turn:0,recent_drawer_ids:[],nomemo:false,disabled:false,digest_failures:2,digest_retry_after:0,transcript_path:$t}' \
+        > "$BB_DIR/sessions/$bb_sid.json"
+done
+jq -n '{sessions:{half1:{started_at:1,pointer:1,done:false},half2:{started_at:1,pointer:1,done:false},fin1:{started_at:1,pointer:2,done:true}},spent:{},trial:{}}' \
+    > "$BB_DIR/backfill/state.json"
+bb_wake() {
+    printf '{"session_id":"%s","cwd":"/tmp","hook_event_name":"SessionStart"}' "$1" \
+        | env -u MNEMON_ENDPOINT -u MNEMON_TOKEN MNEMON_DIR="$BB_DIR" "$HOOKS_DIR/mnemon-wake.sh" 2>/dev/null
+}
+bb_out=$(bb_wake bb1)
+case "$bb_out" in
+    *"Mnemon: 2 old session(s) partly imported; run mnemon-backfill to continue."*) PASS=$((PASS+1)); printf '  ok: banner: a stopped backfill session is counted as partly imported\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: banner: no partly-imported line, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
+esac
+case "$bb_out" in
+    *"Mnemon: 1 session(s) have undigested turns;"*) PASS=$((PASS+1)); printf '  ok: banner: stopped backfill sessions are not counted as undigested\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: banner: undigested count wrong, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
+esac
+case "$bb_out" in
+    *"/mnemon:backfill"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: offered the backfill although one has started\n';;
+    *) PASS=$((PASS+1)); printf '  ok: banner: no offer once a backfill has started\n';;
+esac
+# Corrupt state must never fail the hook.
+printf 'not json{' > "$BB_DIR/backfill/state.json"
+bb_out=$(bb_wake bb2); bb_rc=$?
+assert_eq "$bb_rc" "0" "banner: a corrupt backfill state does not fail the hook"
+case "$bb_out" in
+    *"partly imported"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: corrupt state reported as partly imported\n';;
+    *) PASS=$((PASS+1)); printf '  ok: banner: a corrupt backfill state reports nothing\n';;
+esac
+
+# The offer: once per device, when no backfill state exists.
+rm -rf "$BB_DIR/backfill" "$BB_DIR/sessions"/*.json
+bb_out=$(bb_wake bb3)
+case "$bb_out" in
+    *"Mnemon: bring in this device's past history with /mnemon:backfill (a free scan; nothing is spent)."*) PASS=$((PASS+1)); printf '  ok: banner: offer shown\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: banner: no offer, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
+esac
+bb_out=$(bb_wake bb4)
+case "$bb_out" in
+    *"/mnemon:backfill"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: offer shown twice\n';;
+    *) PASS=$((PASS+1)); printf '  ok: banner: offer shown once\n';;
+esac
+assert_eq "$([ -e "$BB_DIR/backfill/offered" ] && echo yes || echo no)" "yes" "banner: the offer leaves its flag file"
+case "$BB_DIR" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${BB_DIR:?}" ;; esac
+
 # Recall waits at most a second for the state lock, and then skips its
 # timestamp rather than hold up the prompt.
 RL_LOCK="$MNEMON_DIR/sessions/s37.state.lock.d"
@@ -2319,6 +2375,10 @@ assert_eq "$(jq -r '.client_id' "$MNEMON_DIR/config.json")" "cid" "authorize: st
 assert_eq "$(jq -r '.auth_state' "$MNEMON_DIR/config.json")" "ok" "authorize: marks the device live"
 assert_ne "$(jq -r '.token_endpoint' "$MNEMON_DIR/config.json")" "null" "authorize: stores the token endpoint"
 assert_eq "$(jq -r '.recall_timeout_ms' "$MNEMON_DIR/config.json")" "3000" "authorize: preserves existing tunables"
+case "$a1_out" in
+    *"mnemon-backfill.sh\" --dry-run"*"mnemon-backfill.sh\" --project <name>"*) PASS=$((PASS+1)); printf '  ok: authorize: success names the backfill scan and trial\n';;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: authorize: success does not name the backfill scan, got: %s\n' "$(printf '%s' "$a1_out" | tail -5)";;
+esac
 assert_eq "$(stat -c '%a' "$MNEMON_DIR/config.json")" "600" "authorize: the new config is 0600"
 a1_backup=$(ls "$MNEMON_DIR"/config.backup-*.json 2>/dev/null | head -1)
 assert_eq "$(jq -r '.bearer_token' "$a1_backup" 2>/dev/null)" "old-pat-token" "authorize: the backup holds the replaced token"
@@ -2761,6 +2821,20 @@ case "$DOC_OUT" in
     *) PASS=$((PASS+1)); printf '  ok: doctor: the undigested line does not blame failures\n';;
 esac
 rm -f "$DR1/sessions/failed.json"
+# Backfill sessions that stopped part-way get their own line, and are not
+# also counted as undigested.
+mkdir -p "$DR1/backfill"
+cp "$DR1/failed-transcript.jsonl" "$DR1/old-transcript.jsonl"
+jq -n --arg t "$DR1/old-transcript.jsonl" '{last_digest_turn:0,digest_failures:2,digest_retry_after:0,transcript_path:$t}' > "$DR1/sessions/half.json"
+jq -n '{sessions:{half:{started_at:1,pointer:0,done:false}},spent:{},trial:{}}' > "$DR1/backfill/state.json"
+doc_run "$DR1"
+doc_line "warn" "1 old session.*partly imported" "doctor: partly imported sessions get their own line"
+doc_has "fix: run mnemon-backfill to continue" "doctor: the partly imported line says how to continue"
+doc_no_line "warn" "undigested" "doctor: a partly imported session is not also undigested"
+printf 'garbage{' > "$DR1/backfill/state.json"
+doc_run "$DR1"
+doc_no_line "warn" "partly imported" "doctor: a corrupt backfill state is not reported as partly imported"
+rm -rf "$DR1/backfill" "$DR1/sessions/half.json"
 rf_stop_all
 
 # DR2: no configuration at all. FAIL with the enrolment command, exit 1.

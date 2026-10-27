@@ -22,6 +22,13 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   pending, digest, token-refresh and once-per-event locks. A token-refresh
   lock left with no pid (its holder killed mid-take, or a full disk) is taken
   over after 30 s instead of failing every refresh. Plugin 0.3.11.
+- **A digest replay cannot move a session past turns it never sent.** A
+  replay by start reports where the recorded slice ended, and the client
+  advanced there. Session ids are the caller's to choose, so a slice another
+  device recorded under the same id could skip this one's turns; the client
+  now advances no further than the end it sent. Plugin 0.3.11.
+- **The server withholds text with a private key when the key pattern
+  fails,** as the plugin already did, instead of storing it unredacted.
 - **`/mnemon:doctor` no longer reports old untimestamped log lines as recent
   errors.** A line without a timestamp (stray tool output) compared as newer
   than any date. Plugin 0.3.11.

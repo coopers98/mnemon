@@ -127,15 +127,25 @@ mnemon_refresh() (
     # all but one are rejected -- which, with rotation on, would have bricked the
     # device outright.
     #
-    # mkdir is atomic everywhere these hooks run (jq + curl + coreutils; macOS
-    # has no flock). The digest worker's lock uses the same primitive
-    # (mnemon_digest_lock). Stale locks are recovered by liveness check;
-    # waiters give up after ~5s and fail only this one call.
+    # A lock directory (mnemon_lock_take) works everywhere these hooks run
+    # (jq + curl + coreutils; macOS has no flock). The digest worker's lock
+    # uses the same primitive (mnemon_digest_lock). Stale locks are recovered
+    # by liveness check; waiters give up after ~5s and fail only this one call.
     waited=0
-    while ! mkdir "$lock" 2>/dev/null; do
+    while ! mnemon_lock_take "$lock"; do
         pid=$(cat "$lock/pid" 2>/dev/null)
         if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
             rm -rf "$lock"
+            continue
+        fi
+        # A lock with no pid is one being taken right now -- or one whose
+        # holder was killed before writing it, or could not write it (a full
+        # disk). A refresh holds the lock for one 5s call, so at 30s it is the
+        # second kind, and taken over; left alone it would fail every refresh
+        # until the access token died. Renamed aside first, as in
+        # mnemon_with_lock, so only one waiter removes it.
+        if [ -z "$pid" ] && [ $(( $(date +%s) - $(mnemon_mtime "$lock") )) -ge 30 ]; then
+            mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
             continue
         fi
         if [ "$waited" -ge 25 ]; then
@@ -145,8 +155,7 @@ mnemon_refresh() (
         sleep 0.2
         waited=$((waited + 1))
     done
-    echo "$$" > "$lock/pid"
-    trap 'rm -rf "$lock"' EXIT
+    trap 'mnemon_lock_release "$lock"' EXIT
 
     # Another hook may have refreshed while we waited. If the stored token has
     # already moved on, use it and spend nothing. This is the whole anti-stampede
@@ -447,13 +456,13 @@ mnemon_mtime() {
 # pass the check. The result is the same context injected twice for two round
 # trips.
 #
-# mkdir is the atomic primitive here, as it is for the refresh lock; nothing
-# else is available everywhere these hooks run.
+# The claim is a lock directory (mnemon_lock_take), as for the refresh lock;
+# nothing else is available everywhere these hooks run.
 mnemon_claim_once() {
     local sid="$1" event="$2" ttl="${3:-10}"
     local claim="$MNEMON_SESSIONS_DIR/${sid}.${event}.claim"
 
-    if mkdir "$claim" 2>/dev/null; then
+    if mnemon_lock_take "$claim"; then
         return 0
     fi
 
@@ -465,7 +474,7 @@ mnemon_claim_once() {
     now=$(date +%s)
     if [ $(( now - mtime )) -ge "$ttl" ]; then
         rm -rf "$claim" 2>/dev/null
-        mkdir "$claim" 2>/dev/null && return 0
+        mnemon_lock_take "$claim" && return 0
     fi
 
     return 1
@@ -532,6 +541,32 @@ mnemon_session_state_write() {
     mv -f "$tmp" "$f"
 }
 
+# Take a lock directory. Args: <dir>. Returns 0 only to the one caller that now
+# holds it, with this process's pid in <dir>/pid.
+#
+# mkdir's exit status alone is not enough: uutils coreutils' mkdir (the default
+# on newer Ubuntu) reports success to more than one racing caller now and then,
+# and two hooks then held the same lock. The pid file is created with
+# noclobber -- an exclusive create bash does itself -- so exactly one caller
+# writes it, whatever mkdir does. A caller that loses leaves the directory alone.
+mnemon_lock_take() {
+    mkdir "$1" 2>/dev/null || return 1
+    ( set -C; printf '%s\n' "$$" > "$1/pid" ) 2>/dev/null
+}
+
+# Release a lock directory this process holds. Args: <dir>. One that went stale
+# and was taken over belongs to its new owner and is left alone.
+#
+# Not rm -rf: a taker whose lax mkdir succeeded may write its own pid the
+# moment ours is gone. rmdir then finds the directory not empty and leaves that
+# new owner's lock in place; rm -rf could have deleted its pid with ours.
+mnemon_lock_release() {
+    [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] || return 0
+    rm -f "$1/pid"
+    rmdir "$1" 2>/dev/null
+    return 0
+}
+
 # Run a command holding a short mkdir lock. Args: <lockdir> <command...>.
 #
 # For read-modify-write of small files several hooks touch at once (session
@@ -550,7 +585,7 @@ mnemon_session_state_write() {
 mnemon_with_lock() {
     local lock="$1" wait="${MNEMON_LOCK_WAIT:-5}" busy="${MNEMON_LOCK_BUSY:-run}" since=$SECONDS rc
     shift
-    while ! mkdir "$lock" 2>/dev/null; do
+    while ! mnemon_lock_take "$lock"; do
         if [ $(( $(date +%s) - $(mnemon_mtime "$lock") )) -ge 10 ]; then
             mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
             continue
@@ -566,10 +601,9 @@ mnemon_with_lock() {
         fi
         sleep 0.05
     done
-    echo "$$" > "$lock/pid"
     "$@"
     rc=$?
-    [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
+    mnemon_lock_release "$lock"
     return $rc
 }
 
@@ -610,7 +644,7 @@ _mnemon_session_state_update() {
 MNEMON_DIGEST_LOCK_STALE_SECONDS="${MNEMON_DIGEST_LOCK_STALE_SECONDS:-600}"
 mnemon_digest_lock() {
     local lock="$MNEMON_SESSIONS_DIR/${1}.digest.lock.d" pid mtime tries=0
-    while ! mkdir "$lock" 2>/dev/null; do
+    while ! mnemon_lock_take "$lock"; do
         [ "$tries" -ge 3 ] && return 1
         tries=$((tries + 1))
         pid=$(cat "$lock/pid" 2>/dev/null)
@@ -627,7 +661,6 @@ mnemon_digest_lock() {
         fi
         return 1
     done
-    echo "$$" > "$lock/pid"
     return 0
 }
 
@@ -635,9 +668,7 @@ mnemon_digest_lock() {
 # this process holds: one that went stale and was taken over belongs to the
 # worker that took it.
 mnemon_digest_unlock() {
-    local lock="$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
-    [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
-    return 0
+    mnemon_lock_release "$MNEMON_SESSIONS_DIR/${1}.digest.lock.d"
 }
 
 # Mark a held digest lock as fresh. Args: <session_id>. A worker running several

@@ -1582,6 +1582,29 @@ for p in $pids; do wait "$p"; done
 assert_eq "$(jq -c '[(.recent_drawer_ids | length), .nomemo]' "$MNEMON_DIR/sessions/s43.json")" "[12,true]" \
     "state: concurrent updates all land, and @nomemo survives them"
 
+# Test 10q2: the locks hold even where mkdir reports success to more than one
+# racing caller, as uutils coreutils' mkdir (newer Ubuntu's default) sometimes
+# does. This fake mkdir always succeeds, existing directory or not.
+LAXBIN=$(mktemp -d)
+printf '#!/bin/sh\nexec /bin/mkdir -p "$@"\n' > "$LAXBIN/mkdir"; chmod +x "$LAXBIN/mkdir"
+printf '{"last_digest_turn":0,"last_recall_at":0,"recent_drawer_ids":[],"nomemo":true,"disabled":false}' > "$MNEMON_DIR/sessions/s44.json"
+pids=""
+for i in $(seq 1 12); do
+    PATH="$LAXBIN:$PATH" bash -c '. "$1/lib/common.sh"; mnemon_session_state_update s44 ".recent_drawer_ids += [\$i]" --argjson i "$2"' _ "$HOOKS_DIR" "$i" & pids="$pids $!"
+done
+for p in $pids; do wait "$p"; done
+assert_eq "$(jq -c '[(.recent_drawer_ids | length), .nomemo]' "$MNEMON_DIR/sessions/s44.json")" "[12,true]" \
+    "lock: a lax mkdir still lets only one writer in at a time"
+assert_eq "$(PATH="$LAXBIN:$PATH" bash -c '. "$1/lib/common.sh"
+    mnemon_digest_lock s45 && echo first; (mnemon_digest_lock s45 && echo second || echo refused) &
+    wait' _ "$HOOKS_DIR" | tr '\n' ' ')" "first refused " \
+    "lock: a lax mkdir does not hand a held digest lock to a second worker"
+rm -rf "$MNEMON_DIR/sessions/s45".*
+assert_eq "$(PATH="$LAXBIN:$PATH" bash -c '. "$1/lib/common.sh"
+    mnemon_claim_once s46 wake && echo first; mnemon_claim_once s46 wake && echo second || echo refused' _ "$HOOKS_DIR" | tr '\n' ' ')" "first refused " \
+    "claim: a lax mkdir does not deliver an event twice"
+rm -rf "$MNEMON_DIR/sessions/s46".* "$LAXBIN"
+
 # Test 10r: a pending range whose transcript is gone is logged, not dropped
 # silently.
 PG_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
@@ -1805,6 +1828,19 @@ assert_eq "$(jq -r '.recall_timeout_ms' "$MNEMON_DIR/config.json")" "5000" "refr
 assert_eq "$(stat -c '%a' "$MNEMON_DIR/config.json")" "600" "refresh: config stays 0600"
 assert_eq "$(grep -c 'refreshed access token' "$MNEMON_ERROR_LOG_TEST")" "1" "refresh: success is logged"
 assert_eq "$(grep -c '^OAUTH_TOKEN' "$R1_LOG")" "1" "refresh: exactly one token exchange"
+
+# R1b: a refresh lock left with an empty pid (its holder killed between taking
+# it and writing the pid, or a full disk) is taken over once it is old, rather
+# than failing every refresh from then on.
+rf_config "$R1_PORT"
+mkdir -p "$MNEMON_DIR/refresh.lock.d"; : > "$MNEMON_DIR/refresh.lock.d/pid"
+touch -d '@'"$(( $(date +%s) - 60 ))" "$MNEMON_DIR/refresh.lock.d"
+r1b=$(bash -c '. "$1/lib/common.sh"; mnemon_refresh token-1' _ "$HOOKS_DIR")
+case "$r1b" in
+    token-1|"") FAIL=$((FAIL+1)); printf '  FAIL: refresh: an old lock with no pid wedged the refresh (got "%s")\n' "$r1b";;
+    *) PASS=$((PASS+1)); printf '  ok: refresh: an old lock with no pid is taken over\n';;
+esac
+[ -d "$MNEMON_DIR/refresh.lock.d" ] && rm -rf "$MNEMON_DIR/refresh.lock.d"
 
 # R2: three concurrent 401s must produce exactly one refresh. Every hook fires
 # on the same events, so an expiry is discovered by several processes at once;
@@ -2602,6 +2638,8 @@ rf_start "$DR9_PORT" "$DR9/req.log" "$DR9_STATE"
 doc_config "$DR9" "$DR9_PORT" "$DOC_BEARER"
 chmod 644 "$DR9/config.json"
 printf '[2000-01-01T00:00:00Z] an error from long ago\n' > "$DR9/capture-errors.log"
+# Untimestamped lines (stray stderr) have no date, so they are never "recent".
+printf 'jq: an untimestamped stray line\n' >> "$DR9/capture-errors.log"
 printf '[%s] HTTP 502 from somewhere: bad gateway\n' "$(date -u +%FT%TZ)" >> "$DR9/capture-errors.log"
 doc_run "$DR9"
 assert_eq "$DOC_RC" "0" "doctor: warnings alone exit 0"
@@ -2611,6 +2649,10 @@ doc_has "bad gateway" "doctor: shows a recent error from the log"
 case "$DOC_OUT" in
     *"long ago"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: showed an error older than 24h\n';;
     *) PASS=$((PASS+1)); printf '  ok: doctor: errors older than 24h are left out\n';;
+esac
+case "$DOC_OUT" in
+    *"untimestamped stray"*) FAIL=$((FAIL+1)); printf '  FAIL: doctor: showed an untimestamped line as recent\n';;
+    *) PASS=$((PASS+1)); printf '  ok: doctor: untimestamped lines are not counted as recent\n';;
 esac
 rm -f "$DR9/config.json"
 doc_run "$DR9" MNEMON_ENDPOINT="http://127.0.0.1:$DR9_PORT/mcp" MNEMON_TOKEN="$DOC_BEARER"

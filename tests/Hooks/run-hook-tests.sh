@@ -1965,7 +1965,7 @@ mkdir -p "$BB_DIR/sessions" "$BB_DIR/backfill"
 jq -n '{endpoint:"http://127.0.0.1:1/mcp", bearer_token:"t", recall_timeout_ms:300}' > "$BB_DIR/config.json"
 bb_tp="$BB_DIR/old.jsonl"
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"one"}}' '{"type":"user","message":{"role":"user","content":"two"}}' > "$bb_tp"
-for bb_sid in half1 half2 live1; do
+for bb_sid in half1 half2 live1 fin1; do
     jq -n --arg t "$bb_tp" '{last_digest_turn:0,recent_drawer_ids:[],nomemo:false,disabled:false,digest_failures:2,digest_retry_after:0,transcript_path:$t}' \
         > "$BB_DIR/sessions/$bb_sid.json"
 done
@@ -1981,13 +1981,18 @@ case "$bb_out" in
     *) FAIL=$((FAIL+1)); printf '  FAIL: banner: no partly-imported line, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
 esac
 case "$bb_out" in
-    *"Mnemon: 1 session(s) have undigested turns;"*) PASS=$((PASS+1)); printf '  ok: banner: stopped backfill sessions are not counted as undigested\n';;
+    *"Mnemon: 2 session(s) have undigested turns;"*) PASS=$((PASS+1)); printf '  ok: banner: stopped backfill sessions are not counted as undigested\n';;
+
     *) FAIL=$((FAIL+1)); printf '  FAIL: banner: undigested count wrong, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
 esac
 case "$bb_out" in
     *"/mnemon:backfill"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: offered the backfill although one has started\n';;
     *) PASS=$((PASS+1)); printf '  ok: banner: no offer once a backfill has started\n';;
 esac
+# fin1 finished its backfill (done:true) and has since collected live failures:
+# it is undigested (counted above, with live1) and not partly imported.
+assert_eq "$(MNEMON_DIR="$BB_DIR" bash -c '. "$1/lib/common.sh"; mnemon_backfill_unfinished' _ "$HOOKS_DIR")" "2" \
+    "banner: a finished backfill session is not counted as partly imported"
 # Corrupt state must never fail the hook.
 printf 'not json{' > "$BB_DIR/backfill/state.json"
 bb_out=$(bb_wake bb2); bb_rc=$?

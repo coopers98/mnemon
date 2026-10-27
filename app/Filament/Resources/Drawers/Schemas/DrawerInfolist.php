@@ -53,6 +53,12 @@ class DrawerInfolist
                 TextEntry::make('created_at')
                     ->label('Created')
                     ->dateTime(),
+                // Set on backfilled drawers: when the session happened, as
+                // opposed to when the drawer was stored.
+                TextEntry::make('occurred_at')
+                    ->label('Happened')
+                    ->dateTime()
+                    ->visible(fn ($record): bool => $record?->occurred_at !== null),
                 TextEntry::make('updated_at')
                     ->label('Updated')
                     ->dateTime(),

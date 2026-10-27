@@ -34,8 +34,12 @@ class PalaceWakeUpTool extends Tool
         $patterns = $this->wingPatternsFor($request);
         $wingIds = Wing::readableIds($patterns);
 
-        // Recent drawers (wing-filtered when restrictions apply)
-        $drawerQuery = Drawer::with('room.wing')->latest('created_at')->limit(10);
+        // Recent drawers (wing-filtered when restrictions apply). Ranked by when
+        // the content happened, so a backfilled drawer describing a months-old
+        // session does not show up as recent just because it arrived today.
+        $drawerQuery = Drawer::with('room.wing')
+            ->orderByRaw('COALESCE(occurred_at, created_at) DESC')
+            ->limit(10);
 
         if ($wingIds !== null) {
             $drawerQuery->whereHas('room', fn ($q) => $q->whereIn('wing_id', $wingIds));

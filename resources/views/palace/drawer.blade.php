@@ -16,6 +16,11 @@
         <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">stored</span>
         <span style="color: var(--ink);">{{ $drawer->created_at->format('Y-m-d H:i') }}</span>
 
+        @if ($drawer->occurred_at)
+            <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">happened</span>
+            <span style="color: var(--ink);">{{ $drawer->occurred_at->format('Y-m-d H:i') }}</span>
+        @endif
+
         @if ($drawer->source)
             <span style="color: var(--rubric); letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.65rem; padding-top: 0.15rem;">source</span>
             <span style="color: var(--ink); word-break: break-all;">{{ $drawer->source }}</span>
@@ -54,6 +59,9 @@
             <span>d_{{ str_pad((string)$drawer->id, 6, '0', STR_PAD_LEFT) }}</span>
             <span>{{ strlen($drawer->content) }} chars</span>
             <span>{{ $drawer->created_at->format('Y-m-d') }}</span>
+            @if ($drawer->occurred_at)
+                <span>happened {{ $drawer->occurred_at->format('Y-m-d') }}</span>
+            @endif
         </div>
 
         <h1 style="font-family: var(--serif); font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 500; letter-spacing: -0.02em; line-height: 1.05; margin: 0 0 0.75rem;">
@@ -71,6 +79,9 @@
                 <span><b style="color: var(--ink); font-weight: 500;">Source</b> {{ $drawer->source }}</span>
             @endif
             <span><b style="color: var(--ink); font-weight: 500;">Stored</b> {{ $drawer->created_at->format('Y-m-d H:i') }}</span>
+            @if ($drawer->occurred_at)
+                <span><b style="color: var(--ink); font-weight: 500;">Happened</b> {{ $drawer->occurred_at->format('Y-m-d H:i') }}</span>
+            @endif
             @if ($drawer->retention_score !== null)
                 <span><b style="color: var(--ink); font-weight: 500;">Retention</b> {{ round($drawer->retention_score * 100) }}%</span>
             @endif

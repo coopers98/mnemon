@@ -64,6 +64,9 @@
                             @endif
                             <span style="margin-left:auto;font-family:var(--mono);font-size:var(--t-micro);letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-faint);">
                                 {{ $drawer->created_at->format('Y-m-d · H:i') }}
+                                @if ($drawer->occurred_at)
+                                    · happened {{ $drawer->occurred_at->format('Y-m-d') }}
+                                @endif
                             </span>
                         </div>
                         <p style="font-family:var(--serif);font-size:1.05rem;line-height:1.55;color:var(--ink);margin:0;">

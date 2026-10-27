@@ -73,6 +73,12 @@ class DrawersTable
                     ->label('Created')
                     ->dateTime()
                     ->sortable(),
+                // Blank for live drawers; set on backfilled ones.
+                TextColumn::make('occurred_at')
+                    ->label('Happened')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([

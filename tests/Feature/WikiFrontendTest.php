@@ -214,6 +214,34 @@ class WikiFrontendTest extends TestCase
         $response->assertSee('Full drawer content here.');
     }
 
+    public function test_palace_shows_when_a_drawer_happened_when_it_differs_from_storage(): void
+    {
+        // A backfilled drawer is stored today but describes an older session.
+        // The browser must show both, and say nothing extra for live drawers.
+        $wing = Wing::create(['name' => 'Notes', 'slug' => 'notes']);
+        $room = Room::create(['name' => 'Daily', 'slug' => 'daily', 'wing_id' => $wing->id]);
+        $backfilled = Drawer::create([
+            'content' => 'Backfilled drawer.',
+            'room_id' => $room->id,
+            'source' => 'claude-code',
+            'occurred_at' => '2026-07-14 10:30:00',
+        ]);
+        $live = Drawer::create(['content' => 'Live drawer.', 'room_id' => $room->id, 'source' => 'manual']);
+
+        $this->actingAs($this->user)->get('/palace/drawer/'.$backfilled->id)
+            ->assertStatus(200)
+            ->assertSee('Happened')
+            ->assertSee('2026-07-14 10:30');
+
+        $this->actingAs($this->user)->get('/palace/drawer/'.$live->id)
+            ->assertStatus(200)
+            ->assertDontSee('Happened');
+
+        $this->actingAs($this->user)->get('/palace/notes/daily')
+            ->assertStatus(200)
+            ->assertSee('happened 2026-07-14');
+    }
+
     public function test_palace_wing_returns_404_for_nonexistent(): void
     {
         $response = $this->actingAs($this->user)->get('/palace/nonexistent');

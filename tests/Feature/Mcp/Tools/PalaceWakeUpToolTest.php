@@ -47,6 +47,33 @@ class PalaceWakeUpToolTest extends TestCase
         $this->assertFalse($hasPersonalContent);
     }
 
+    public function test_recent_drawers_rank_by_when_they_happened_not_when_they_arrived(): void
+    {
+        // A backfilled drawer arrives today but describes a session from months
+        // ago. The wake banner must not present it as recent activity.
+        $w = Wing::factory()->create(['slug' => 'work']);
+        $r = Room::factory()->create(['wing_id' => $w->id]);
+        $live = Drawer::factory()->create([
+            'room_id' => $r->id,
+            'content' => 'live-thing',
+            'created_at' => now()->subMinute(),
+            'occurred_at' => null,
+        ]);
+        $backfilled = Drawer::factory()->create([
+            'room_id' => $r->id,
+            'content' => 'backfilled-thing',
+            'created_at' => now(),
+            'occurred_at' => now()->subDays(90),
+        ]);
+
+        $resp = $this->mcpCall('palace_wake_up', [], ['mcp:use']);
+
+        $this->assertSame(
+            [$live->id, $backfilled->id],
+            collect($resp->json('result.structuredContent.recent_drawers'))->pluck('id')->all()
+        );
+    }
+
     public function test_reports_the_plugin_version_the_server_ships(): void
     {
         // Nothing told a device it was running old hooks. This machine sat two

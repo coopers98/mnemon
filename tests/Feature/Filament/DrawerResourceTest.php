@@ -255,6 +255,27 @@ class DrawerResourceTest extends TestCase
             ->assertSee('manual-entry');
     }
 
+    public function test_view_page_shows_occurred_at_only_when_present(): void
+    {
+        $wing = Wing::create(['name' => 'Work Wing']);
+        $room = Room::create(['name' => 'Notes Room', 'wing_id' => $wing->id]);
+        $backfilled = Drawer::create([
+            'content' => 'backfilled',
+            'room_id' => $room->id,
+            'occurred_at' => '2026-07-14 10:30:00',
+        ]);
+        $live = Drawer::create(['content' => 'live', 'room_id' => $room->id]);
+
+        Livewire::test(ViewDrawer::class, ['record' => $backfilled->getRouteKey()])
+            ->assertSuccessful()
+            ->assertSee('Happened')
+            ->assertSee('Jul 14, 2026');
+
+        Livewire::test(ViewDrawer::class, ['record' => $live->getRouteKey()])
+            ->assertSuccessful()
+            ->assertDontSee('Happened');
+    }
+
     public function test_default_sort_is_created_at_descending(): void
     {
         $wing = Wing::create(['name' => 'Work']);

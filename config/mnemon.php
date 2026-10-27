@@ -107,6 +107,17 @@ return [
         // Upper bound on the model's output (reasoning included) per digest.
         // Caps what one call can spend.
         'max_completion_tokens' => (int) env('MNEMON_DIGEST_MAX_COMPLETION_TOKENS', 16000),
+
+        // What one million tokens cost on the digest model, published by
+        // brain_status so a client can estimate a backfill before running it.
+        // Null until set: Mnemon does not guess prices.
+        'pricing' => [
+            'in_per_mtok' => env('MNEMON_DIGEST_PRICE_IN_PER_MTOK'),
+            'out_per_mtok' => env('MNEMON_DIGEST_PRICE_OUT_PER_MTOK'),
+        ],
+
+        // A typical digest's output (reasoning included), for the same estimate.
+        'typical_output_tokens' => (int) env('MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS', 3000),
     ],
     // The public, read-only demo (trymnemon.com). Off unless MNEMON_DEMO=true.
     // See docs/design/2026-10-13-public-demo-design.md.

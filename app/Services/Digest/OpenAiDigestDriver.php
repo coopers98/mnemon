@@ -23,6 +23,37 @@ class OpenAiDigestDriver
     }
 
     /**
+     * The model digests run on.
+     */
+    public function model(): string
+    {
+        return config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.6-luna');
+    }
+
+    /**
+     * The system prompt for a digest of this context. Public so the size
+     * brain_status advertises is measured on the real prompt.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    public function systemPrompt(array $context): string
+    {
+        // The session's project is known from where it ran; say so, so the
+        // model writes for that project. The service enforces the filing.
+        $sessionWing = isset($context['session_wing'])
+            ? "\nThis session ran in the project whose wing is '{$context['session_wing']}'. File project-specific drawers there; ".
+              "use another wing only for content that is not about this project (a person, a cross-project decision).\n"
+            : '';
+
+        return "You are Mnemon's session digester. Read a Claude Code transcript and extract drawers worth storing. ".
+            "Respond with strict JSON: {\"proposals\":[{\"content\":\"…\",\"wing_slug\":\"…\",\"room_slug\":\"…\",\"confidence\":0.0-1.0,\"propose_new_wing\":bool,\"propose_new_room\":bool,\"rationale\":\"…\"}]}.\n".
+            'Existing wings: '.json_encode($context['existing_wings'] ?? [])."\n".
+            'Existing rooms per wing (wing_id keys): '.json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
+            'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []).
+            $sessionWing;
+    }
+
+    /**
      * @return array<int, array<string, mixed>> The model's proposals; empty when it found nothing worth keeping.
      *
      * @throws DigestUnavailable When the model could not be asked or its answer could not be read.
@@ -38,21 +69,9 @@ class OpenAiDigestDriver
             throw new DigestUnavailable('OPENAI_API_KEY is not set on the server', retryable: false);
         }
 
-        $model = config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.6-luna');
+        $model = $this->model();
 
-        // The session's project is known from where it ran; say so, so the
-        // model writes for that project. The service enforces the filing.
-        $sessionWing = isset($context['session_wing'])
-            ? "\nThis session ran in the project whose wing is '{$context['session_wing']}'. File project-specific drawers there; ".
-              "use another wing only for content that is not about this project (a person, a cross-project decision).\n"
-            : '';
-
-        $system = "You are Mnemon's session digester. Read a Claude Code transcript and extract drawers worth storing. ".
-            "Respond with strict JSON: {\"proposals\":[{\"content\":\"…\",\"wing_slug\":\"…\",\"room_slug\":\"…\",\"confidence\":0.0-1.0,\"propose_new_wing\":bool,\"propose_new_room\":bool,\"rationale\":\"…\"}]}.\n".
-            'Existing wings: '.json_encode($context['existing_wings'] ?? [])."\n".
-            'Existing rooms per wing (wing_id keys): '.json_encode($context['existing_rooms_per_wing'] ?? [])."\n".
-            'Drawers already captured this session (avoid duplicates): '.json_encode($context['recent_drawers'] ?? []).
-            $sessionWing;
+        $system = $this->systemPrompt($context);
 
         // A timeout does not come back as an unsuccessful response -- the HTTP
         // client throws. Either way the model was never heard from, which is

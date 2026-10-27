@@ -192,6 +192,21 @@ class WingIsolationTest extends TestCase
         $this->assertSame($before, $this->snapshot(), 'a refused call must not change another wing');
     }
 
+    public function test_brain_status_project_resolution_treats_a_hidden_wing_as_missing(): void
+    {
+        Wing::create(['name' => 'Project Personal', 'slug' => 'project-personal']);
+
+        $responses = [];
+        foreach (['personal', 'personal-ghost'] as $name) {
+            $res = $this->mcpCall('brain_status', ['projects' => [$name]], ['mcp:use'], self::RESTRICTED);
+            $res->assertOk();
+            $this->assertSame([$name => null], $res->json('result.structuredContent.digest.projects'));
+            $responses[] = str_replace($name, '{arg}', $res->getContent());
+        }
+
+        $this->assertSame($responses[0], $responses[1], 'a hidden project wing must look exactly like a missing one');
+    }
+
     // --------------------------------------------------------------- writes
 
     public function test_wiki_lint_auto_fix_is_refused_for_a_restricted_token(): void

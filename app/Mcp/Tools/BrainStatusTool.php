@@ -9,6 +9,7 @@ use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
+use App\Services\Digest\OpenAiDigestDriver;
 use Closure;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Schema;
@@ -32,6 +33,11 @@ class BrainStatusTool extends Tool
         if ($err = $this->requireScope($request)) {
             return $err;
         }
+
+        $params = $request->validate([
+            'projects' => 'nullable|array|max:500',
+            'projects.*' => 'string|max:100',
+        ]);
 
         $staleDays = (int) config('mnemon.wiki.stale_days', 30);
         $staleThreshold = now()->subDays($staleDays);
@@ -105,6 +111,7 @@ class BrainStatusTool extends Tool
             'stale_wiki_pages' => $staleWikiPages,
             'pending_update_pages' => $pendingUpdatePages,
             'embedding' => $this->embeddingStatus($drawers),
+            'digest' => $this->digestStatus($readableWingIds, $params['projects'] ?? null),
         ];
 
         BrainSessionLogger::log($request, 'brain_status', [], 1);
@@ -114,7 +121,62 @@ class BrainStatusTool extends Tool
 
     public function schema(JsonSchema $s): array
     {
-        return [];
+        return [
+            'projects' => $s->array()->description('Optional project names (up to 500). The digest block then says which visible wing each resolves to, or null when it has none.'),
+        ];
+    }
+
+    /**
+     * What a client needs to price a digest before sending any: the model, its
+     * prices (null until configured), the fixed prompt cost for THIS token's
+     * wings, and where its project names would be filed.
+     *
+     * @param  array<int>|null  $readableWingIds  Null for an unrestricted token.
+     * @param  array<int, string>|null  $projects
+     * @return array<string, mixed>
+     */
+    private function digestStatus(?array $readableWingIds, ?array $projects): array
+    {
+        $driver = new OpenAiDigestDriver;
+
+        $wings = Wing::query()
+            ->when($readableWingIds !== null, fn ($q) => $q->whereIn('id', $readableWingIds))
+            ->get(['id', 'slug']);
+        $rooms = Room::query()->whereIn('wing_id', $wings->pluck('id'))->get(['slug', 'wing_id']);
+
+        // The context SessionDigestService hands the driver, minus the
+        // per-call parts: recent drawers are empty here and added back at
+        // their worst case (50 snippets of 200 characters) below.
+        $prompt = $driver->systemPrompt([
+            'existing_wings' => $wings->pluck('slug')->all(),
+            'existing_rooms_per_wing' => $rooms->groupBy('wing_id')->map(fn ($rs) => $rs->pluck('slug')->all())->all(),
+            'recent_drawers' => [],
+        ]);
+
+        $price = fn (string $key) => ($v = config("mnemon.digest.pricing.{$key}")) === null || $v === '' ? null : (float) $v;
+
+        $digest = [
+            'model' => $driver->model(),
+            'price_in_per_mtok' => $price('in_per_mtok'),
+            'price_out_per_mtok' => $price('out_per_mtok'),
+            'prompt_overhead_tokens' => (int) ceil((mb_strlen($prompt) + 50 * 200) / 4),
+            'typical_output_tokens' => (int) config('mnemon.digest.typical_output_tokens', 3000),
+            'max_completion_tokens' => (int) config('mnemon.digest.max_completion_tokens', 16000),
+        ];
+
+        if ($projects !== null) {
+            // An existing wing this token can see, or null. A hidden wing and
+            // a missing one both answer null.
+            $visible = $wings->keyBy('id');
+            $resolved = [];
+            foreach ($projects as $name) {
+                $wing = Wing::forProject($name);
+                $resolved[$name] = $wing !== null && $visible->has($wing->id) ? $wing->slug : null;
+            }
+            $digest['projects'] = (object) $resolved;
+        }
+
+        return $digest;
     }
 
     /**

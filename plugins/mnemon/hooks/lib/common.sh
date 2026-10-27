@@ -258,30 +258,39 @@ mnemon_call() {
     # their value through argv, which dies with "Argument list too long" past
     # MAX_ARG_STRLEN (~128KB on Linux). Shell builtins and redirection have no
     # such limit.
-    local body params_file
-    body=$(mktemp "${TMPDIR:-/tmp}/mnemon-body.XXXXXX") || return 1
-    params_file="$body.params"
-    printf '%s' "$params" > "$params_file"
-
-    if ! jq -n --arg m "$method" --slurpfile p "$params_file" \
-        '{jsonrpc:"2.0",id:1,method:$m,params:$p[0]}' > "$body" 2>/dev/null; then
-        rm -f "$body" "$params_file"
-        return 1
-    fi
-    rm -f "$params_file"
-
+    #
+    # The file lives only inside this subshell, whose trap removes it on any
+    # exit -- a ^C or TERM to the process group included, which used to leave
+    # it in $TMPDIR. A trap here, not in mnemon_call itself, so a caller's own
+    # traps are left alone. Exit 200/201: the body could not be built (curl's
+    # own codes stop below 100).
     local response raw status
-    # Accept is required by MCP Streamable HTTP, and it is what makes a Laravel
-    # instance answer an auth failure with a 401 instead of a 302 redirect to an
-    # HTML login page -- without it the token-expired branch below never fires.
     local rc=0
-    raw=$(curl -s -m "$timeout_s" -w '\n%{http_code}' -X POST "$endpoint" \
-        -H "Authorization: Bearer $token" \
-        -H "Content-Type: application/json" \
-        -H "Accept: application/json, text/event-stream" \
-        --data-binary @"$body" 2>/dev/null) || rc=$?
-    rm -f "$body"
-    [ "$rc" -eq 0 ] || { _mnemon_call_failed "transport: curl exit $rc"; return 1; }
+    raw=$(
+        body=""
+        trap '[ -z "$body" ] || rm -f "$body" "$body.params"' EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        body=$(mktemp "${TMPDIR:-/tmp}/mnemon-body.XXXXXX") || exit 200
+        printf '%s' "$params" > "$body.params"
+        jq -n --arg m "$method" --slurpfile p "$body.params" \
+            '{jsonrpc:"2.0",id:1,method:$m,params:$p[0]}' > "$body" 2>/dev/null || exit 201
+        rm -f "$body.params"
+        # Accept is required by MCP Streamable HTTP, and it is what makes a
+        # Laravel instance answer an auth failure with a 401 instead of a 302
+        # redirect to an HTML login page -- without it the token-expired
+        # branch below never fires.
+        curl -s -m "$timeout_s" -w '\n%{http_code}' -X POST "$endpoint" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" \
+            --data-binary @"$body" 2>/dev/null
+    ) || rc=$?
+    case "$rc" in
+        0) ;;
+        200|201) return 1 ;;
+        *) _mnemon_call_failed "transport: curl exit $rc"; return 1 ;;
+    esac
 
     status="${raw##*$'\n'}"
     response="${raw%$'\n'*}"
@@ -976,6 +985,75 @@ mnemon_project_name() {
     printf '%s' "$name"
 }
 
+# The secret rules, as jq definitions that both mnemon_clean_transcript and
+# mnemon_redact_text splice in ahead of their own filter: one copy of them, so
+# what is redacted never differs between the two. They read $fail (the
+# MNEMON_CLEAN_FAIL test hook), which each caller binds.
+MNEMON_REDACT_JQ='
+    # A regex that fails (Oniguruma has a retry limit) keeps the text it
+    # was given -- it never empties it or drops the turn -- and says so on
+    # stderr, which the caller logs. $fail (MNEMON_CLEAN_FAIL) names a
+    # pattern to fail on purpose, for the tests.
+    def keep(f; $name):
+        . as $in
+        | try (if $fail == $name then error("forced by MNEMON_CLEAN_FAIL") else f end)
+          catch (("redaction pattern \($name) failed (\(.)); the text was kept" | debug) as $_ | $in);
+
+    # The private-key patterns fail closed instead: a text that still
+    # holds a key header after one of them failed is withheld whole.
+    def keep_pem(f):
+        . as $in
+        | try (if $fail == "pem" then error("forced by MNEMON_CLEAN_FAIL") else f end)
+          catch (("redaction pattern pem failed (\(.)); the text was withheld" | debug) as $_
+                 | if ($in | contains("PRIVATE KEY-----")) then "[REDACTED-PRIVATE-KEY: text withheld]" else $in end);
+
+    # A key with its END line, everything from BEGIN to it -- Proc-Type/
+    # DEK-Info headers of an encrypted key, line breaks escaped as a
+    # literal \n. Non-greedy and bounded, so a stray BEGIN cannot run away.
+    def pem_whole: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----";
+    # Without one (a key cut off), from BEGIN to the end of the text when
+    # a body follows: a 20+ character base64 run, after any header lines,
+    # with real or escaped (\n, \r\n) line breaks. A header named in
+    # prose has no body and is left alone.
+    def pem_open: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\\s|\\\\[rn])*(?:Proc-Type|DEK-Info):[^\\r\\n\\\\]*)*(?:\\s|\\\\[rn])*[A-Za-z0-9+/=]{20,}[\\s\\S]*\\z";
+
+    def mnemon_redact:
+        # PEM private keys, whole and then cut off (pem_whole, pem_open).
+        keep_pem(gsub(pem_whole; "[REDACTED-PRIVATE-KEY]"))
+        | keep_pem(sub(pem_open; "[REDACTED-PRIVATE-KEY]"))
+        | keep(gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]"); "aws")
+        | keep(gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]"); "jwt")
+        | keep(gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]"); "bearer")
+        | keep(gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]"); "openai")
+        | keep(gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]"); "github_pat")
+        | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"); "github")
+        | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"); "slack")
+        | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"); "aiven")
+        # Secret assignments and keys: the same three rules as the
+        # server ContentSanitizer, which documents them. They redact a
+        # value that looks like a secret, not every mention of one -- a
+        # broader rule hit prose ("token: the refresh flow", "**Token:**
+        # rotated hourly", TOKEN_LIMIT=4096) in 24 of the 26 texts it
+        # touched in a real corpus.
+        # A. env/flag assignment, B. quoted JSON key, C. unquoted key
+        # with an opaque value (8+ characters, letters and digits).
+        # (\x27 is a single quote.)
+        | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)=)(?<n>(?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \\t]*=[ \\t]*(?=\\\\?[\"\\x27]))(?<q>(?:\\\\?[\"\\x27])?)(?![$<%{=]|\\[REDACTED|(?i:true|false|null|none)\\b|\\d+\\b)[^\\s\"\\x27\\\\,}\\]:][^\\s\"\\x27\\\\]{3,}"; "\(.n)=\(.q)[REDACTED]"); "assign")
+        | keep(gsub("(?<k>(?<![A-Za-z0-9])\\\\?\"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?\"[ \\t]*:[ \\t]*\\\\?\")(?![$<%{,}\\]]|\\[REDACTED)[^\"\\\\]+"; "\(.k)[REDACTED]"); "jsonkey")
+        | keep(gsub("(?<k>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \\t]*:[ \\t]*)(?=[A-Za-z0-9+/=._~!@#%^&*-]*\\d)(?=[A-Za-z0-9+/=._~!@#%^&*-]*[A-Za-z])(?![$<%{]|\\[REDACTED)[A-Za-z0-9+/=._~!@#%^&*-]{8,}(?=[\\s\"\\x27,}\\]\\\\]|$)"; "\(.k)[REDACTED]"); "keyvalue")
+        # scheme://user:pass@ -- the scheme tells admin:123456@ (a
+        # password) from a bare //host:8080@ or //TODO:fix@.
+        | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"); "url");
+'
+
+# Redact secrets from plain text: stdin to stdout, byte for byte apart from
+# the secrets, with exactly the rules mnemon_clean_transcript applies (PEM
+# private keys, the named token patterns, rules A/B/C and URL credentials). A
+# pattern that fails says so on stderr, as in the cleaner.
+mnemon_redact_text() {
+    jq -Rsj --arg fail "${MNEMON_CLEAN_FAIL:-}" "$MNEMON_REDACT_JQ"' mnemon_redact'
+}
+
 # Reduce a Claude Code transcript to the conversation. Args: [<file>]; reads
 # stdin without one. Input is JSONL -- one record per line -- and a line may
 # also hold an array of records (the inline `.transcript` a Stop payload can
@@ -1040,7 +1118,7 @@ mnemon_clean_transcript() {
     local lines=false
     [ "${1:-}" = "--lines" ] && { lines=true; shift; }
     jq -nRc --argjson scan "$MNEMON_CLEAN_SCAN_MAX" --argjson usermax "$MNEMON_CLEAN_TEXT_MAX" --argjson lines "$lines" \
-        --arg fail "${MNEMON_CLEAN_FAIL:-}" '
+        --arg fail "${MNEMON_CLEAN_FAIL:-}" "$MNEMON_REDACT_JQ"'
         def text_of:
             if type == "string" then .
             elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join("\n\n")
@@ -1072,61 +1150,6 @@ mnemon_clean_transcript() {
             | if $head then sub("\\A\\s*Mnemon (recall|palace state):[^\\n]*(\\n {2}[^\\n]*)*"; "") else . end
             | gsub("\\[Request interrupted by user[^\\]]*\\]"; "");
 
-        # A regex that fails (Oniguruma has a retry limit) keeps the text it
-        # was given -- it never empties it or drops the turn -- and says so on
-        # stderr, which the caller logs. $fail (MNEMON_CLEAN_FAIL) names a
-        # pattern to fail on purpose, for the tests.
-        def keep(f; $name):
-            . as $in
-            | try (if $fail == $name then error("forced by MNEMON_CLEAN_FAIL") else f end)
-              catch (("redaction pattern \($name) failed (\(.)); the text was kept" | debug) as $_ | $in);
-
-        # The private-key patterns fail closed instead: a text that still
-        # holds a key header after one of them failed is withheld whole.
-        def keep_pem(f):
-            . as $in
-            | try (if $fail == "pem" then error("forced by MNEMON_CLEAN_FAIL") else f end)
-              catch (("redaction pattern pem failed (\(.)); the text was withheld" | debug) as $_
-                     | if ($in | contains("PRIVATE KEY-----")) then "[REDACTED-PRIVATE-KEY: text withheld]" else $in end);
-
-        # A key with its END line, everything from BEGIN to it -- Proc-Type/
-        # DEK-Info headers of an encrypted key, line breaks escaped as a
-        # literal \n. Non-greedy and bounded, so a stray BEGIN cannot run away.
-        def pem_whole: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----";
-        # Without one (a key cut off), from BEGIN to the end of the text when
-        # a body follows: a 20+ character base64 run, after any header lines,
-        # with real or escaped (\n, \r\n) line breaks. A header named in
-        # prose has no body and is left alone.
-        def pem_open: "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?:\\s|\\\\[rn])*(?:Proc-Type|DEK-Info):[^\\r\\n\\\\]*)*(?:\\s|\\\\[rn])*[A-Za-z0-9+/=]{20,}[\\s\\S]*\\z";
-
-        def redact:
-            # PEM private keys, whole and then cut off (pem_whole, pem_open).
-            keep_pem(gsub(pem_whole; "[REDACTED-PRIVATE-KEY]"))
-            | keep_pem(sub(pem_open; "[REDACTED-PRIVATE-KEY]"))
-            | keep(gsub("AKIA[0-9A-Z]{16}"; "[REDACTED-AWS-KEY]"); "aws")
-            | keep(gsub("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"; "[REDACTED-JWT]"); "jwt")
-            | keep(gsub("Bearer\\s+[A-Za-z0-9._~+/=-]{20,}"; "Bearer [REDACTED]"); "bearer")
-            | keep(gsub("\\bsk-[A-Za-z0-9_-]{20,}"; "[REDACTED-OPENAI-KEY]"); "openai")
-            | keep(gsub("\\bgithub_pat_[A-Za-z0-9_]{60,}"; "[REDACTED-GITHUB-TOKEN]"); "github_pat")
-            | keep(gsub("\\bgh[pousr]_[A-Za-z0-9]{36,}"; "[REDACTED-GITHUB-TOKEN]"); "github")
-            | keep(gsub("\\bxox[abprs]-[A-Za-z0-9-]{10,}"; "[REDACTED-SLACK-TOKEN]"); "slack")
-            | keep(gsub("\\bAVNS_[A-Za-z0-9]+"; "[REDACTED-API-KEY]"); "aiven")
-            # Secret assignments and keys: the same three rules as the
-            # server ContentSanitizer, which documents them. They redact a
-            # value that looks like a secret, not every mention of one -- a
-            # broader rule hit prose ("token: the refresh flow", "**Token:**
-            # rotated hourly", TOKEN_LIMIT=4096) in 24 of the 26 texts it
-            # touched in a real corpus.
-            # A. env/flag assignment, B. quoted JSON key, C. unquoted key
-            # with an opaque value (8+ characters, letters and digits).
-            # (\x27 is a single quote.)
-            | keep(gsub("(?<![A-Za-z0-9])(?!(?i:pwd)=)(?<n>(?:[A-Za-z0-9]+_)*(?:PG)?(?i:PASSWORD|PASSWD|PWD|SECRET|TOKEN|ACCESS_KEY|API_KEY|API_SECRET|AUTH_TOKEN|PRIVATE_KEY)(?i:_KEY(?:_BASE)?)?)(?:=|[ \\t]*=[ \\t]*(?=\\\\?[\"\\x27]))(?<q>(?:\\\\?[\"\\x27])?)(?![$<%{=]|\\[REDACTED|(?i:true|false|null|none)\\b|\\d+\\b)[^\\s\"\\x27\\\\,}\\]:][^\\s\"\\x27\\\\]{3,}"; "\(.n)=\(.q)[REDACTED]"); "assign")
-            | keep(gsub("(?<k>(?<![A-Za-z0-9])\\\\?\"(?:[A-Za-z0-9]+[_-])*(?i:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\\\?\"[ \\t]*:[ \\t]*\\\\?\")(?![$<%{,}\\]]|\\[REDACTED)[^\"\\\\]+"; "\(.k)[REDACTED]"); "jsonkey")
-            | keep(gsub("(?<k>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?i:password|passwd|secret|token|api[_-]?key)[ \\t]*:[ \\t]*)(?=[A-Za-z0-9+/=._~!@#%^&*-]*\\d)(?=[A-Za-z0-9+/=._~!@#%^&*-]*[A-Za-z])(?![$<%{]|\\[REDACTED)[A-Za-z0-9+/=._~!@#%^&*-]{8,}(?=[\\s\"\\x27,}\\]\\\\]|$)"; "\(.k)[REDACTED]"); "keyvalue")
-            # scheme://user:pass@ -- the scheme tells admin:123456@ (a
-            # password) from a bare //host:8080@ or //TODO:fix@.
-            | keep(gsub("\\b(?<s>[A-Za-z][A-Za-z0-9+.-]*)://[^\\s/@:]+:[^\\s/@]+@"; "\(.s)://[REDACTED-CREDENTIALS]@"); "url");
-
         def turn:
             if .type == "attachment" then
                 .timestamp as $ts
@@ -1150,8 +1173,8 @@ mnemon_clean_transcript() {
             # The start ends inside a key with no END line before the cut:
             # its body runs on into the end of the text.
             | ($cut and ($hu | try (gsub(pem_whole; "") | test(pem_open)) catch true)) as $open
-            | ($hu | redact) as $h
-            | ($p.t | if $user then unwrap_harness(false; true) else . end | redact
+            | ($hu | mnemon_redact) as $h
+            | ($p.t | if $user then unwrap_harness(false; true) else . end | mnemon_redact
                     # The end of a key the cut split: body characters, header
                     # lines and (escaped) line breaks up to its END line...
                     | keep_pem(sub("\\A[A-Za-z0-9+/=\\s\\\\:,-]{0,20000}?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED-PRIVATE-KEY]"))

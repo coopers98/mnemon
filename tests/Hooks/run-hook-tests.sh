@@ -1538,6 +1538,198 @@ assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/s36b.json")" "4" \
 stop_server $BO_PID
 mv "$MNEMON_DIR/config.bo.json" "$MNEMON_DIR/config.json"
 
+# Worker report: the backfill runs the worker in the foreground, one chunk
+# per call (MNEMON_DIGEST_MAX_PASSES=1), reads one JSON line per call from
+# MNEMON_DIGEST_REPORT, and enforces its spending cap between calls. With
+# neither set, live capture behaves as before.
+WR_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+WR_LOG="$MNEMON_DIR/requests-wr.log"
+: > "$WR_LOG"
+FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" FAKE_USAGE=1 "$THIS_DIR/fixtures/server.sh" &
+WR_PID=$!
+wait_server "$WR_PORT"
+cp "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.wr.json"
+jq --arg e "http://127.0.0.1:$WR_PORT/mcp" '.endpoint=$e | .digest_chunk_chars=1000' \
+  "$MNEMON_DIR/config.wr.json" > "$MNEMON_DIR/config.json"
+# Six turns of ~450 characters, roles alternating so none merge: three chunks
+# of two turns each at digest_chunk_chars=1000.
+tp_wr="$MNEMON_DIR/transcript-wr.jsonl"
+: > "$tp_wr"
+for i in 1 2 3 4 5 6; do
+    if [ $((i % 2)) = 1 ]; then
+        printf '{"type":"user","timestamp":"2026-09-0%sT10:00:00.123Z","message":{"role":"user","content":"REPORT-TURN-%s %s"}}\n' \
+            "$i" "$i" "$(head -c 400 /dev/zero | tr '\0' 'r')" >> "$tp_wr"
+    else
+        printf '{"type":"assistant","timestamp":"2026-09-0%sT10:00:00.456Z","message":{"role":"assistant","content":[{"type":"text","text":"REPORT-TURN-%s %s"}]}}\n' \
+            "$i" "$i" "$(head -c 400 /dev/zero | tr '\0' 'r')" >> "$tp_wr"
+    fi
+done
+wr_sent() { jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.turn_range.start)-\(.params.arguments.turn_range.end)"] | join(",")' "$WR_LOG"; }
+
+rm -f "$MNEMON_DIR/sessions/wr1".* "$MNEMON_DIR/wr1.report"
+MNEMON_DIGEST_MAX_PASSES=1 MNEMON_DIGEST_REPORT="$MNEMON_DIR/wr1.report" \
+    "$HOOKS_DIR/lib/digest-worker.sh" wr1 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1
+assert_eq "$(wr_sent)" "0-2" "worker: MAX_PASSES=1 sends exactly one chunk of a 3-chunk session"
+assert_eq "$(jq -r '.last_digest_turn' "$MNEMON_DIR/sessions/wr1.json")" "2" \
+    "worker: MAX_PASSES=1 advances the pointer past that chunk only"
+assert_eq "$(jq -r '.end' "$MNEMON_DIR/sessions/wr1.digest.pending" 2>/dev/null)" "6" \
+    "worker: MAX_PASSES=1 carries the rest in the pending marker"
+assert_eq "$(wc -l < "$MNEMON_DIR/wr1.report" | tr -d ' ')" "1" "worker: one report line per call"
+assert_eq "$(jq -c 'keys_unsorted' "$MNEMON_DIR/wr1.report")" \
+    '["start","end","outcome","replayed","turn_end","drawers","dropped","usage"]' \
+    "worker: a report line has exactly the documented fields"
+assert_eq "$(jq -c '[.start, .end, .outcome, .replayed, .turn_end, .drawers, .dropped, .usage.prompt_tokens, .usage.completion_tokens]' "$MNEMON_DIR/wr1.report")" \
+    '[0,2,"ok",false,2,[{"id":41,"wing":"research"},{"id":42,"wing":"project-atlas"}],1,1200,300]' \
+    "worker: report line on success carries drawers, usage, turn_end"
+assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.occurred_at] | join(",")' "$WR_LOG")" \
+    "2026-09-02T10:00:00Z" "worker: occurred_at is the last turn's ts"
+# The next call picks up where the last stopped; a value below 1 is 1.
+: > "$WR_LOG"
+MNEMON_DIGEST_MAX_PASSES=0 MNEMON_DIGEST_REPORT="$MNEMON_DIR/wr1.report" \
+    "$HOOKS_DIR/lib/digest-worker.sh" wr1 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1
+assert_eq "$(wr_sent)" "2-4" "worker: MAX_PASSES=0 is read as 1, and the next call resumes at the pointer"
+assert_eq "$(sed -n 2p "$MNEMON_DIR/wr1.report" | jq -c '[.start, .end, .outcome]')" '[2,4,"ok"]' \
+    "worker: report lines are appended, one per call"
+assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | .params.arguments.occurred_at] | join(",")' "$WR_LOG")" \
+    "2026-09-04T10:00:00Z" "worker: occurred_at follows the chunk sent"
+
+# A replay reports replayed and the server's turn_end.
+: > "$WR_LOG"
+stop_server $WR_PID
+FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" FAKE_REPLAY_END=1 "$THIS_DIR/fixtures/server.sh" &
+WR_PID=$!
+wait_server "$WR_PORT"
+rm -f "$MNEMON_DIR/sessions/wr2".* "$MNEMON_DIR/wr2.report"
+MNEMON_DIGEST_MAX_PASSES=1 MNEMON_DIGEST_REPORT="$MNEMON_DIR/wr2.report" \
+    "$HOOKS_DIR/lib/digest-worker.sh" wr2 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1
+assert_eq "$(jq -c '[.start, .end, .outcome, .replayed, .turn_end, .drawers, .dropped, .usage]' "$MNEMON_DIR/wr2.report")" \
+    '[0,2,"ok",true,1,[],0,null]' "worker: report line on a replay says replayed, with the server's turn_end"
+stop_server $WR_PID
+
+# Failures write a line too, each with its kind. No call, no line.
+for kc in "FAKE_TOOL_ERROR=Retryable: the digest did not run (the model timed out). Nothing was stored.|transient" \
+    "FAKE_TOOL_ERROR=Not retryable: the digest did not run (OPENAI_API_KEY is not set on the server).|not_retryable" \
+    "FAKE_STATUS=413|payload"; do
+    : > "$WR_LOG"
+    env "${kc%|*}" FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" "$THIS_DIR/fixtures/server.sh" &
+    WR_PID=$!
+    wait_server "$WR_PORT"
+    rm -f "$MNEMON_DIR/sessions/wr3".* "$MNEMON_DIR/wr3.report"
+    MNEMON_DIGEST_MAX_PASSES=1 MNEMON_DIGEST_REPORT="$MNEMON_DIR/wr3.report" \
+        "$HOOKS_DIR/lib/digest-worker.sh" wr3 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1
+    case "${kc##*|}" in
+        transient) wr_what="report line on a Retryable error has outcome transient and usage null" ;;
+        *) wr_what="report line on $(printf '%s' "${kc%|*}" | cut -c1-30) has outcome ${kc##*|}" ;;
+    esac
+    assert_eq "$(jq -c '[.start, .end, .outcome, .replayed, .turn_end, .drawers, .dropped, .usage]' "$MNEMON_DIR/wr3.report" 2>/dev/null)" \
+        "[0,2,\"${kc##*|}\",false,null,[],0,null]" "worker: $wr_what"
+    stop_server $WR_PID
+done
+rm -f "$MNEMON_DIR/sessions/wr4".* "$MNEMON_DIR/wr4.report"
+mv "$MNEMON_DIR/config.json" "$MNEMON_DIR/config.nc.json"
+mkdir -p "$MNEMON_DIR/nc-home"
+env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+    HOME="$MNEMON_DIR/nc-home" MNEMON_DIGEST_MAX_PASSES=1 MNEMON_DIGEST_REPORT="$MNEMON_DIR/wr4.report" \
+    "$HOOKS_DIR/lib/digest-worker.sh" wr4 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1
+mv "$MNEMON_DIR/config.nc.json" "$MNEMON_DIR/config.json"
+assert_eq "$([ -e "$MNEMON_DIR/wr4.report" ] && echo written || echo none)" "none" \
+    "worker: no call (no credentials) writes no report line"
+
+# occurred_at is left out when the last turn has no ts, and for an inline
+# transcript, which the worker did not slice.
+: > "$WR_LOG"
+FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" "$THIS_DIR/fixtures/server.sh" &
+WR_PID=$!
+wait_server "$WR_PORT"
+tp_nots="$MNEMON_DIR/transcript-nots.jsonl"
+{
+  printf '%s\n' '{"type":"user","timestamp":"2026-09-01T10:00:00Z","message":{"role":"user","content":"stamped"}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"not stamped"}]}}'
+  printf '%s\n' '{"type":"user","timestamp":"yesterday","message":{"role":"user","content":"stamped badly"}}'
+} > "$tp_nots"
+rm -f "$MNEMON_DIR/sessions/wr5".* "$MNEMON_DIR/sessions/wr6".*
+head -n 2 "$tp_nots" > "$MNEMON_DIR/transcript-nots2.jsonl"
+"$HOOKS_DIR/lib/digest-worker.sh" wr5 0 2 "" "" "" "$MNEMON_DIR/transcript-nots2.jsonl" >/dev/null 2>&1
+"$HOOKS_DIR/lib/digest-worker.sh" wr6 0 3 "" "" "" "$tp_nots" >/dev/null 2>&1
+bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript "$2"' _ "$HOOKS_DIR" "$tp_wr" > "$MNEMON_DIR/sessions/wr7.in"
+rm -f "$MNEMON_DIR/sessions/wr7.json"
+"$HOOKS_DIR/lib/digest-worker.sh" wr7 0 6 "$MNEMON_DIR/sessions/wr7.in" "" "" >/dev/null 2>&1
+assert_eq "$(jq -rs '[.[] | select(.params.name? == "session_digest") | "\(.params.arguments.session_id):\(.params.arguments | has("occurred_at"))"] | join(",")' "$WR_LOG")" \
+    "wr5:false,wr6:false,wr7:false" "worker: occurred_at is omitted with no ts, a ts that is not ISO-8601, and an inline transcript"
+stop_server $WR_PID
+
+# The worker's own temp files go on every exit, a signal included -- the
+# backfill runs it in the foreground, where ^C is likely.
+: > "$WR_LOG"
+FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" FAKE_DELAY=2 "$THIS_DIR/fixtures/server.sh" &
+WR_PID=$!
+wait_server "$WR_PORT"
+wr_tmp="$MNEMON_DIR/wr-tmp"
+mkdir -p "$wr_tmp"
+rm -f "$MNEMON_DIR/sessions/wr8".*
+wr_sid=""
+command -v setsid >/dev/null 2>&1 && wr_sid=setsid
+TMPDIR="$wr_tmp" $wr_sid "$HOOKS_DIR/lib/digest-worker.sh" wr8 0 6 "" "" "" "$tp_wr" >/dev/null 2>&1 &
+wr_w=$!
+wait_until 10 grep -q '"session_digest"' "$WR_LOG"
+if [ -n "$wr_sid" ]; then kill -TERM -- "-$wr_w" 2>/dev/null; else kill -TERM "$wr_w" 2>/dev/null; fi
+wait "$wr_w" 2>/dev/null
+wr_left=$(cd "$MNEMON_DIR/sessions" && ls wr8.slice.* wr8.input.* wr8.digest-error.* 2>/dev/null; ls "$wr_tmp")
+assert_eq "$wr_left" "" "worker: a TERM leaves no slice, input, error or request-body file behind"
+assert_eq "$([ -d "$MNEMON_DIR/sessions/wr8.digest.lock.d" ] && echo held || echo released)" "released" \
+    "worker: a TERM releases the digest lock"
+stop_server $WR_PID
+
+# Unset, the env vars change nothing: capture sends every chunk, as before,
+# and nothing writes a report.
+rm -f "$MNEMON_DIR"/wr*.report
+: > "$WR_LOG"
+FAKE_PORT="$WR_PORT" FAKE_REQUEST_LOG="$WR_LOG" "$THIS_DIR/fixtures/server.sh" &
+WR_PID=$!
+wait_server "$WR_PORT"
+rm -f "$MNEMON_DIR/sessions/wr9".*
+printf '{"session_id":"wr9","transcript_path":"%s","hook_event_name":"Stop","cwd":"/tmp"}' "$tp_wr" \
+  | env -u MNEMON_DIGEST_MAX_PASSES -u MNEMON_DIGEST_REPORT "$HOOKS_DIR/mnemon-capture.sh" || true
+wait_worker wr9
+assert_eq "$(wr_sent)" "0-2,2-4,4-6" "worker: unset env vars change nothing (every chunk sent in one run)"
+assert_eq "$(find "$MNEMON_DIR" -name '*report*' | wc -l | tr -d ' ')" "0" \
+    "worker: unset env vars change nothing (no report file is created)"
+stop_server $WR_PID
+mv "$MNEMON_DIR/config.wr.json" "$MNEMON_DIR/config.json"
+
+# mnemon_redact_text applies the cleaner's secret rules to plain text. Each
+# fixture line that carries a secret-shaped string is cleaned alone, and its
+# raw text redacted: the two must agree, marker for marker.
+rd_n=0
+rd_bad=""
+while IFS= read -r rd_line; do
+    printf '%s' "$rd_line" | grep -qE 'AKIA|eyJ|Bearer|sk-|github_pat|gh[pousr]_|xox|AVNS|PRIVATE KEY|PASSWORD|password|secret|token|://[^ ]*:[^ ]*@' || continue
+    rd_clean=$(printf '%s\n' "$rd_line" | bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript' _ "$HOOKS_DIR" 2>/dev/null | jq -r '.[0].text // empty')
+    [ -n "$rd_clean" ] || continue
+    rd_n=$((rd_n + 1))
+    rd_text=$(printf '%s' "$rd_line" \
+        | jq -j '.message.content | if type == "string" then . else [.[] | objects | select(.type == "text") | .text] | join("\n\n") end' \
+        | bash -c '. "$1/lib/common.sh"; mnemon_redact_text' _ "$HOOKS_DIR" 2>/dev/null \
+        | jq -Rrs 'gsub("\\n{3,}"; "\n\n") | sub("^\\s+"; "") | sub("\\s+$"; "")')
+    [ "$rd_text" = "$rd_clean" ] || rd_bad="$rd_bad $rd_n"
+done < "$THIS_DIR/fixtures/transcript-shapes.jsonl"
+assert_eq "$([ "$rd_n" -gt 0 ] && echo "${rd_bad:-same}")" "same" \
+    "redact: mnemon_redact_text redacts what the cleaner redacts ($rd_n secret-bearing lines)"
+assert_eq "$(printf 'key AKIA%s and sk-%s\n' ABCDEFGHIJKLMNOP abcdefghijklmnopqrstuvwx | bash -c '. "$1/lib/common.sh"; mnemon_redact_text' _ "$HOOKS_DIR")" \
+    "key [REDACTED-AWS-KEY] and [REDACTED-OPENAI-KEY]" "redact: reads stdin, writes stdout, keeps the text around a secret"
+
+# The cleaner shares its redaction with mnemon_redact_text. Its output on the
+# fixture is the snapshot taken before the two were split apart, byte for byte.
+for cl_mode in "" --lines; do
+    cl_snap="$THIS_DIR/fixtures/transcript-shapes.cleaned${cl_mode:+-lines}.json"
+    if bash -c '. "$1/lib/common.sh"; mnemon_clean_transcript $3 "$2"' _ "$HOOKS_DIR" "$THIS_DIR/fixtures/transcript-shapes.jsonl" "$cl_mode" 2>/dev/null \
+        | cmp -s - "$cl_snap"; then
+        PASS=$((PASS+1)); printf '  ok: cleaner: output unchanged after the refactor%s\n' "${cl_mode:+ ($cl_mode)}"
+    else
+        FAIL=$((FAIL+1)); printf '  FAIL: cleaner: output differs from %s\n' "$cl_snap"
+    fi
+done
+
 # Test 10p: a worker that takes the lock after another finished sends from the
 # pointer, not from where its own Stop read it. W1 digests 0-2; a Stop at 4
 # read the pointer as 0 while W1 ran; W2, starting after W1, used to send 0-4,

@@ -4,8 +4,15 @@
 # mnemon-capture.sh.
 # Args: <session_id> <start> <end> <text_file> [<project>] [<filing>] [<transcript_path>]
 #   With a transcript path, <text_file> is empty and the worker slices and
-#   cleans the file itself. Without one (an inline transcript) it sends
+#   cleans the file itself, and <start> is ignored: the worker starts from the
+#   pointer, re-read under the lock. Without one (an inline transcript) it sends
 #   <text_file> as the range <start>-<end>.
+# Env (both unset for live capture; the backfill sets them and runs the worker
+# in the foreground):
+#   MNEMON_DIGEST_MAX_PASSES  chunks to send in this run (default 10; a value
+#                             that is not a whole number of 1 or more is 1).
+#   MNEMON_DIGEST_REPORT      a file to append one JSON line to per call made
+#                             (see report_call). No call, no line.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
@@ -22,6 +29,13 @@ PENDING="$MNEMON_SESSIONS_DIR/${session_id}.digest.pending"
 # Chunks sent per worker run. What is left stays in the pending marker for the
 # next Stop.
 MAX_PASSES=10
+if [ -n "${MNEMON_DIGEST_MAX_PASSES:-}" ]; then
+    case "$MNEMON_DIGEST_MAX_PASSES" in
+        *[!0-9]*) MAX_PASSES=1 ;;
+        *) MAX_PASSES=$((10#$MNEMON_DIGEST_MAX_PASSES)); [ "$MAX_PASSES" -ge 1 ] || MAX_PASSES=1 ;;
+    esac
+fi
+REPORT="${MNEMON_DIGEST_REPORT:-}"
 # Failures in a row at the same one-line chunk, each one the payload could have
 # caused, before that line is skipped.
 SKIP_AFTER=3
@@ -30,6 +44,21 @@ LAST_FAIL_KIND=""
 # The range being worked on, for a pass that fails before it is sent.
 CUR_PATH=""
 CUR_END=""
+# This worker's own temp files: a transcript slice, the payload cleaned from
+# it (and its cleaning errors), and what a failed call reported. Removed on
+# every exit, a signal included.
+SLICE="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
+INPUT="$MNEMON_SESSIONS_DIR/${session_id}.input.$$.txt"
+ERRF="$MNEMON_SESSIONS_DIR/${session_id}.digest-error.$$"
+HOLDS_LOCK=0
+cleanup() {
+    rm -f "$SLICE" "$INPUT" "$INPUT.err" "$ERRF"
+    [ "$HOLDS_LOCK" = 1 ] && mnemon_digest_unlock "$session_id"
+    HOLDS_LOCK=0
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # One worker per session at a time (see mnemon_digest_lock). The loser hands
 # its range to the winner rather than dropping it: when the user sends one
@@ -43,7 +72,7 @@ if ! mnemon_digest_lock "$session_id"; then
     [ -n "$text_file" ] && rm -f "$text_file"
     exit 0
 fi
-trap 'mnemon_digest_unlock "$session_id"' EXIT
+HOLDS_LOCK=1
 
 # What kind of failure a failed call was. Args: <what mnemon_call reported>.
 #
@@ -105,9 +134,27 @@ record_failure() {
     fi
 }
 
+# Append one line for a call to MNEMON_DIGEST_REPORT, when it is set. Args:
+# <start> <end> <outcome: ok | a failure_kind> [<result, on ok>].
+#   {"start","end","outcome","replayed","turn_end","drawers":[{"id","wing"}],
+#    "dropped","usage"}
+# turn_end, drawers, dropped and usage are the server's, from the result.
+report_call() {
+    [ -n "$REPORT" ] || return 0
+    printf '%s' "${4:-}" | jq -Rsc --argjson s "$1" --argjson e "$2" --arg o "$3" '
+        ((try fromjson catch null) | objects | .structuredContent | objects) // {}
+        | {start: $s, end: $e, outcome: $o,
+           replayed: (.replayed == true),
+           turn_end: (.turn_end | numbers // null),
+           drawers: [.persisted[]? | objects | {id, wing}],
+           dropped: (.dropped_outside_wings | numbers // 0),
+           usage: (.usage | objects // null)}' >> "$REPORT" 2>/dev/null
+}
+
 # Send one slice. Args: <start> <end> <text_file>. Returns 0 when the digest ran.
 run_once() {
-    local sstart="$1" send="$2" tfile="$3" pair recent_ids params result persisted_ids errf err done_to
+    local sstart="$1" send="$2" tfile="$3" pair recent_ids params result persisted_ids err done_to sliced=false
+    [ -n "$transcript_path" ] && sliced=true
     LAST_FAIL_KIND=""
     mnemon_digest_lock_touch "$session_id"
     if ! pair=$(mnemon_token); then
@@ -125,6 +172,9 @@ run_once() {
     recent_ids=$(mnemon_session_state "$session_id" | jq -c '.recent_drawer_ids // []' 2>/dev/null)
     [ -n "$recent_ids" ] || recent_ids='[]'
 
+    # occurred_at: when the slice happened, the ts of its last turn -- for a
+    # slice cut from a transcript file only, and only an ISO-8601 one.
+    #
     # replay "by_start": this worker advances to a replay's turn_end and carries
     # the rest, so the server may answer a retry from a recorded start with that
     # slice. It does so only when asked -- an older worker advances to the end
@@ -141,25 +191,32 @@ run_once() {
         --argjson r "$recent_ids" \
         --arg p "$project" \
         --arg f "$filing" \
+        --argjson sliced "$sliced" \
         '{name:"session_digest",arguments:({session_id:$sid,harness:"claude-code",turn_range:{start:$ts,end:$te},transcript:$t,recent_drawer_ids:$r,replay:"by_start"}
             + (if $p == "" then {} else {project:$p} end)
-            + (if $f == "" then {} else {project_filing:$f} end))}')
+            + (if $f == "" then {} else {project_filing:$f} end)
+            + (if $sliced then
+                 ($t | try fromjson catch null
+                  | if type == "array" then (last | if type == "object" then .ts else null end) else null end
+                  | if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T") then {occurred_at: .} else {} end)
+               else {} end))}')
 
     rm -f "$tfile"
 
     # 90s, above the server's own 60s budget for the model call, so a slow
     # digest that the server completes is not abandoned by the client.
-    errf="$MNEMON_SESSIONS_DIR/${session_id}.digest-error.$$"
-    rm -f "$errf"
-    if ! result=$(MNEMON_CALL_ERROR_FILE="$errf" mnemon_call "tools/call" "$params" 90000 "${pair%|*}" "${pair#*|}") \
+    rm -f "$ERRF"
+    if ! result=$(MNEMON_CALL_ERROR_FILE="$ERRF" mnemon_call "tools/call" "$params" 90000 "${pair%|*}" "${pair#*|}") \
         || [ -z "$result" ]; then
-        err=$(cat "$errf" 2>/dev/null)
-        rm -f "$errf"
+        err=$(cat "$ERRF" 2>/dev/null)
+        rm -f "$ERRF"
         mnemon_log_error "digest call failed for session=$session_id range=$sstart-$send"
         record_failure "$err" "$sstart"
+        report_call "$sstart" "$send" "$LAST_FAIL_KIND"
         return 1
     fi
-    rm -f "$errf"
+    rm -f "$ERRF"
+    report_call "$sstart" "$send" ok "$result"
 
     # A result without structuredContent still counts as digested; it just
     # names no drawers. An empty value here once made --argjson fail and the
@@ -205,8 +262,8 @@ digest_from_pointer() {
     start=$(mnemon_session_state "$session_id" | jq -r '.last_digest_turn // 0')
     [ "$end" -gt "$start" ] || return 0
 
-    slice="$MNEMON_SESSIONS_DIR/${session_id}.slice.$$.jsonl"
-    out="$MNEMON_SESSIONS_DIR/${session_id}.input.$$.txt"
+    slice="$SLICE"
+    out="$INPUT"
     if ! sliced_to=$(mnemon_slice_transcript "$path" "$start" "$end" "$slice"); then
         rm -f "$slice"
         mnemon_log_error "$what for session=$session_id: lines $start-$end of the transcript are gone; skipped"
@@ -276,14 +333,14 @@ while :; do
         run_pending || ok=0
     done
     mnemon_digest_unlock "$session_id"
-    trap - EXIT
+    HOLDS_LOCK=0
     # A worker that lost the lock after the check above and before the release
     # left its range in the marker. Take the lock back for it; if another
     # worker got there first, that one handles it. A marker left after this
     # point is picked up by the next Stop.
     [ "$ok" = 1 ] && [ -f "$PENDING" ] && [ "$passes" -lt "$MAX_PASSES" ] || break
     mnemon_digest_lock "$session_id" || break
-    trap 'mnemon_digest_unlock "$session_id"' EXIT
+    HOLDS_LOCK=1
 done
 
 # After a failure the pointer has not moved and the marker is kept: the next

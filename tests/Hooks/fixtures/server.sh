@@ -17,6 +17,10 @@
 #      FAKE_REPLAY_END (answer a session_digest starting at 0 that opts in with
 #                       replay: "by_start" as a replay of a
 #                       slice the server already holds, ending at this turn),
+#      FAKE_USAGE (answer a session_digest that is not replayed the way a
+#                  digest that stored drawers does: persisted drawers,
+#                  dropped_outside_wings, the turn_end sent, and the model's
+#                  token usage),
 #      FAKE_NO_STRUCTURED (answer tools/call with a result that has no
 #                          structuredContent),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
@@ -266,6 +270,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if tr.get("start") == 0 and args.get("replay") == "by_start":
                 self._reply(200, ('{"jsonrpc":"2.0","id":1,"result":{"structuredContent":'
                                   '{"persisted":[],"replayed":true,"turn_end":%d}}}' % int(replay_end)).encode())
+                return
+
+        if os.environ.get("FAKE_USAGE"):
+            try:
+                params = json.loads(body).get("params", {})
+                args = params.get("arguments", {})
+            except (ValueError, AttributeError):
+                params, args = {}, {}
+            if params.get("name") == "session_digest":
+                end = int(args.get("turn_range", {}).get("end", 0))
+                self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {
+                    "persisted": [{"id": 41, "wing": "research", "room": "notes"},
+                                  {"id": 42, "wing": "project-atlas", "room": "decisions"}],
+                    "dropped_outside_wings": 1,
+                    "turn_end": end,
+                    "usage": {"prompt_tokens": 1200, "completion_tokens": 300, "reasoning_tokens": 0}}}}).encode())
                 return
 
         if os.environ.get("FAKE_NO_STRUCTURED"):

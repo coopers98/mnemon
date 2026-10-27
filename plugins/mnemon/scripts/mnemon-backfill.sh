@@ -9,6 +9,11 @@
 # and prints what an import would send, what it would cost, and what it skips
 # and why. It sends nothing to the model and writes nothing under ~/.mnemon.
 #
+# --project <name> (the trial) or --all imports: the same scan and estimate,
+# a confirmation (--yes skips it, never the cap), the memory notes, then the
+# transcripts one model call at a time under the cap. It can be stopped with
+# Ctrl-C and resumed with the same command (lib/backfill-run.sh).
+#
 # Runs wherever the hooks run -- Linux, macOS, Git Bash on Windows -- so plain
 # bash, curl, jq and coreutils only. Output is plain text with no colour, and
 # any prompt text it shows is redacted and cut to 60 characters.
@@ -16,6 +21,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/backfill-scan.sh
 . "$SCRIPT_DIR/lib/backfill-scan.sh"
+# shellcheck source=lib/backfill-run.sh
+. "$SCRIPT_DIR/lib/backfill-run.sh"
 
 backfill_parse_args "$@"
 rc=$?
@@ -29,8 +36,8 @@ if [ "$BACKFILL_HELP" = 1 ]; then
 fi
 
 if [ "$BACKFILL_DRY_RUN" = 0 ] && { [ -n "$BACKFILL_PROJECT" ] || [ "$BACKFILL_ALL" = 1 ]; }; then
-    echo "mnemon-backfill: importing is not available in this version yet; add --dry-run to see the estimate" >&2
-    exit 2
+    backfill_run
+    exit $?
 fi
 
 echo "Mnemon backfill: scan (nothing is sent to the model)"

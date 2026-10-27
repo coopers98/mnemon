@@ -27,6 +27,20 @@
 #      FAKE_DIGEST_WINGS (comma-separated project names that resolve to a
 #                         wing "project-<name>" in the digest block; every
 #                         other name sent in `projects` answers null),
+#      FAKE_USAGE_PROMPT (the prompt_tokens FAKE_USAGE reports, default 1200),
+#      FAKE_DIGEST_ERROR (answer every session_digest with a tool error of this
+#                         text, e.g. "Retryable: ..." or "Not retryable: ...";
+#                         other tools answer as usual),
+#      FAKE_TOUCH_ON_DIGEST (a file whose mtime is set to now whenever a
+#                            session_digest arrives: a session coming alive),
+#      FAKE_DRAWER_ADD (answer drawer_add as the real tool does: {id, tier,
+#                       wing: "project-<project>", created}, created false for
+#                       content already stored -- kept in FAKE_STATE_DIR -- and
+#                       drawer_get with a two-line content),
+#      FAKE_DRAWER_ADD_DENY (a project whose drawer_add is refused with the
+#                            real tool's wing error),
+#      FAKE_ADD_429 (answer the first N drawer_add calls with HTTP 429; the
+#                    count is kept in FAKE_STATE_DIR),
 #      FAKE_NO_STRUCTURED (answer tools/call with a result that has no
 #                          structuredContent),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
@@ -264,6 +278,59 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if DELAY:
             time.sleep(DELAY)
 
+        try:
+            call = json.loads(body).get("params", {}) or {}
+            call_args = call.get("arguments", {}) or {}
+        except (ValueError, AttributeError):
+            call, call_args = {}, {}
+        tool = call.get("name")
+
+        if tool == "session_digest":
+            touch = os.environ.get("FAKE_TOUCH_ON_DIGEST", "")
+            if touch:
+                os.utime(touch, None)
+            derr = os.environ.get("FAKE_DIGEST_ERROR", "")
+            if derr:
+                self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {
+                    "content": [{"type": "text", "text": derr}], "isError": True}}).encode())
+                return
+
+        if tool == "drawer_add" and os.environ.get("FAKE_ADD_429") and STATE:
+            n429 = self._state("add429")
+            seen = int(open(n429).read() or 0) if os.path.exists(n429) else 0
+            if seen < int(os.environ["FAKE_ADD_429"]):
+                open(n429, "w").write(str(seen + 1))
+                self._reply(429, b'{"message":"Too Many Attempts."}')
+                return
+
+        if tool == "drawer_add" and os.environ.get("FAKE_DRAWER_ADD"):
+            project = str(call_args.get("project", ""))
+            if project and project == os.environ.get("FAKE_DRAWER_ADD_DENY", ""):
+                self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {
+                    "content": [{"type": "text", "text": "Token does not have access to wing: project-" + project}],
+                    "isError": True}}).encode())
+                return
+            stored = {}
+            path = self._state("drawers.json")
+            if path and os.path.exists(path):
+                stored = json.load(open(path))
+            content = str(call_args.get("content", ""))
+            created = content not in stored
+            if created:
+                stored[content] = 500 + len(stored)
+                if path:
+                    json.dump(stored, open(path, "w"))
+            self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {
+                "id": stored[content], "tier": "hot", "wing": "project-" + project, "created": created}}}).encode())
+            return
+
+        if tool == "drawer_get" and os.environ.get("FAKE_DRAWER_ADD"):
+            did = call_args.get("id")
+            self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {
+                "id": did, "wing": "research",
+                "content": "Drawer %s opens with this line\nand goes on here" % did}}}).encode())
+            return
+
         replay_end = os.environ.get("FAKE_REPLAY_END", "")
         if replay_end:
             # As the real server: a later end replays by start only for a
@@ -291,7 +358,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                   {"id": 42, "wing": "project-atlas", "room": "decisions"}],
                     "dropped_outside_wings": 1,
                     "turn_end": end,
-                    "usage": {"prompt_tokens": 1200, "completion_tokens": 300, "reasoning_tokens": 0}}}}).encode())
+                    "usage": {"prompt_tokens": int(os.environ.get("FAKE_USAGE_PROMPT", "1200")),
+                              "completion_tokens": 300, "reasoning_tokens": 0}}}}).encode())
                 return
 
         digest_mode = os.environ.get("FAKE_DIGEST", "")

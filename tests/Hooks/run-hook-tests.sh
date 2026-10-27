@@ -3561,6 +3561,291 @@ assert_eq "$(bf_snapshot)" "$BF_BEFORE" "backfill scan: ~/.mnemon is byte-identi
 rf_stop_all
 rm -rf "$BF" "$BF_STATE"
 
+# --- backfill run --------------------------------------------------------------
+# mnemon-backfill --project <name> (the trial) and --all import: memory notes
+# through drawer_add, then transcripts through the digest worker, one call at a
+# time, under a token cap. A HOME of its own and a synthetic projects tree; the
+# fake server stands in for Mnemon.
+BR=$(mktemp -d)
+BR_HOME="$BR/home"
+BR_MN="$BR_HOME/.mnemon"
+BR_ROOT="$BR_HOME/.claude/projects"
+mkdir -p "$BR_MN/sessions" "$BR_ROOT" "$BR/work"
+BR_SECRET="sk-brSECRETabcdefghijklmnop0123"
+for r in atlas beacon scratch; do git init -q "$BR/work/$r"; done
+git -C "$BR/work/atlas" remote add origin "https://example.com/me/atlas.git"
+br_sid() { printf 'br000000-0000-0000-0000-%012d' "$1"; }
+BR_A1="$BR_ROOT/-work-atlas/$(br_sid 1).jsonl"
+BR_A2="$BR_ROOT/-work-atlas/$(br_sid 2).jsonl"
+bf_session "$BR_A1" "$(br_sid 1)" "$BR/work/atlas" cli "Plan the atlas migration" "Here is the plan." "Ship it on Friday" "Done, shipped."
+bf_session "$BR_A2" "$(br_sid 2)" "$BR/work/atlas" cli "Review the atlas schema" "Looks fine."
+bf_session "$BR_ROOT/-work-beacon/$(br_sid 3).jsonl" "$(br_sid 3)" "$BR/work/beacon" cli "Tune the beacon interval" "Set to 30s."
+# scratch is in project_ignore: no project, the model files it.
+bf_session "$BR_ROOT/-work-scratch/$(br_sid 4).jsonl" "$(br_sid 4)" "$BR/work/scratch" cli "Scratch thoughts on lunch" "Noted."
+mkdir -p "$BR_ROOT/-work-atlas/memory"
+printf '# Deploys\nThe atlas deploy runs on Fridays. key %s\n' "$BR_SECRET" > "$BR_ROOT/-work-atlas/memory/deploys.md"
+printf '# Buckets\nUse the staging bucket.\n' > "$BR_ROOT/-work-atlas/memory/buckets.md"
+printf -- '- [Deploys](deploys.md)\n' > "$BR_ROOT/-work-atlas/memory/MEMORY.md"
+
+# Args: <port>. Points the sandbox at a server. digest_chunk_chars 40 makes
+# every turn a chunk of its own: atlas is 4 + 2 calls.
+br_config() {
+    jq -n --arg e "http://127.0.0.1:$1/mcp" \
+        '{endpoint:$e, bearer_token:"br-token", digest_chunk_chars:40, project_ignore:["scratch"]}' > "$BR_MN/config.json"
+}
+# Back to before any import: no session state, no backfill progress, every
+# file old again.
+br_reset() {
+    rm -rf "$BR_MN/sessions" "$BR_MN/backfill" "$BR_MN/capture-errors.log"
+    mkdir -p "$BR_MN/sessions"
+    find "$BR_ROOT" -type f -exec touch -t 202601010000 {} +
+}
+# Args: [script args...]. Runs mnemon-backfill in the sandbox with stdin closed
+# (a terminal on stdin would be asked); sets BF_OUT and BF_RC for bf_has.
+br_run() {
+    BF_OUT=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR \
+        -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+        HOME="$BR_HOME" MNEMON_DIR="$BR_MN" MNEMON_BACKFILL_TTY="${BR_TTY:-$BR/no-tty}" \
+        MNEMON_BACKFILL_MAX_SLEEP=0 MNEMON_BACKFILL_429_SLEEP=0 MNEMON_BACKFILL_NOTE_PAUSE=0 \
+        bash "$BACKFILL_SH" "$@" 2>&1 < /dev/null)
+    BF_RC=$?
+}
+# Args: <log>. session_digest requests as "<session_id> <start>-<end>" lines.
+br_digests() {
+    jq -r 'select(.params.name? == "session_digest") | .params.arguments
+        | "\(.session_id) \(.turn_range.start)-\(.turn_range.end)"' "$1" 2>/dev/null
+}
+br_count() { grep -c "\"$2\"" "$1" 2>/dev/null; }
+br_state() { jq -r "$1" "$BR_MN/backfill/state.json" 2>/dev/null; }
+# The per-call estimate the run charges an attempt that reports no usage.
+br_per_call() { printf '%s\n' "$BF_OUT" | sed -n 's/^ *per call: *\([0-9][0-9]*\) tokens.*/\1/p' | head -n 1; }
+BR_STATE_SRV=$(mktemp -d)
+
+# The trial: one project, its notes first, then its sessions in one-chunk calls.
+br_reset
+BR_PORT=$(rf_free_port); BR_LOG="$BR/req.log"
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_DRAWER_ADD=1
+br_config "$BR_PORT"
+br_run --project atlas --yes
+assert_eq "$BF_RC" "0" "backfill run: a trial exits 0"
+bf_lacks "Proceed?" "backfill run: --yes does not ask"
+assert_eq "$(br_digests "$BR_LOG" | tr '\n' ' ')" \
+    "$(br_sid 1) 0-1 $(br_sid 1) 1-2 $(br_sid 1) 2-3 $(br_sid 1) 3-4 $(br_sid 2) 0-1 $(br_sid 2) 1-2 " \
+    "backfill run: a trial digests only its project's sessions, one chunk per call, in order"
+bf_has "calls:         6" "backfill run: the estimate counted the same 6 calls"
+assert_eq "$(br_state '[.sessions[] | "\(.pointer):\(.done)"] | join(",")')" "4:true,2:true" \
+    "backfill run: progress records each session's pointer and done"
+assert_eq "$(br_state '"\(.spent.in) \(.spent.out) \(.spent.calls) \(.spent.replays)"')" "7200 1800 6 0" \
+    "backfill run: spend is the usage the calls reported"
+assert_eq "$(br_state '"\(.trial.project) \(.trial.tokens_per_call)"')" "atlas 1500" \
+    "backfill run: a trial stores its project and tokens per call"
+assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" \
+    "backfill run: a finished session's marker, which the backfill caused, is removed"
+assert_eq "$(br_count "$BR_LOG" drawer_add)" "2" "backfill run: each memory note goes through drawer_add once"
+assert_eq "$(grep -n '"drawer_add"' "$BR_LOG" | head -n 1 | cut -d: -f1 | awk -v d="$(grep -n '"session_digest"' "$BR_LOG" | head -n 1 | cut -d: -f1)" '{ print ($1 < d) ? "notes first" : "sessions first" }')" \
+    "notes first" "backfill run: notes go before transcripts"
+br_note=$(jq -c 'select(.params.name? == "drawer_add") | .params.arguments' "$BR_LOG" | grep Deploys)
+assert_eq "$(printf '%s' "$br_note" | jq -r '"\(.project) \(.room) \(.metadata.harness) \(.metadata.backfill) \(.metadata.source_path | endswith("deploys.md"))"')" \
+    "atlas memory claude-code true true" "backfill run: a note carries project, room memory and its metadata"
+assert_eq "$(printf '%s' "$br_note" | jq -r '.occurred_at == (.metadata.mtime | todate)')" "true" \
+    "backfill run: a note's occurred_at is its file's mtime"
+assert_eq "$(grep -c "$BR_SECRET" "$BR_LOG")" "0" "backfill run: a note is redacted before it is sent"
+assert_eq "$(printf '%s' "$br_note" | jq -r '.content | contains("[REDACTED")')" "true" "backfill run: the redacted note still goes"
+bf_has "project-atlas" "backfill run: the report counts drawers per wing"
+bf_has "Drawer 41 opens with this line" "backfill run: the report shows a drawer's first line, fetched with drawer_get"
+bf_lacks "and goes on here" "backfill run: only the first line of a drawer is shown"
+
+# The same command again: every session is done, the notes come back as
+# already stored, and nothing is spent twice.
+: > "$BR_LOG"
+br_run --project atlas --yes
+assert_eq "$(br_count "$BR_LOG" session_digest)" "0" "backfill run: a re-run sends no turn again"
+assert_eq "$(br_count "$BR_LOG" drawer_add)" "2" "backfill run: a re-run sends the notes again"
+bf_has "2 already stored" "backfill run: the server's dedup answers created:false"
+assert_eq "$(br_state '"\(.spent.in) \(.spent.out) \(.spent.calls)"')" "7200 1800 6" "backfill run: a re-run spends nothing"
+
+# --all after the trial: recalibrated from it; the project_ignore session is
+# filed by the model.
+: > "$BR_LOG"
+br_run --all --yes
+assert_eq "$BF_RC" "0" "backfill run: --all exits 0"
+bf_has "recalibrated from the trial on atlas: 1500 tokens per call" "backfill run: --all recalibrates from the trial"
+assert_eq "$(jq -r 'select(.params.name? == "session_digest") | .params.arguments
+    | "\(.session_id | .[-1:]) \(.project // "-") \(.project_filing // "-")"' "$BR_LOG" | sort -u | tr '\n' ',')" \
+    "3 beacon -,4 - model," "backfill run: a project_ignore session is sent with filing model"
+rf_stop_all
+
+# No --yes and no terminal to ask on: refused, nothing sent. An answer on the
+# terminal proceeds.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_DRAWER_ADD=1
+br_config "$BR_PORT"
+br_run --project atlas
+assert_ne "$BF_RC" "0" "backfill run: no --yes and no terminal exits non-zero"
+bf_has "--yes" "backfill run: the refusal says how to proceed"
+assert_eq "$(br_count "$BR_LOG" session_digest)/$(br_count "$BR_LOG" drawer_add)" "0/0" "backfill run: a refused run sends nothing"
+assert_eq "$([ -e "$BR_MN/backfill/state.json" ] && echo written || echo none)" "none" "backfill run: a refused run writes no progress"
+# No credentials on the device: refused before anything is attempted.
+jq 'del(.bearer_token)' "$BR_MN/config.json" > "$BR/c.json" && mv "$BR/c.json" "$BR_MN/config.json"
+br_run --project atlas --yes
+assert_eq "$BF_RC" "1" "backfill run: no credentials exits 1"
+bf_has "no Mnemon credentials" "backfill run: no credentials says so"
+br_config "$BR_PORT"
+printf 'n\n' > "$BR/tty-no"
+BR_TTY="$BR/tty-no" br_run --project atlas --memory-only
+bf_has "Proceed? [y/N]" "backfill run: without --yes it asks on the terminal"
+assert_eq "$(br_count "$BR_LOG" drawer_add)" "0" "backfill run: answering no sends nothing"
+printf 'y\n' > "$BR/tty-yes"
+BR_TTY="$BR/tty-yes" br_run --project atlas --memory-only
+assert_eq "$(br_count "$BR_LOG" drawer_add)/$(br_count "$BR_LOG" session_digest)" "2/0" "backfill run: answering yes proceeds (--memory-only: notes only)"
+
+# The cap: a cap below one call's estimate sends no call; the run stops before
+# the call that would pass it.
+br_reset
+: > "$BR_LOG"
+br_run --project atlas --yes --max-tokens 1
+assert_eq "$(br_count "$BR_LOG" session_digest)" "0" "backfill run: a cap below one call's estimate makes no call"
+bf_has "Stopped at the cap" "backfill run: the run says the cap stopped it"
+BR_E=$(br_per_call)
+assert_ne "${BR_E:-0}" "0" "backfill run: the per-call estimate is printed"
+BR_E=${BR_E:-0}
+br_reset
+: > "$BR_LOG"
+br_run --project atlas --yes --max-tokens $((BR_E + 1500 + 1))
+assert_eq "$(br_count "$BR_LOG" session_digest)" "2" "backfill run: the cap stops before the call that would pass it"
+assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" \
+    "backfill run: a session stopped at the cap loses the marker the backfill caused"
+assert_eq "$(jq -r '.last_digest_turn' "$BR_MN/sessions/$(br_sid 1).json")" "2" "backfill run: the pointer holds what was digested"
+assert_eq "$(br_state ".sessions[\"$(br_sid 1)\"].done")" "false" "backfill run: a session cut off by the cap is not done"
+rf_stop_all
+# A call far dearer than its estimate overshoots by that one call only.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_USAGE_PROMPT=50000 FAKE_DRAWER_ADD=1
+br_config "$BR_PORT"
+br_run --project atlas --yes --max-tokens $((BR_E + 1))
+assert_eq "$(br_count "$BR_LOG" session_digest)" "1" "backfill run: the cap overshoots by at most one call"
+# --max-cost, at the published price: a cent buys no call here.
+br_reset; : > "$BR_LOG"
+br_run --project atlas --yes --max-cost 0.01
+assert_eq "$(br_count "$BR_LOG" session_digest)" "0" "backfill run: --max-cost caps in dollars at the published price"
+bf_has "Stopped at the cap" "backfill run: --max-cost stops at the cap"
+rf_stop_all
+# --max-cost with no published price is refused before anything is sent.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=unpriced FAKE_DIGEST_WINGS="atlas,beacon" FAKE_USAGE=1 FAKE_DRAWER_ADD=1
+br_config "$BR_PORT"
+br_run --project atlas --yes --max-cost 5
+assert_eq "$BF_RC" "2" "backfill run: --max-cost without a published price exits 2"
+bf_has "--max-tokens" "backfill run: --max-cost without a price points at --max-tokens"
+assert_eq "$(br_count "$BR_LOG" session_digest)/$(br_count "$BR_LOG" drawer_add)" "0/0" "backfill run: a refused --max-cost sends nothing"
+rf_stop_all
+
+# Every call answered "Retryable:": the session stops after 3, each attempt is
+# charged the estimate, and a marker that was there before is left alone.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_DRAWER_ADD=1 FAKE_DIGEST_ERROR="Retryable: the digest model timed out"
+br_config "$BR_PORT"
+jq -cn --arg p "$BR_A1" '{path:$p, end:3}' > "$BR_MN/sessions/$(br_sid 1).digest.pending"
+br_run --project atlas --yes
+assert_eq "$(br_digests "$BR_LOG" | tr '\n' ' ')" "$(br_sid 1) 0-1 $(br_sid 1) 0-1 $(br_sid 1) 0-1 " \
+    "backfill run: 3 failures in a row stop the session (and transient ones the run)"
+assert_eq "$(br_state '.spent.estimated')" "$((3 * BR_E))" "backfill run: each failed attempt is charged the per-call estimate"
+assert_ne "$BF_RC" "0" "backfill run: a run stopped by failures exits non-zero"
+bf_has "resume with the same command" "backfill run: a run stopped by failures says how to resume"
+assert_eq "$(jq -r '.end' "$BR_MN/sessions/$(br_sid 1).digest.pending" 2>/dev/null)" "4" \
+    "backfill run: a marker that existed before the backfill is kept"
+rf_stop_all
+
+# "Not retryable:" stops the whole run at once, with its reason; the marker the
+# backfill caused is removed.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_DRAWER_ADD=1 FAKE_DIGEST_ERROR="Not retryable: no OpenAI API key is configured on the server."
+br_config "$BR_PORT"
+br_run --project atlas --yes
+assert_eq "$(br_count "$BR_LOG" session_digest)" "1" "backfill run: not_retryable stops the whole run at once"
+bf_has "no OpenAI API key is configured" "backfill run: not_retryable says why"
+assert_ne "$BF_RC" "0" "backfill run: not_retryable exits non-zero"
+assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" \
+    "backfill run: a stopped session's marker is removed when the backfill caused it"
+rf_stop_all
+
+# A session whose transcript changes between calls has come alive: it is left
+# to its hooks after that call, and its marker is kept.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_DRAWER_ADD=1 FAKE_TOUCH_ON_DIGEST="$BR_A1"
+br_config "$BR_PORT"
+br_run --project atlas --yes
+assert_eq "$(br_digests "$BR_LOG" | grep -c "$(br_sid 1)")" "1" "backfill run: a session modified between calls is left after that call"
+assert_eq "$(br_digests "$BR_LOG" | grep -c "$(br_sid 2)")" "2" "backfill run: the other sessions go on"
+assert_eq "$(jq -r '.end' "$BR_MN/sessions/$(br_sid 1).digest.pending" 2>/dev/null)" "4" \
+    "backfill run: a session that came alive keeps its marker"
+bf_has "modified" "backfill run: the report says why the session was left"
+rf_stop_all
+
+# Ctrl-C between calls: the call in flight finishes, progress is written, and a
+# re-run of the same command sends no turn twice.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_DRAWER_ADD=1 FAKE_DELAY=1
+br_config "$BR_PORT"
+# Job control on, so the background run does not ignore SIGINT.
+set -m
+env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR HOME="$BR_HOME" MNEMON_DIR="$BR_MN" \
+    MNEMON_BACKFILL_TTY="$BR/no-tty" MNEMON_BACKFILL_MAX_SLEEP=0 MNEMON_BACKFILL_NOTE_PAUSE=0 \
+    bash "$BACKFILL_SH" --project atlas --yes > "$BR/int.out" 2>&1 < /dev/null &
+BR_PID=$!
+set +m
+wait_until 30 grep -q '"session_digest"' "$BR_LOG"
+kill -INT "$BR_PID" 2>/dev/null
+wait "$BR_PID"
+BF_RC=$?
+BF_OUT=$(cat "$BR/int.out")
+assert_eq "$BF_RC" "130" "backfill run: Ctrl-C exits 130"
+bf_has "resume with the same command" "backfill run: Ctrl-C says how to resume"
+assert_eq "$(br_count "$BR_LOG" session_digest)" "1" "backfill run: Ctrl-C finishes the call in flight and starts no other"
+assert_eq "$(br_state ".sessions[\"$(br_sid 1)\"].pointer")" "1" "backfill run: Ctrl-C writes progress"
+assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" "backfill run: Ctrl-C finishes marker ownership"
+assert_eq "$(find "$BR_MN" -name '*.tmp.*' | wc -l | tr -d ' ')" "0" "backfill run: Ctrl-C leaves no temp file behind"
+br_run --project atlas --yes
+assert_eq "$BF_RC" "0" "backfill run: the re-run completes"
+assert_eq "$(br_digests "$BR_LOG" | sort | uniq -d | wc -l | tr -d ' ')" "0" "backfill run: no range is sent twice across an interrupted run"
+assert_eq "$(br_digests "$BR_LOG" | wc -l | tr -d ' ')" "6" "backfill run: the re-run sends the rest"
+rf_stop_all
+
+# Notes: a 429 is waited out and retried; a wing denial is a drop, counted.
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_DRAWER_ADD=1 FAKE_ADD_429=1
+br_config "$BR_PORT"
+br_run --project atlas --memory-only --yes
+assert_eq "$(br_count "$BR_LOG" drawer_add)" "3" "backfill run: a 429 on drawer_add is retried"
+bf_has "2 new" "backfill run: both notes are stored after the retry"
+rf_stop_all
+br_reset; rm -f "$BR_STATE_SRV"/*
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_DRAWER_ADD=1 FAKE_DRAWER_ADD_DENY=atlas
+br_config "$BR_PORT"
+br_run --project atlas --memory-only --yes
+assert_eq "$BF_RC" "0" "backfill run: a wing denial does not stop the run"
+bf_has "2 dropped" "backfill run: a wing denial is counted as a drop"
+rf_stop_all
+rm -rf "$BR" "$BR_STATE_SRV"
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 # A HOME of its own: mnemon_token falls back to ~/.claude.json.

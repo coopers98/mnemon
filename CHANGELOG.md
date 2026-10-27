@@ -9,7 +9,22 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-27
+
 ### Fixed
+- **The plugin's locks hold where `mkdir` is uutils coreutils.** Newer
+  Ubuntu ships the Rust uutils `mkdir`, which now and then reports success to
+  two callers racing for the same directory, so two hooks could hold one lock:
+  concurrent session-state updates were lost (about 1 run in 13 with 12
+  writers) and two digest workers could run for one session. A lock is now
+  held only by the caller that creates its pid file, which bash does with an
+  exclusive create, whatever `mkdir` does. This covers the session-state,
+  pending, digest, token-refresh and once-per-event locks. A token-refresh
+  lock left with no pid (its holder killed mid-take, or a full disk) is taken
+  over after 30 s instead of failing every refresh. Plugin 0.3.11.
+- **`/mnemon:doctor` no longer reports old untimestamped log lines as recent
+  errors.** A line without a timestamp (stray tool output) compared as newer
+  than any date. Plugin 0.3.11.
 - **Secret rules run in linear time and redact whole values.** Rule C no
   longer re-scans quadratically (1 MB took 162 s on the server), rule A keeps
   values containing `,` `}` `]` whole, and rule B no longer breaks a JSON
@@ -42,7 +57,7 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - **Digest progress can no longer move backwards.** `last_digest_turn` is
   written as the larger of the stored and new values, whoever writes it, so a
   stale copy of the session state cannot rewind it and have turns digested
-  twice. The digest worker's lock is now an atomic `mkdir` lock per session
+  twice. The digest worker's lock is now a lock directory per session
   (replacing a PID file that two workers could both claim), recovered when its
   owner is gone or it is older than 10 minutes. Session-state writes apply
   their change to the state on disk, and a write that is not a JSON object is
@@ -536,4 +551,6 @@ error message**:
 The palace (wings → rooms → drawers), the wiki layer, hybrid retrieval over
 pgvector plus PostgreSQL full-text, and the Filament admin panel.
 
+[Unreleased]: https://github.com/coopers98/mnemon/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/coopers98/mnemon/releases/tag/v1.0.1
 [1.0.0]: https://github.com/coopers98/mnemon/releases/tag/v1.0.0

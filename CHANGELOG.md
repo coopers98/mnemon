@@ -17,25 +17,34 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   eligible, with the estimate recalibrated from the trial. Memory notes go in
   through `drawer_add`, transcripts through the digest worker one call at a
   time. Every run has a cap (`--max-tokens`, `--max-cost`, else the estimate's
-  high figure plus 25%) and resumes with the same command. The enrolment
-  message, the session banner and `/mnemon:doctor` point to it. Plugin 0.3.12.
+  high figure plus 25%) and resumes with the same command. Plugin 0.3.12.
 - **Drawers record when the conversation happened (`occurred_at`).** The
-  backfill sets it to the original time; search's recency boost, `drawer_get`
-  and `wiki_compile` use it when present and fall back to `created_at`.
-  `drawer_add` and `session_digest` take an optional `occurred_at`; a time in
-  the future is clamped to now.
+  backfill sets it to the original time. `drawer_add` and `session_digest`
+  take an optional `occurred_at`; a time in the future is clamped to now.
 - **`drawer_add` takes an optional `project`,** filing the drawer under the
   same wing a digest of that project would use.
 - **`session_digest` reports the model's token usage, and
   `brain_status` publishes a `digest` block** (model, prices, prompt overhead,
   typical and maximum output, and which wing each of a list of projects
-  resolves to, among the wings the token can read) so a client can estimate a backfill. New server settings:
+  resolves to, among the wings the token can read) so a client can estimate a
+  backfill. New server settings:
   `MNEMON_DIGEST_MAX_COMPLETION_TOKENS` (default 16000, caps one call's output),
   `MNEMON_DIGEST_PRICE_IN_PER_MTOK`, `MNEMON_DIGEST_PRICE_OUT_PER_MTOK` (unset:
   no dollar figures) and `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000).
   The two defaults are provisional; the trial's report gives the measured
   figures to set them from. All additions are optional, so plugin 0.3.11 and
   older servers keep working.
+
+### Changed
+- **Search recency, `drawer_get` and `wiki_compile` use `occurred_at`** when a
+  drawer has one, and fall back to `created_at`, so backfilled history does not
+  look like it happened today. Drawers without it behave as before.
+- **The session banner and `/mnemon:doctor` count partly imported sessions
+  separately** from undigested ones and point to `mnemon-backfill` to continue;
+  the banner also offers the backfill once on a device that has never run it.
+  Plugin 0.3.12.
+- **The enrolment message prints the backfill commands** (the scan and the
+  trial) with the plugin directory filled in. Plugin 0.3.12.
 
 ## [1.0.1] — 2026-10-27
 

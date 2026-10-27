@@ -944,8 +944,10 @@ guess prices or tokens:
 - `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000) is the output a typical
   digest is assumed to produce, and `MNEMON_DIGEST_MAX_COMPLETION_TOKENS`
   (default 16000) caps one call's output, reasoning included. Both defaults are
-  provisional. The trial's report prints the output tokens actually reported and
-  the number of calls; divide one by the other and, if it is far from 3000, set
+  provisional. Take the trial report's average output per digested call; if the
+  report does not print one, divide its output tokens by the calls that
+  returned usage (not counting replays and failed calls, which the report's
+  call total includes). If that figure is far from 3000, set
   `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` to it.
 
 The run always has a cap, checked before every call: by default the estimate's
@@ -968,7 +970,7 @@ Every skipped session or note has one reason, listed in the scan under
 | `capture_ignore` | The repository or directory is in `capture_ignore` in `~/.mnemon/config.json` | Remove it from the config |
 | `unresolved` | The directory's working directory is gone or not a repository, so there is no project name | `--include <name>`, the directory name without the leading `-`, files it under that name |
 | `new_project` | The project has no wing on the server yet. Live capture would create one; the backfill asks you first | `--include <project>` |
-| `nomemo` | The session started with `@nomemo` | None; delete `~/.mnemon/sessions/<session_id>.json` to reset |
+| `nomemo` | The session turned capture off: a prompt in the transcript starts a line with `@nomemo`, or the hooks recorded `nomemo` in its state file | None for a transcript that has `@nomemo` in its prompts. Deleting `~/.mnemon/sessions/<session_id>.json` clears only a `nomemo` the hooks recorded |
 | `disabled` | The session ran with `MNEMON_DISABLE=1` | None |
 | `done` | Already fully digested, by live capture or an earlier backfill | None |
 | `busy` | Live capture is digesting it right now | Run again later |

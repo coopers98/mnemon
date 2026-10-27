@@ -21,6 +21,12 @@
 #                  digest that stored drawers does: persisted drawers,
 #                  dropped_outside_wings, the turn_end sent, and the model's
 #                  token usage),
+#      FAKE_DIGEST (answer brain_status with a digest block: "priced" publishes
+#                   prices, any other value publishes null prices; unset, the
+#                   reply has no digest block, as from an older server),
+#      FAKE_DIGEST_WINGS (comma-separated project names that resolve to a
+#                         wing "project-<name>" in the digest block; every
+#                         other name sent in `projects` answers null),
 #      FAKE_NO_STRUCTURED (answer tools/call with a result that has no
 #                          structuredContent),
 #      FAKE_MAX_TRANSCRIPT (reject a session_digest whose transcript exceeds
@@ -286,6 +292,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "dropped_outside_wings": 1,
                     "turn_end": end,
                     "usage": {"prompt_tokens": 1200, "completion_tokens": 300, "reasoning_tokens": 0}}}}).encode())
+                return
+
+        digest_mode = os.environ.get("FAKE_DIGEST", "")
+        if digest_mode:
+            try:
+                params = json.loads(body).get("params", {})
+                args = params.get("arguments", {}) or {}
+            except (ValueError, AttributeError):
+                params, args = {}, {}
+            if params.get("name") == "brain_status":
+                priced = digest_mode == "priced"
+                digest = {
+                    "model": "fake-digest-model",
+                    "price_in_per_mtok": 1.25 if priced else None,
+                    "price_out_per_mtok": 10.0 if priced else None,
+                    "prompt_overhead_tokens": 2000,
+                    "typical_output_tokens": 2500,
+                    "max_completion_tokens": 16000,
+                }
+                if isinstance(args.get("projects"), list):
+                    wings = [w for w in os.environ.get("FAKE_DIGEST_WINGS", "").split(",") if w]
+                    digest["projects"] = {p: ("project-" + p if p in wings else None)
+                                          for p in args["projects"]}
+                self._reply(200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": {
+                    "structuredContent": {"wings": [], "digest": digest}}}).encode())
                 return
 
         if os.environ.get("FAKE_NO_STRUCTURED"):

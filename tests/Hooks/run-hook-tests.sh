@@ -3286,6 +3286,245 @@ for d in $DOC_DIRS; do
     case "$d" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${d:?}" ;; esac
 done
 
+# --- backfill scan -------------------------------------------------------------
+# mnemon-backfill with no arguments is the free scan: it says what an import
+# would send and what it would cost, and sends nothing. Everything here runs in
+# a HOME of its own with a synthetic ~/.claude/projects tree built below; no
+# real transcript is read.
+BACKFILL_SH="$HOOKS_DIR/../scripts/mnemon-backfill.sh"
+BACKFILL_LIB="$HOOKS_DIR/../scripts/lib/backfill-scan.sh"
+BF=$(mktemp -d)
+BF_HOME="$BF/home"
+BF_MN="$BF_HOME/.mnemon"
+BF_ROOT="$BF_HOME/.claude/projects"
+mkdir -p "$BF_MN/sessions" "$BF_ROOT" "$BF/work"
+BF_SECRET="sk-bfSECRETabcdefghijklmnop0123"
+
+# Repositories the sessions ran in. atlas has a remote, so its name comes from
+# the remote; the others are named for their directory.
+for r in atlas cron heart beacon ignoredrepo; do git init -q "$BF/work/$r"; done
+git -C "$BF/work/atlas" remote add origin "https://example.com/me/atlas.git"
+
+# Args: <file> <session_id> <cwd> <entrypoint> <text>... One record per text,
+# user and assistant alternating, starting with the user. A text that starts
+# with "U:" is forced to a user record (two user records in a row).
+bf_session() {
+    local file="$1" sid="$2" cwd="$3" ep="$4" role=user n=0 t
+    shift 4
+    mkdir -p "$(dirname "$file")"
+    : > "$file"
+    for t in "$@"; do
+        case "$t" in U:*) role=user; t="${t#U:}" ;; esac
+        n=$((n + 1))
+        jq -cn --arg r "$role" --arg s "$sid" --arg c "$cwd" --arg e "$ep" --arg t "$t" \
+            --arg ts "2026-09-0$(( (n % 9) + 1 ))T10:00:00.123Z" \
+            '{type:$r, sessionId:$s, cwd:$c, entrypoint:$e, timestamp:$ts, isSidechain:false,
+              message:{role:$r, content:(if $r == "user" then $t else [{type:"text", text:$t}] end)}}' >> "$file"
+        if [ "$role" = user ]; then role=assistant; else role=user; fi
+    done
+}
+bf_id() { printf 'bf000000-0000-0000-0000-%012d' "$1"; }
+
+A="$BF_ROOT/-work-atlas"
+bf_session "$A/$(bf_id 1).jsonl" "$(bf_id 1)" "$BF/work/atlas" cli "Plan the atlas migration" "Here is the plan." "Ship it" "Done."
+bf_session "$A/$(bf_id 2).jsonl" "$(bf_id 2)" "$BF/work/atlas" sdk-py "Review the atlas schema" "Looks fine." "Thanks" "Welcome."
+# @nomemo in the third user record, straight after the second: the cleaner
+# would merge the two, so the test must see each record on its own.
+bf_session "$A/$(bf_id 3).jsonl" "$(bf_id 3)" "$BF/work/atlas" cli "Hello atlas" "Hi." "second thought" "U:  @NoMemo keep this between us" "Understood."
+# A subagent's transcript carries its parent's sessionId; it is never read.
+bf_session "$A/$(bf_id 1)/subagents/agent-1.jsonl" "$(bf_id 1)" "$BF/work/atlas" cli "SUBAGENT prompt" "SUBAGENT reply"
+bf_session "$A/$(bf_id 5).jsonl" "$(bf_id 5)" "$BF/work/atlas" cli "Already digested session" "Yes." "Again" "Yes."
+jq -n --argjson n "$(wc -l < "$A/$(bf_id 5).jsonl" | tr -d ' ')" '{last_digest_turn:$n}' > "$BF_MN/sessions/$(bf_id 5).json"
+bf_session "$A/$(bf_id 6).jsonl" "other-session-id" "$BF/work/atlas" cli "Mismatched id" "Ok."
+bf_session "$A/$(bf_id 7).jsonl" "$(bf_id 7)" "$BF/work/atlas" cli "Session held by live capture" "Ok."
+mkdir "$BF_MN/sessions/$(bf_id 7).digest.lock.d" && echo "$$" > "$BF_MN/sessions/$(bf_id 7).digest.lock.d/pid"
+bf_session "$A/$(bf_id 8).jsonl" "$(bf_id 8)" "$BF/work/atlas" cli "Disabled session" "Ok."
+printf '{"last_digest_turn":0,"disabled":true}' > "$BF_MN/sessions/$(bf_id 8).json"
+mkdir -p "$A/memory"
+printf '# Note A\nThe atlas deploy runs on Fridays.\n' > "$A/memory/note-a.md"
+printf '# Note B\nUse the staging bucket.\n' > "$A/memory/note-b.md"
+printf -- '- [Note A](note-a.md)\n' > "$A/memory/MEMORY.md"
+# A 5-session cluster of one first prompt (automation, skipped) and a 4-session
+# one (under the threshold, eligible -- and still listed).
+for i in 11 12 13 14 15; do
+    bf_session "$BF_ROOT/-work-cron/$(bf_id $i).jsonl" "$(bf_id $i)" "$BF/work/cron" cli \
+        "Heartbeat $BF_SECRET: check the queue and report" "Queue is empty ($i)."
+done
+for i in 21 22 23 24; do
+    bf_session "$BF_ROOT/-work-heart/$(bf_id $i).jsonl" "$(bf_id $i)" "$BF/work/heart" sdk-py \
+        "Summarise the overnight logs" "Nothing unusual ($i)."
+done
+# A cwd that no longer exists, under a directory name with a space.
+bf_session "$BF_ROOT/-tmp-my dir/$(bf_id 31).jsonl" "$(bf_id 31)" "$BF/gone/my dir" cli "Work in a dir that is gone" "Ok."
+bf_session "$BF_ROOT/-work-beacon/$(bf_id 41).jsonl" "$(bf_id 41)" "$BF/work/beacon" cli "A beacon session" "Ok."
+bf_session "$BF_ROOT/-work-ignoredrepo/$(bf_id 51).jsonl" "$(bf_id 51)" "$BF/work/ignoredrepo" cli "An ignored repo" "Ok."
+# Everything is old except the one file modified now.
+find "$BF_ROOT" -type f -exec touch -t 202601010000 {} +
+bf_session "$A/$(bf_id 4).jsonl" "$(bf_id 4)" "$BF/work/atlas" cli "A live session" "Still going."
+
+BF_STATE=$(mktemp -d)
+BF_PORT=$(rf_free_port); BF_LOG="$BF/req.log"
+rf_start "$BF_PORT" "$BF_LOG" "$BF_STATE" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,cron,heart"
+BF_PORT_U=$(rf_free_port); BF_LOG_U="$BF/req-u.log"
+rf_start "$BF_PORT_U" "$BF_LOG_U" "$BF_STATE" FAKE_DIGEST=unpriced FAKE_DIGEST_WINGS="atlas,cron,heart"
+BF_PORT_OLD=$(rf_free_port); BF_LOG_OLD="$BF/req-old.log"
+rf_start "$BF_PORT_OLD" "$BF_LOG_OLD" "$BF_STATE"
+# Args: <port>. Points the sandbox's config at a server.
+bf_config() {
+    jq -n --arg e "http://127.0.0.1:$1/mcp" \
+        '{endpoint:$e, bearer_token:"bf-token", capture_ignore:["ignoredrepo"]}' > "$BF_MN/config.json"
+}
+bf_config "$BF_PORT"
+
+# A snapshot of everything under ~/.mnemon: names, sizes and contents.
+bf_snapshot() {
+    (cd "$BF_MN" && find . -print | LC_ALL=C sort && find . -type f -exec cksum {} + | LC_ALL=C sort)
+}
+BF_BEFORE=$(bf_snapshot)
+
+# Args: [script args...]. Runs the scan in the sandbox; sets BF_OUT and BF_RC.
+bf_run() {
+    BF_OUT=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR \
+        -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+        HOME="$BF_HOME" MNEMON_DIR="$BF_MN" bash "$BACKFILL_SH" "$@" 2>&1)
+    BF_RC=$?
+}
+# Args: <function> [args...]. Runs one of the scan library's functions on its
+# own, with the flags in BF_ARGS; its output is the function's.
+bf_lib() {
+    local fn="$1"; shift
+    env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR \
+        -u CLAUDE_PLUGIN_OPTION_MNEMON_ENDPOINT -u CLAUDE_PLUGIN_OPTION_MNEMON_TOKEN \
+        HOME="$BF_HOME" MNEMON_DIR="$BF_MN" BF_ARGS="${BF_ARGS:-}" bash -c '
+            . "$1"; shift
+            fn="$1"; shift
+            backfill_parse_args ${BF_ARGS:-} || exit 2
+            "$fn" "$BACKFILL_PROJECTS_ROOT" "$@"' _ "$BACKFILL_LIB" "$fn" "$@" 2>/dev/null
+}
+bf_show() { printf '    output was:\n%s\n' "$(printf '%s\n' "$BF_OUT" | sed 's/^/      /')"; }
+bf_has() {
+    case "$BF_OUT" in
+        *"$1"*) PASS=$((PASS+1)); printf '  ok: %s\n' "$2" ;;
+        *) FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$2"; bf_show ;;
+    esac
+}
+bf_lacks() {
+    case "$BF_OUT" in
+        *"$1"*) FAIL=$((FAIL+1)); printf '  FAIL: %s\n' "$2"; bf_show ;;
+        *) PASS=$((PASS+1)); printf '  ok: %s\n' "$2" ;;
+    esac
+}
+# Args: <tsv> <session_id>. Echoes "status reason" for that session.
+bf_status() { awk -F'\t' -v s="$2" '$1 == s { print $5 " " $6 }' <<< "$1"; }
+
+bf_run
+assert_eq "$BF_RC" "0" "backfill scan: exits 0"
+assert_eq "$(grep -c '"brain_status"' "$BF_LOG")" "1" "backfill scan: asks brain_status exactly once"
+assert_eq "$(grep -c '"session_digest"' "$BF_LOG")" "0" "backfill scan: sends no session_digest"
+assert_eq "$(grep -c '"drawer_add"' "$BF_LOG")" "0" "backfill scan: sends no drawer_add"
+bf_has "Per project" "backfill scan: prints the per-project table"
+bf_has "Skipped" "backfill scan: prints the skip summary"
+bf_has "[REDACTED-OPENAI-KEY]" "backfill scan: a cluster's prompt is shown redacted"
+bf_lacks "$BF_SECRET" "backfill scan: a secret in a prompt is never printed"
+bf_lacks "SUBAGENT" "backfill scan: a subagent transcript is never read"
+case "$BF_OUT" in
+    *"heart"*"sdk-py 4"*) PASS=$((PASS+1)); printf '  ok: backfill scan: prints the entrypoint mix per project\n' ;;
+    *) FAIL=$((FAIL+1)); printf '  FAIL: backfill scan: no entrypoint mix for heart\n'; bf_show ;;
+esac
+if printf '%s\n' "$BF_OUT" | grep -E '^ +cost: ' | grep -qE '\$[0-9]+\.[0-9]{2} to \$[0-9]+\.[0-9]{2}'; then
+    PASS=$((PASS+1)); printf '  ok: backfill scan: a published price gives a dollar range\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: backfill scan: no dollar range with a published price\n'; bf_show
+fi
+bf_has "20-60 s per call" "backfill scan: estimates wall-clock time at 20-60 s per call"
+# The cluster's prompt is cut to 60 characters after redaction.
+bf_cluster=$(printf '%s\n' "$BF_OUT" | grep -F '[REDACTED-OPENAI-KEY]' | head -n 1 | sed 's/.*"\(.*\)".*/\1/')
+assert_eq "$([ "${#bf_cluster}" -le 60 ] && echo short)" "short" "backfill scan: a cluster's prompt is cut to 60 characters"
+
+BF_TSV=$(bf_lib backfill_scan)
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 1)")" "eligible " "backfill scan: a real-work session is eligible"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 2)")" "eligible " "backfill scan: an sdk-py work session is eligible too"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 3)")" "skip nomemo" "backfill scan: @nomemo in a merged user record skips the session"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 4)")" "skip recent" "backfill scan: a file modified now is left to its hooks"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 5)")" "skip done" "backfill scan: a pointer at the line count is done"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 6)")" "skip id_mismatch" "backfill scan: a mismatched sessionId is skipped"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 7)")" "skip busy" "backfill scan: a held digest lock is busy"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 8)")" "skip disabled" "backfill scan: a disabled state file skips the session"
+for i in 11 12 13 14 15; do
+    assert_eq "$(bf_status "$BF_TSV" "$(bf_id $i)")" "skip automation" "backfill scan: 5-cluster session $i is automation"
+done
+for i in 21 22 23 24; do
+    assert_eq "$(bf_status "$BF_TSV" "$(bf_id $i)")" "eligible " "backfill scan: 4-cluster session $i is eligible"
+done
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 31)")" "skip unresolved" "backfill scan: a cwd that is gone is unresolved"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 41)")" "skip new_project" "backfill scan: a project with no wing is new"
+assert_eq "$(bf_status "$BF_TSV" "$(bf_id 51)")" "skip capture_ignore" "backfill scan: capture_ignore is honoured"
+assert_eq "$(printf '%s\n' "$BF_TSV" | grep -c 'agent-1')" "0" "backfill scan: the subagent file is absent"
+assert_eq "$(printf '%s\n' "$BF_TSV" | awk -F'\t' 'NF != 13' | wc -l | tr -d ' ')" "0" "backfill scan: every row has 13 columns"
+assert_eq "$(awk -F'\t' -v s="$(bf_id 1)" '$1 == s { print $3 "|" $4 "|" $7 "|" $8 "|" $12 }' <<< "$BF_TSV")" \
+    "atlas|atlas|4|0|cli" "backfill scan: a row names project, repo, lines, pointer and entrypoint"
+assert_eq "$(awk -F'\t' -v s="$(bf_id 1)" '$1 == s { print ($9 >= 1 && $10 > 0) ? "y" : "n" }' <<< "$BF_TSV")" "y" \
+    "backfill scan: an eligible session is simulated to at least one call"
+assert_eq "$(awk -F'\t' '$1 ~ /bf000000-0000-0000-0000-00000000001[1-5]/ { print $11 }' <<< "$BF_TSV" | sort -u | wc -l | tr -d ' ')" "1" \
+    "backfill scan: a cluster shares one first-prompt hash"
+
+# The estimate follows from the rows and the server's published figures:
+# overhead 2000 (to 1.5x), 2500 output tokens per call.
+bf_calls=$(awk -F'\t' '$5 == "eligible" { c += $9 } END { print c + 0 }' <<< "$BF_TSV")
+bf_chars=$(awk -F'\t' '$5 == "eligible" { c += $10 } END { print c + 0 }' <<< "$BF_TSV")
+bf_in_low=$(( (bf_chars + 3) / 4 + bf_calls * 2000 ))
+bf_in_high=$(( (bf_chars + 3) / 4 + bf_calls * 3000 ))
+bf_has "input tokens:  $bf_in_low to $bf_in_high" "backfill scan: input tokens are chunk characters / 4 plus overhead to 1.5x"
+bf_has "output tokens: $((bf_calls * 2500))" "backfill scan: output tokens use the server's typical figure"
+
+BF_NOTES=$(bf_lib backfill_notes)
+assert_eq "$(awk -F'\t' '$1 ~ /note-a\.md$/ { print $2 " " $3 }' <<< "$BF_NOTES")" "atlas eligible" "backfill notes: a memory note is eligible under its project"
+assert_eq "$(awk -F'\t' '$1 ~ /note-b\.md$/ { print $3 }' <<< "$BF_NOTES")" "eligible" "backfill notes: every note is listed"
+assert_eq "$(printf '%s\n' "$BF_NOTES" | grep -c 'MEMORY\.md')" "0" "backfill notes: MEMORY.md is absent"
+assert_eq "$(printf '%s\n' "$BF_NOTES" | awk -F'\t' 'NF != 6' | wc -l | tr -d ' ')" "0" "backfill notes: every row has 6 columns"
+
+# --include brings in an unresolved directory, by its name, and a new project.
+BF_TSV2=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR \
+    HOME="$BF_HOME" MNEMON_DIR="$BF_MN" bash -c '. "$1"; backfill_parse_args --include "tmp-my dir" --include beacon \
+        --include-automation "$2" && backfill_scan "$BACKFILL_PROJECTS_ROOT"' _ "$BACKFILL_LIB" \
+        "$(awk -F'\t' -v s="$(bf_id 11)" '$1 == s { print $11 }' <<< "$BF_TSV")" 2>/dev/null)
+assert_eq "$(awk -F'\t' -v s="$(bf_id 31)" '$1 == s { print $3 " " $5 }' <<< "$BF_TSV2")" "tmp-my dir eligible" \
+    "backfill scan: --include files an unresolved directory under its name"
+assert_eq "$(bf_status "$BF_TSV2" "$(bf_id 41)")" "eligible " "backfill scan: --include brings in a new project"
+assert_eq "$(bf_status "$BF_TSV2" "$(bf_id 11)")" "eligible " "backfill scan: --include-automation brings a cluster back"
+BF_TSV3=$(BF_ARGS="--skip-entrypoint sdk --project heart" bf_lib backfill_scan)
+assert_eq "$(bf_status "$BF_TSV3" "$(bf_id 21)")" "skip automation" "backfill scan: --skip-entrypoint skips by entrypoint prefix"
+assert_eq "$(bf_status "$BF_TSV3" "$(bf_id 1)")" "skip not_included" "backfill scan: --project leaves other projects out"
+
+# No published price: tokens and calls, and the dollars say unknown.
+bf_config "$BF_PORT_U"
+bf_run
+bf_has "cost:          unknown (no price published)" "backfill scan: no published price says unknown"
+# A server too old to publish a digest block: unknown dollars, fallback figures.
+bf_config "$BF_PORT_OLD"
+bf_run --include beacon
+assert_eq "$BF_RC" "0" "backfill scan: an older server still gets a scan"
+bf_has "cost:          unknown (no price published)" "backfill scan: an older server's price is unknown"
+bf_has "output tokens: 3000" "backfill scan: an older server uses the fallback output figure"
+bf_config "$BF_PORT"
+
+# Sampling: when simulating every file would take too long, a size-stratified
+# sample is simulated and the totals say so.
+bf_run_sampled() { MNEMON_BACKFILL_SIM_SECONDS=0 MNEMON_BACKFILL_SIM_PROBE=1 bf_run "$@"; }
+bf_run_sampled
+bf_has "sampled" "backfill scan: a slow scan samples and says so"
+
+# A cleaning error in the simulation is printed, not logged under ~/.mnemon.
+MNEMON_CLEAN_FAIL=aws bf_run
+bf_has "redaction pattern aws failed" "backfill scan: a simulated cleaning error is printed"
+
+bf_run --bogus
+assert_eq "$BF_RC" "2" "backfill scan: an unknown option exits 2"
+
+assert_eq "$(bf_snapshot)" "$BF_BEFORE" "backfill scan: ~/.mnemon is byte-identical after every scan"
+rf_stop_all
+rm -rf "$BF" "$BF_STATE"
+
 # Test 10: capture hook with no token short-circuits.
 rm -f "$MNEMON_DIR/config.json"
 # A HOME of its own: mnemon_token falls back to ~/.claude.json.

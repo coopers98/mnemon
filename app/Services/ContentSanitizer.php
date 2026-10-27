@@ -94,6 +94,17 @@ class ContentSanitizer
             // null is a PCRE failure, not "nothing matched". Assigning it
             // stored an empty string.
             if ($next === null) {
+                // A key is not kept on the chance the pattern would have
+                // found one: text with a key header is withheld whole, as the
+                // plugin withholds it on the device.
+                if (str_contains($pattern, 'PRIVATE KEY') && str_contains($content, 'PRIVATE KEY-----')) {
+                    Log::warning('mnemon: private-key pattern failed; withholding the text', [
+                        'error' => preg_last_error_msg(),
+                    ]);
+
+                    return '[REDACTED:PRIVATE_KEY]';
+                }
+
                 Log::warning('mnemon: sanitizer pattern failed; keeping the text it was given', [
                     'pattern' => $pattern,
                     'error' => preg_last_error_msg(),

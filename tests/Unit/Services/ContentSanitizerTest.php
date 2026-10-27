@@ -397,6 +397,43 @@ class ContentSanitizerTest extends TestCase
         $this->assertSame('DB_PASSWORD=[REDACTED]', $out);
     }
 
+    public function test_a_private_key_is_withheld_when_its_pattern_fails(): void
+    {
+        $key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAsecretkeybody0123456789abcdef\n-----END RSA PRIVATE KEY-----";
+        Log::shouldReceive('warning')->atLeast()->once();
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $out = $this->sanitizer->sanitize("before\n{$key}\nafter");
+        } finally {
+            ini_set('pcre.jit', $jit);
+            ini_set('pcre.backtrack_limit', $limit);
+        }
+
+        $this->assertStringNotContainsString('secretkeybody', $out);
+    }
+
+    public function test_text_without_a_key_is_kept_when_a_pattern_fails(): void
+    {
+        Log::shouldReceive('warning');
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $out = $this->sanitizer->sanitize('an ordinary note about the deploy');
+        } finally {
+            ini_set('pcre.jit', $jit);
+            ini_set('pcre.backtrack_limit', $limit);
+        }
+
+        $this->assertSame('an ordinary note about the deploy', $out);
+    }
+
     public function test_a_turn_ending_in_a_quoted_key_stays_valid_json(): void
     {
         $json = '[{"text":"the \\"token\\":"},{"text":"ok"}]';

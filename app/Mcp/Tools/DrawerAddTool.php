@@ -8,6 +8,7 @@ use App\Mcp\Concerns\ResolvesAgentSource;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Wing;
 use App\Services\DrawerWriteService;
+use App\Support\ProjectWings;
 use Carbon\Carbon;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -32,7 +33,8 @@ class DrawerAddTool extends Tool
         }
 
         $params = $request->validate([
-            'wing' => 'required|string',
+            'wing' => 'required_without:project|prohibits:project|nullable|string',
+            'project' => 'required_without:wing|prohibits:wing|nullable|string|max:100',
             'room' => 'required|string',
             'content' => 'required|string',
             'source' => 'nullable|string',
@@ -40,16 +42,24 @@ class DrawerAddTool extends Tool
             'occurred_at' => 'nullable|date',
         ]);
 
-        // Slugged the way Wing's creating event slugs a name, so the stored
-        // slug -- the thing consent patterns are built from -- never carries
-        // characters such as `%` or `_` from the raw argument.
-        $params['wing'] = Wing::slugify($params['wing']);
-        if ($params['wing'] === '') {
-            return Response::error('Parameter "wing" must contain at least one letter or digit.');
-        }
+        if (isset($params['project'])) {
+            $slug = $this->wingForProject($request, $params['project']);
+            if ($slug instanceof Response) {
+                return $slug;
+            }
+            $params['wing'] = $slug;
+        } else {
+            // Slugged the way Wing's creating event slugs a name, so the stored
+            // slug -- the thing consent patterns are built from -- never carries
+            // characters such as `%` or `_` from the raw argument.
+            $params['wing'] = Wing::slugify($params['wing']);
+            if ($params['wing'] === '') {
+                return Response::error('Parameter "wing" must contain at least one letter or digit.');
+            }
 
-        if ($err = $this->requireWingAccess($request, $params['wing'])) {
-            return $err;
+            if ($err = $this->requireWingAccess($request, $params['wing'])) {
+                return $err;
+            }
         }
 
         $drawer = $this->writer->createDrawer(
@@ -63,13 +73,48 @@ class DrawerAddTool extends Tool
 
         BrainSessionLogger::log($request, 'drawer_add', $params, 1);
 
-        return Response::structured(['id' => $drawer->id, 'tier' => $drawer->tier]);
+        return Response::structured([
+            'id' => $drawer->id,
+            'tier' => $drawer->tier,
+            'wing' => $params['wing'],
+            'created' => $drawer->wasRecentlyCreated,
+        ]);
+    }
+
+    /**
+     * The wing a project files into, or the refusal to return. A project whose
+     * wing the token cannot reach is refused exactly as a missing wing is.
+     */
+    private function wingForProject(Request $request, string $project): string|Response
+    {
+        $name = Wing::slugify($project);
+        if ($name === '') {
+            return Response::error('Parameter "project" must contain at least one letter or digit.');
+        }
+
+        $patterns = $this->wingPatternsFor($request);
+        $ids = Wing::readableIds($patterns);
+        $wings = Wing::query()
+            ->when($ids !== null, fn ($q) => $q->whereIn('id', $ids))
+            ->get()
+            ->all();
+
+        $slug = ProjectWings::wingSlugForProject($project, $wings, $patterns);
+        if ($slug !== null) {
+            return $slug;
+        }
+
+        $missing = "project-{$name}";
+
+        return $this->requireWingAccess($request, $missing)
+            ?? Response::error("Token does not have access to wing: {$missing}");
     }
 
     public function schema(JsonSchema $s): array
     {
         return [
-            'wing' => $s->string()->required()->description('Wing slug (auto-created if missing).'),
+            'wing' => $s->string()->description('Wing slug (auto-created if missing). Give exactly one of wing or project.'),
+            'project' => $s->string()->description('Project name; files into that project\'s wing, aliases included, the same wing session digests use. Give exactly one of wing or project.'),
             'room' => $s->string()->required()->description('Room slug within wing.'),
             'content' => $s->string()->required()->description('Verbatim drawer content.'),
             'source' => $s->string()->description('Optional source override; defaults to OAuth client name.'),

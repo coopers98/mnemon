@@ -155,6 +155,7 @@ class WingIsolationTest extends TestCase
             'context_set conflict' => ['tool', 'context_set', 'name', 'personal', 'personal-ghost', ['content' => 'x', 'expected_revision' => 1]],
             'context_set trashed' => ['tool', 'context_set', 'name', 'personal:trashed', 'personal:ghost', ['content' => 'x']],
             'drawer_add' => ['tool', 'drawer_add', 'wing', 'personal', 'personal-ghost', ['room' => 'diary', 'content' => 'x', 'occurred_at' => '2026-01-01T00:00:00Z']],
+            'drawer_add by project' => ['tool', 'drawer_add', 'project', 'personal', 'personal-ghost', ['room' => 'diary', 'content' => 'x']],
             'resource drawer' => ['resource', 'mnemon://drawer/{arg}', null, '{personal_drawer}', 999999, []],
             'resource wiki' => ['resource', 'mnemon://wiki/{arg}', null, 'personal', 'personal-ghost', []],
             'resource wing' => ['resource', 'mnemon://wing/{arg}', null, 'personal', 'personal-ghost', []],
@@ -166,6 +167,11 @@ class WingIsolationTest extends TestCase
     public function test_hidden_items_are_indistinguishable_from_missing_ones(
         string $kind, string $target, ?string $key, string|int $hidden, string|int $missing, array $extra,
     ): void {
+        // A project argument names a wing by convention; the hidden one exists.
+        if ($key === 'project') {
+            Wing::create(['name' => 'Project Personal', 'slug' => 'project-'.Wing::slugify($hidden)]);
+        }
+
         $before = $this->snapshot();
 
         $hidden = $this->resolve($hidden);
@@ -544,7 +550,8 @@ class WingIsolationTest extends TestCase
     private function mask(string $body, string $value): string
     {
         // Tools that map a page name to its wing echo the slugified form too.
-        foreach (array_unique([$value, Wing::slugify($value)]) as $echo) {
+        // A project argument is echoed as the wing name it resolves to.
+        foreach (array_unique([$value, Wing::slugify($value), 'project-'.Wing::slugify($value)]) as $echo) {
             $body = preg_replace('/(?<![\w-])'.preg_quote($echo, '/').'(?![\w.:-])/', '<ARG>', $body);
         }
 

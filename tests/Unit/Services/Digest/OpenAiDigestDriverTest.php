@@ -46,6 +46,43 @@ class OpenAiDigestDriverTest extends TestCase
         $this->assertEquals('Meeting with Atlas team', $result[0]['content']);
     }
 
+    public function test_driver_sends_max_completion_tokens(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+        $this->assertSame(16000, config('mnemon.digest.max_completion_tokens'));
+
+        (new OpenAiDigestDriver)->digest('t', []);
+        Http::assertSent(fn ($request) => $request['max_completion_tokens'] === 16000);
+
+        config(['mnemon.digest.max_completion_tokens' => 500]);
+        (new OpenAiDigestDriver)->digest('t', []);
+        Http::assertSent(fn ($request) => $request['max_completion_tokens'] === 500);
+    }
+
+    public function test_driver_exposes_usage_including_reasoning_tokens(): void
+    {
+        config(['services.openai.api_key' => 'sk-test']);
+        $driver = new OpenAiDigestDriver;
+        $this->assertNull($driver->lastUsage());
+
+        $empty = ['choices' => [['message' => ['content' => '{"proposals":[]}']]]];
+        Http::fakeSequence('api.openai.com/*')
+            ->push($empty + ['usage' => ['prompt_tokens' => 120, 'completion_tokens' => 80,
+                'completion_tokens_details' => ['reasoning_tokens' => 50]]])
+            ->push($empty + ['usage' => ['prompt_tokens' => 7, 'completion_tokens' => 3]])
+            ->push($empty);
+
+        $driver->digest('t', []);
+        $this->assertSame(['prompt_tokens' => 120, 'completion_tokens' => 80, 'reasoning_tokens' => 50], $driver->lastUsage());
+
+        $driver->digest('t', []);
+        $this->assertSame(['prompt_tokens' => 7, 'completion_tokens' => 3, 'reasoning_tokens' => 0], $driver->lastUsage());
+
+        $driver->digest('t', []);
+        $this->assertNull($driver->lastUsage());
+    }
+
     public function test_uses_the_shared_llm_model_by_default(): void
     {
         Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);

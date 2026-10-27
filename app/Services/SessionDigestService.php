@@ -105,14 +105,20 @@ class SessionDigestService
             'session_wing' => $sessionWingSlug,
         ]);
 
+        // Not every LLM reports usage (test fakes do not).
+        $usage = method_exists($this->llm, 'lastUsage') ? $this->llm->lastUsage() : null;
+
         // One transaction for every write and the slice record. A proposal that
         // fails mid-loop used to leave the drawers before it committed; the
         // client, seeing an error, retried the range and wrote them again.
         try {
-            return DB::transaction(fn () => $this->persist(
+            $result = DB::transaction(fn () => $this->persist(
                 $proposals, $floor, $sessionId, $harness, $turnRange,
                 $existingWings, $allowedWingPatterns, $sessionWingSlug, $unfiledWingSlug, $occurredAt,
             ));
+            $result['usage'] = $usage;
+
+            return $result;
         } catch (QueryException $e) {
             // Another worker recorded this range while the model ran. This
             // run's drawers were rolled back with the transaction; report

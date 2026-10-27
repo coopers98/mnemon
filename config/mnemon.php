@@ -103,6 +103,10 @@ return [
         // reached the client as an opaque 500 rather than as a retryable
         // timeout. Raise it if digests of long sessions still time out.
         'timeout' => env('MNEMON_DIGEST_TIMEOUT', 60),
+
+        // Upper bound on the model's output (reasoning included) per digest.
+        // Caps what one call can spend.
+        'max_completion_tokens' => (int) env('MNEMON_DIGEST_MAX_COMPLETION_TOKENS', 16000),
     ],
     // The public, read-only demo (trymnemon.com). Off unless MNEMON_DEMO=true.
     // See docs/design/2026-10-13-public-demo-design.md.

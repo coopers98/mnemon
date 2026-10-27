@@ -8,6 +8,20 @@ use Illuminate\Support\Facades\Log;
 
 class OpenAiDigestDriver
 {
+    /** @var array{prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null */
+    private ?array $lastUsage = null;
+
+    /**
+     * Token usage of the most recent digest() call; null before a call or
+     * when the response reported none.
+     *
+     * @return array{prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null
+     */
+    public function lastUsage(): ?array
+    {
+        return $this->lastUsage;
+    }
+
     /**
      * @return array<int, array<string, mixed>> The model's proposals; empty when it found nothing worth keeping.
      *
@@ -15,6 +29,8 @@ class OpenAiDigestDriver
      */
     public function digest(string $transcript, array $context): array
     {
+        $this->lastUsage = null;
+
         $apiKey = config('services.openai.api_key') ?? env('OPENAI_API_KEY');
         if (empty($apiKey)) {
             Log::warning('mnemon: OPENAI_API_KEY missing for session_digest');
@@ -49,6 +65,7 @@ class OpenAiDigestDriver
                 ->timeout((int) config('mnemon.digest.timeout', 60))
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
+                    'max_completion_tokens' => (int) config('mnemon.digest.max_completion_tokens', 16000),
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [
                         ['role' => 'system', 'content' => $system],
@@ -75,6 +92,15 @@ class OpenAiDigestDriver
                 "the model call failed with HTTP {$status}",
                 retryable: $status === 429 || $status >= 500,
             );
+        }
+
+        $usage = $response->json('usage');
+        if (is_array($usage)) {
+            $this->lastUsage = [
+                'prompt_tokens' => (int) ($usage['prompt_tokens'] ?? 0),
+                'completion_tokens' => (int) ($usage['completion_tokens'] ?? 0),
+                'reasoning_tokens' => (int) ($usage['completion_tokens_details']['reasoning_tokens'] ?? 0),
+            ];
         }
 
         $content = $response->json('choices.0.message.content');

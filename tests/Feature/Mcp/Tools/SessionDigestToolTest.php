@@ -370,6 +370,64 @@ class SessionDigestToolTest extends TestCase
         ];
     }
 
+    public function test_session_digest_result_carries_usage(): void
+    {
+        $this->bindUsageLlm(['prompt_tokens' => 10, 'completion_tokens' => 5, 'reasoning_tokens' => 2]);
+        $body = $this->mcpCall('session_digest', $this->usageArgs('sess-usage'), ['mcp:use'])
+            ->json('result.structuredContent');
+        $this->assertSame(['prompt_tokens' => 10, 'completion_tokens' => 5, 'reasoning_tokens' => 2], $body['usage']);
+
+        // An LLM that cannot report usage (and one that reports none) gives null.
+        $this->mockDigestService([]);
+        $body = $this->mcpCall('session_digest', $this->usageArgs('sess-usage-2'), ['mcp:use'])
+            ->json('result.structuredContent');
+        $this->assertArrayHasKey('usage', $body);
+        $this->assertNull($body['usage']);
+    }
+
+    public function test_replay_result_has_no_usage(): void
+    {
+        $this->bindUsageLlm(['prompt_tokens' => 10, 'completion_tokens' => 5, 'reasoning_tokens' => 2]);
+        $args = $this->usageArgs('sess-usage-replay');
+        $this->mcpCall('session_digest', $args, ['mcp:use']);
+        $second = $this->mcpCall('session_digest', $args, ['mcp:use'])->json('result.structuredContent');
+
+        $this->assertTrue($second['replayed']);
+        $this->assertArrayNotHasKey('usage', $second);
+    }
+
+    private function usageArgs(string $sessionId): array
+    {
+        return [
+            'session_id' => $sessionId,
+            'harness' => 'claude-code',
+            'turn_range' => ['start' => 0, 'end' => 4],
+            'transcript' => 'we discussed a real note today',
+        ];
+    }
+
+    private function bindUsageLlm(array $usage): void
+    {
+        $this->app->bind(SessionDigestService::class, function ($app) use ($usage) {
+            $llm = new class($usage)
+            {
+                public function __construct(private array $usage) {}
+
+                public function digest(string $t, array $c): array
+                {
+                    return [];
+                }
+
+                public function lastUsage(): ?array
+                {
+                    return $this->usage;
+                }
+            };
+
+            return new SessionDigestService($llm, $app->make(DrawerWriteService::class));
+        });
+    }
+
     private function mockDigestService(array $proposals): void
     {
         $this->app->bind(SessionDigestService::class, function ($app) use ($proposals) {

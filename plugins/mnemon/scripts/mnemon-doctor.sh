@@ -388,10 +388,11 @@ now=$(date +%s)
 cutoff=$(date -u -d "@$((now - 86400))" +%FT%TZ 2>/dev/null || date -u -r "$((now - 86400))" +%FT%TZ 2>/dev/null)
 recent=""
 if [ -s "$MNEMON_ERROR_LOG" ] && [ -n "$cutoff" ]; then
-    # ISO-8601 UTC timestamps sort as strings. Routine refresh notices are
+    # ISO-8601 UTC timestamps sort as strings. A line without one (stray
+    # stderr) has no date, so it is never recent. Routine refresh notices are
     # logged here too but are not errors.
     recent=$(head -n "$log_lines_before" "$MNEMON_ERROR_LOG" 2>/dev/null \
-        | awk -v c="$cutoff" 'substr($0, 2, 20) >= c' \
+        | awk -v c="$cutoff" '/^\[[0-9][0-9][0-9][0-9]-/ && substr($0, 2, 20) >= c' \
         | grep -v 'refreshed access token' | tail -3)
 fi
 if [ -z "$recent" ]; then

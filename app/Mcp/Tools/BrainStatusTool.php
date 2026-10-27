@@ -167,11 +167,10 @@ class BrainStatusTool extends Tool
         if ($projects !== null) {
             // An existing wing this token can see, or null. A hidden wing and
             // a missing one both answer null.
-            $visible = $wings->keyBy('id');
             $resolved = [];
             foreach ($projects as $name) {
-                $wing = Wing::forProject($name);
-                $resolved[$name] = $wing !== null && $visible->has($wing->id) ? $wing->slug : null;
+                $wing = Wing::forProject($name, $wings->pluck('id')->all());
+                $resolved[$name] = $wing?->slug;
             }
             $digest['projects'] = (object) $resolved;
         }

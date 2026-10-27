@@ -27,8 +27,10 @@ class Wing extends Model
     /**
      * The project wing for a project name, matched by slug ("mnemon" →
      * project-mnemon) or by alias ("recital-lineup" → project-cora).
+     *
+     * @param  array<int>|null  $wingIds  Wings the caller may see; null for all.
      */
-    public static function forProject(string $project): ?self
+    public static function forProject(string $project, ?array $wingIds = null): ?self
     {
         $name = static::slugify($project);
 
@@ -36,8 +38,13 @@ class Wing extends Model
             return null;
         }
 
-        return static::where('slug', "project-{$name}")->first()
-            ?? static::where('slug', 'like', 'project-%')
+        // A caller that can see only some wings passes their ids: the lookup
+        // then never meets a wing it cannot see, so a hidden wing cannot take
+        // a name from a visible one (and the answer cannot reveal it exists).
+        $scope = fn () => static::query()->when($wingIds !== null, fn ($q) => $q->whereIn('id', $wingIds));
+
+        return $scope()->where('slug', "project-{$name}")->first()
+            ?? $scope()->where('slug', 'like', 'project-%')
                 ->whereNotNull('aliases')
                 ->get()
                 ->first(fn (Wing $wing) => in_array($name, array_map(static::slugify(...), $wing->aliases), true));

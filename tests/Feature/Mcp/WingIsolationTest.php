@@ -201,6 +201,7 @@ class WingIsolationTest extends TestCase
             $res = $this->mcpCall('brain_status', ['projects' => [$name]], ['mcp:use'], self::RESTRICTED);
             $res->assertOk();
             $this->assertSame([$name => null], $res->json('result.structuredContent.digest.projects'));
+            $this->assertDoesNotMatchRegularExpression(self::LEAK, str_replace($name, '{arg}', $res->getContent()));
             $responses[] = str_replace($name, '{arg}', $res->getContent());
         }
 

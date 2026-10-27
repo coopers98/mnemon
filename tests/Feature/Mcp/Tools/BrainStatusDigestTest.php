@@ -113,6 +113,7 @@ class BrainStatusDigestTest extends TestCase
     {
         $res = $this->mcpCall('brain_status', ['projects' => array_map(fn ($i) => "p{$i}", range(1, 501))]);
 
-        $this->assertTrue($res->json('result.isError') ?? false || $res->json('error') !== null);
+        $this->assertTrue($res->json('result.isError'));
+        $this->assertStringContainsString('projects field must not have more than 500 items', $res->json('result.content.0.text'));
     }
 }

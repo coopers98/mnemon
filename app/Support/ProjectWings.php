@@ -22,7 +22,7 @@ class ProjectWings
      */
     public static function wingSlugForProject(string $project, array $tokenWings, ?array $patterns): ?string
     {
-        $wing = Wing::forProject($project);
+        $wing = Wing::forProject($project, collect($tokenWings)->pluck('id')->all());
 
         if ($wing !== null) {
             $visible = collect($tokenWings)->contains(fn (Wing $w) => $w->id === $wing->id);

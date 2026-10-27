@@ -900,6 +900,112 @@ Type `@nomemo` at the start of any prompt to suppress both recall and capture fo
 In Filament: `/admin` → Drawers → filter by `source = "claude-code:session_digest"`.
 For new-wing proposals: `/admin` → Access Control → Pending Wings.
 
+### Bring in your history
+
+Hooks only capture sessions from the day they are installed. The backfill
+imports what is already on the device: past Claude Code sessions under
+`~/.claude/projects`, and the memory notes Claude Code keeps beside them. It is
+a script in the plugin, not on your `PATH`, so it is run as
+`bash "<plugin dir>/scripts/mnemon-backfill.sh"`. The enrolment script prints
+that exact line with the plugin directory filled in; copy it from there.
+
+It works in three steps, each more expensive than the last.
+
+1. **The scan (free).** `mnemon-backfill.sh --dry-run`, or just `/mnemon:backfill`
+   inside Claude Code. It reads the transcripts, asks the server one
+   `brain_status` call, and prints what an import would send, what it would
+   cost, and what it would skip and why. Nothing goes to the model and nothing
+   is written under `~/.mnemon`.
+2. **The trial.** `mnemon-backfill.sh --project <name>`, with a project name from
+   the scan. It imports that one project, asks `Proceed? [y/N]` first, and
+   prints a report. Run this in a terminal yourself: it spends tokens.
+3. **The full run.** `mnemon-backfill.sh --all` imports every eligible project.
+   After a trial, its estimate is recalibrated from what the trial measured.
+
+`--yes` skips the confirmation. It never skips the cap.
+
+#### What it costs
+
+Each transcript is cut into digest calls the same way live capture cuts them.
+A call's input is the cleaned transcript text divided by 4 (tokens), plus a
+fixed prompt overhead the server publishes; the scan shows the low figure
+(overhead as published) and a high one (1.5x the overhead). A call's output
+includes the model's reasoning, which varies far more than the input does.
+So the estimate is a range, not a price. For a large history the scan simulates
+a sample of the sessions and extrapolates the rest by size, and says so.
+
+Two things are the operator's to set on the server, because Mnemon does not
+guess prices or tokens:
+
+- `MNEMON_DIGEST_PRICE_IN_PER_MTOK` and `MNEMON_DIGEST_PRICE_OUT_PER_MTOK`:
+  dollars per million tokens for the digest model. Without them the scan and
+  report show token counts and `cost: unknown (no price published)`, and
+  `--max-cost` is refused.
+- `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000) is the output a typical
+  digest is assumed to produce, and `MNEMON_DIGEST_MAX_COMPLETION_TOKENS`
+  (default 16000) caps one call's output, reasoning included. Both defaults are
+  provisional. The trial's report prints the output tokens actually reported and
+  the number of calls; divide one by the other and, if it is far from 3000, set
+  `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` to it.
+
+The run always has a cap, checked before every call: by default the estimate's
+high figure plus 25%. `--max-tokens <n>` sets it in input plus output tokens;
+`--max-cost <dollars>` sets it in dollars when a price is published. A run can
+pass the cap by one call at most. Stopping at the cap is not a failure: the
+report says so and the same command carries on.
+
+The scan also estimates time at 20 to 60 seconds per call. Calls are made one at
+a time.
+
+#### What it skips, and how to override
+
+Every skipped session or note has one reason, listed in the scan under
+"Skipped".
+
+| Reason | Meaning | Override |
+|---|---|---|
+| `automation` | Its first prompt is shared by 5 or more sessions, or its entrypoint matches `--skip-entrypoint` | `--include-automation <hash>` (hashes are listed in the scan); `--automation-min <n>` moves the threshold |
+| `capture_ignore` | The repository or directory is in `capture_ignore` in `~/.mnemon/config.json` | Remove it from the config |
+| `unresolved` | The directory's working directory is gone or not a repository, so there is no project name | `--include <name>`, the directory name without the leading `-`, files it under that name |
+| `new_project` | The project has no wing on the server yet. Live capture would create one; the backfill asks you first | `--include <project>` |
+| `nomemo` | The session started with `@nomemo` | None; delete `~/.mnemon/sessions/<session_id>.json` to reset |
+| `disabled` | The session ran with `MNEMON_DISABLE=1` | None |
+| `done` | Already fully digested, by live capture or an earlier backfill | None |
+| `busy` | Live capture is digesting it right now | Run again later |
+| `recent` | Modified within the last 30 minutes, so it may still be open | `--quiet-minutes <n>` |
+| `id_mismatch` | The file name and the session id inside it disagree | None |
+| `not_included` | Outside what you asked for: another project than `--project`, before `--since <YYYY-MM-DD>`, or `--memory-only` | Change the flags |
+
+Memory notes follow the same reasons where they apply. A note is imported with
+`drawer_add` into the `memory` room of its project's wing; `--memory-only`
+imports only notes.
+
+#### Stopping and resuming
+
+Ctrl-C ends the run between calls and prints the report. Run the same command
+again to resume: progress is kept in `~/.mnemon/backfill/state.json`, and each
+session carries on from the line its last accepted digest ended on. Anything
+already stored is recognised by the server and not stored twice. If a run is
+stopped by repeated failures, the report says why; fix that and resume.
+
+Live capture and the backfill share one progress record per session
+(`~/.mnemon/sessions/<session_id>.json`). Two consequences. A session the
+backfill finished is not digested again by live capture. And if you resume an
+old Claude Code session that the backfill has not finished, the next Stop
+digests the rest of it live, spending tokens outside the backfill's cap; the
+backfill then sees it as done. A session modified during a run is left to its
+hooks.
+
+#### Original dates
+
+Drawers made by the backfill carry `occurred_at`, the time the conversation or
+note actually happened (the last turn of the slice, or the note's modification
+time), alongside `created_at`, the time it was stored. Search's recency boost,
+`drawer_get` and `wiki_compile`'s ordering of source drawers use `occurred_at`
+when it is set and fall back to `created_at` when it is not. Without it, a
+backfilled year would all look like it happened today and would outrank
+genuinely recent work. A date in the future is clamped to now.
+
 ### Troubleshooting
 
 - **Start with `/mnemon:doctor`.** It says whether the device is connected and,

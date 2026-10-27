@@ -254,6 +254,8 @@ Three hooks:
 
 To check that a device is connected, and why not if it isn't, run `/mnemon:doctor` in Claude Code.
 
+To bring in sessions and memory notes from before the hooks were installed, run `/mnemon:backfill` for a free scan of what could be imported; the [user guide](docs/USERGUIDE.md#bring-in-your-history) covers the trial and full import.
+
 Claude Code leaves plugin auto-update off for third-party marketplaces. The setup script (`curl -fsSL https://<your-instance>/install | bash`) turns it on for this one; see [Staying current](docs/USERGUIDE.md#staying-current) to do it by hand.
 
 See [`docs/USERGUIDE.md`](docs/USERGUIDE.md#automatic-memory-in-claude-code) for the full walkthrough.

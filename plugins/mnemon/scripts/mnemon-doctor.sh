@@ -415,7 +415,7 @@ fi
 bf_unfinished=$(mnemon_backfill_unfinished)
 if [ "${bf_unfinished:-0}" -gt 0 ] 2>/dev/null; then
     warn "backfill: $bf_unfinished old session(s) partly imported" \
-        "run mnemon-backfill to continue"
+        "run /mnemon:backfill to see how to continue"
 fi
 
 finish

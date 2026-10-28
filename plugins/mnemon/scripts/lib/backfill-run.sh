@@ -7,8 +7,8 @@
 #                  (drawer_add), then digest the transcripts (the digest
 #                  worker, one call at a time), and report. Returns 0 when it
 #                  finished or stopped at the cap, 1 when it was refused,
-#                  declined or stopped by failures, 2 on a bad flag, 130/143
-#                  when interrupted.
+#                  declined or stopped by failures, 2 on a bad flag, 129/130/143
+#                  when interrupted (HUP/INT/TERM).
 #
 # Progress is kept in ~/.mnemon/backfill/state.json, written atomically:
 #   {sessions: {<sid>: {started_at, pointer, done}},
@@ -480,6 +480,10 @@ _bfr_report() {
     [ "$BFR_NOLINE" -gt 0 ] && echo "  worker runs that reported no call: $BFR_NOLINE"
     echo "  input tokens:  $BFR_USED_IN reported (estimate $BACKFILL_EST_IN_LOW to $BACKFILL_EST_IN_HIGH)"
     echo "  output tokens: $BFR_USED_OUT reported (estimate $BACKFILL_EST_OUT)"
+    # What a call actually took, for calibrating the estimate's figures.
+    if [ "$BFR_USAGE_CALLS" -gt 0 ]; then
+        echo "  per call ($BFR_USAGE_CALLS calls with usage): in $(( (BFR_USED_IN + BFR_USAGE_CALLS / 2) / BFR_USAGE_CALLS )), out $(( (BFR_USED_OUT + BFR_USAGE_CALLS / 2) / BFR_USAGE_CALLS ))"
+    fi
     echo "  charged at the per-call estimate: $BFR_EST_CHARGED tokens (attempts that reported no usage)"
     echo "  charged against the cap: $((BFR_CH_IN + BFR_CH_OUT)) tokens"
     if [ -n "$BACKFILL_PRICE_IN" ] && [ -n "$BACKFILL_PRICE_OUT" ]; then
@@ -568,7 +572,7 @@ backfill_run() {
     mkdir -p "$MNEMON_SESSIONS_DIR"
     _bfr_state_init || return 1
 
-    # Ctrl-C (or TERM) ends the run between calls: the call in flight
+    # Ctrl-C (or TERM, or HUP from a closed terminal) ends the run between calls: the call in flight
     # finishes, or the worker abandons it -- its pointer only moves after the
     # server accepts a chunk -- and then the session's marker ownership is
     # settled, progress written and the report printed, as at any other stop.
@@ -577,6 +581,7 @@ backfill_run() {
     BFR_STOP=""
     trap 'BFR_STOP=130' INT
     trap 'BFR_STOP=143' TERM
+    trap 'BFR_STOP=129' HUP
     trap 'backfill_cleanup; rm -f "$BFR_STATE.tmp.$$"' EXIT
 
     BFR_RUN_STOP="" BFR_REASON=""

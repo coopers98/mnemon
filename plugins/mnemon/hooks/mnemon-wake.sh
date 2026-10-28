@@ -68,7 +68,7 @@ fi
 # once: the flag file is the "once", the state file the "never run".
 bf_unfinished=$(mnemon_backfill_unfinished)
 if [ "${bf_unfinished:-0}" -gt 0 ] 2>/dev/null; then
-    printf 'Mnemon: %s old session(s) partly imported; run mnemon-backfill to continue.\n' "$bf_unfinished"
+    printf 'Mnemon: %s old session(s) partly imported; run /mnemon:backfill to see how to continue.\n' "$bf_unfinished"
 elif [ ! -e "$MNEMON_DIR/backfill/state.json" ] && [ ! -e "$MNEMON_DIR/backfill/offered" ]; then
     printf "Mnemon: bring in this device's past history with /mnemon:backfill (a free scan; nothing is spent).\n"
     mkdir -p "$MNEMON_DIR/backfill" 2>/dev/null && : > "$MNEMON_DIR/backfill/offered" 2>/dev/null

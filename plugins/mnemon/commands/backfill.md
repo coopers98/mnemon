@@ -26,5 +26,7 @@ run it for them):
 bash "$(ls -d ~/.claude/plugins/cache/*/mnemon/*/ | sort -V | tail -1)scripts/mnemon-backfill.sh" --project <name>
 ```
 
-using a project name from the report. If the report says a backfill was left
-part-way, the same command continues it.
+using a project name from the report. If the report opens with
+`N session(s) partly imported (resume: ...)`, a backfill was left part-way:
+give the user the resume command it names (`--project <name>` or `--all`) in
+place of the trial, run the same way.

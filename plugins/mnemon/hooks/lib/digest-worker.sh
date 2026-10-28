@@ -332,8 +332,10 @@ while :; do
         passes=$((passes + 1))
         run_pending || ok=0
     done
-    mnemon_digest_unlock "$session_id"
+    # Cleared first: a signal between the two would otherwise have the EXIT
+    # trap release a lock that by then may be another worker's.
     HOLDS_LOCK=0
+    mnemon_digest_unlock "$session_id"
     # A worker that lost the lock after the check above and before the release
     # left its range in the marker. Take the lock back for it; if another
     # worker got there first, that one handles it. A marker left after this

@@ -623,6 +623,23 @@ backfill_print_scan() {
         if (r != "") return r " (project_ignore)"
         n = split(path, a, "/"); return "(unresolved) " substr(a[n - 1], (substr(a[n - 1], 1, 1) == "-") ? 2 : 1) }'
 
+    # A backfill left part-way, from its progress file (read only; a missing or
+    # unreadable one says nothing): how many sessions, and how to resume them.
+    local partly partly_n partly_project
+    partly=$(jq -r 'select(type == "object")
+        | [([(.sessions // {}) | to_entries[] | select(.value.done == false)] | length | tostring),
+           (.trial.project // "" | tostring | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' \
+        "$BACKFILL_MNEMON_DIR/backfill/state.json" 2>/dev/null | tr -d '\r')
+    IFS="$BACKFILL_US" read -r partly_n partly_project <<< "$partly"
+    if [ "${partly_n:-0}" -gt 0 ] 2>/dev/null; then
+        if [ -n "$partly_project" ]; then
+            echo "$partly_n session(s) partly imported (resume: --project $partly_project or --all)"
+        else
+            echo "$partly_n session(s) partly imported (resume: --all)"
+        fi
+        echo
+    fi
+
     echo "Per project (sessions found, eligible, simulated calls; memory notes eligible)"
     printf '  %-32s %8s %8s %7s %6s\n' "project" "sessions" "eligible" "calls" "notes"
     awk -F'\t' -v first="$notes" "$label_awk"'
@@ -658,7 +675,15 @@ backfill_print_scan() {
     echo
     echo "Repeated first prompts (${BACKFILL_AUTOMATION_MIN}+ sessions are skipped as automation; --include-automation <hash> brings one back)"
     printf '  %5s  %-12s  %-16s  %-30s  %s\n' "count" "status" "hash" "projects" "first prompt"
-    local clusters
+    local clusters skipped_hashes
+    # A cluster is labelled as the classifier treats it: skipped when any of
+    # its sessions was skipped as automation, or when all its sessions (the
+    # opted-out ones counted, as the classifier counts them) reach the
+    # threshold. The count shown leaves the opted-out ones out.
+    skipped_hashes=$( { awk -F'\t' '$6 == "automation" && $11 != "" { print $11 }' "$scan"
+        awk -F "$BACKFILL_US" -v min="$BACKFILL_AUTOMATION_MIN" '$12 != "" { n[$12]++ }
+            END { for (h in n) if (n[h] >= min) print h }' "$BACKFILL_TMP/meta"; } | LC_ALL=C sort -u)
+    [ -n "$skipped_hashes" ] && skipped_hashes="$skipped_hashes"$'\n'
     # A session that opted out (@nomemo, capture_ignore) is never listed.
     clusters=$(awk -F'\t' "$label_awk"'$11 != "" && $6 != "nomemo" && $6 != "capture_ignore" { n[$11]++; k = label($3, $4, $2)
             if (index(SUBSEP p[$11] SUBSEP, SUBSEP k SUBSEP) == 0) p[$11] = (p[$11] == "") ? k : p[$11] SUBSEP k }
@@ -669,7 +694,7 @@ backfill_print_scan() {
     else
         while IFS=$'\t' read -r count hash projects; do
             if backfill_listed "$BACKFILL_INCLUDE_AUTOMATION" "$hash"; then state="included"
-            elif [ "$count" -ge "$BACKFILL_AUTOMATION_MIN" ]; then state="skipped"
+            elif backfill_listed "$skipped_hashes" "$hash"; then state="skipped"
             else state="eligible"
             fi
             prompt=$(awk -F "$BACKFILL_US" -v h="$hash" '$12 == h { print $15; exit }' "$BACKFILL_TMP/meta")

@@ -1958,7 +1958,7 @@ case "$SW_DIR" in /tmp/*|"${TMPDIR:-/tmp}"/*) rm -rf "${SW_DIR:?}" ;; esac
 
 # A backfill session that stopped part-way is not "undigested": live capture
 # would never send it (its transcript is old and its pointer is the backfill's),
-# so the banner points at mnemon-backfill instead, and the history offer is
+# so the banner points at /mnemon:backfill instead, and the history offer is
 # made once per device while no backfill has run.
 BB_DIR=$(mktemp -d)
 mkdir -p "$BB_DIR/sessions" "$BB_DIR/backfill"
@@ -1977,7 +1977,7 @@ bb_wake() {
 }
 bb_out=$(bb_wake bb1)
 case "$bb_out" in
-    *"Mnemon: 2 old session(s) partly imported; run mnemon-backfill to continue."*) PASS=$((PASS+1)); printf '  ok: banner: a stopped backfill session is counted as partly imported\n';;
+    *"Mnemon: 2 old session(s) partly imported; run /mnemon:backfill to see how to continue."*) PASS=$((PASS+1)); printf '  ok: banner: a stopped backfill session is counted as partly imported\n';;
     *) FAIL=$((FAIL+1)); printf '  FAIL: banner: no partly-imported line, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
 esac
 case "$bb_out" in
@@ -1986,7 +1986,7 @@ case "$bb_out" in
     *) FAIL=$((FAIL+1)); printf '  FAIL: banner: undigested count wrong, got: %s\n' "$(printf '%s' "$bb_out" | head -c 300)";;
 esac
 case "$bb_out" in
-    *"/mnemon:backfill"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: offered the backfill although one has started\n';;
+    *"past history with /mnemon:backfill"*) FAIL=$((FAIL+1)); printf '  FAIL: banner: offered the backfill although one has started\n';;
     *) PASS=$((PASS+1)); printf '  ok: banner: no offer once a backfill has started\n';;
 esac
 # fin1 finished its backfill (done:true) and has since collected live failures:
@@ -2834,7 +2834,7 @@ jq -n --arg t "$DR1/old-transcript.jsonl" '{last_digest_turn:0,digest_failures:2
 jq -n '{sessions:{half:{started_at:1,pointer:0,done:false}},spent:{},trial:{}}' > "$DR1/backfill/state.json"
 doc_run "$DR1"
 doc_line "warn" "1 old session.*partly imported" "doctor: partly imported sessions get their own line"
-doc_has "fix: run mnemon-backfill to continue" "doctor: the partly imported line says how to continue"
+doc_has "fix: run /mnemon:backfill to see how to continue" "doctor: the partly imported line says how to continue"
 doc_no_line "warn" "undigested" "doctor: a partly imported session is not also undigested"
 printf 'garbage{' > "$DR1/backfill/state.json"
 doc_run "$DR1"
@@ -3637,6 +3637,49 @@ bf_run --bogus
 assert_eq "$BF_RC" "2" "backfill scan: an unknown option exits 2"
 
 assert_eq "$(bf_snapshot)" "$BF_BEFORE" "backfill scan: ~/.mnemon is byte-identical after every scan"
+
+# A backfill left part-way: the scan reads its progress (read-only) and says
+# how to resume it. No progress file, or a corrupt one, says nothing.
+bf_run
+bf_lacks "partly imported" "backfill scan: no progress file, no partly imported line"
+mkdir -p "$BF_MN/backfill"
+printf '%s' '{"sessions":{"a":{"pointer":2,"done":false},"b":{"pointer":1,"done":false},"c":{"pointer":4,"done":true}},"trial":{"project":"atlas","tokens_per_call":1500}}' \
+    > "$BF_MN/backfill/state.json"
+bf_run
+bf_has "2 session(s) partly imported (resume: --project atlas or --all)" \
+    "backfill scan: a part-way backfill is counted, with the trial's project to resume"
+printf '%s' '{"sessions":{"a":{"pointer":2,"done":false}}}' > "$BF_MN/backfill/state.json"
+bf_run
+bf_has "1 session(s) partly imported (resume: --all)" "backfill scan: with no trial, only --all is offered"
+printf '{"sessions":' > "$BF_MN/backfill/state.json"
+bf_run
+bf_lacks "partly imported" "backfill scan: a corrupt progress file prints nothing"
+assert_eq "$(cat "$BF_MN/backfill/state.json")" '{"sessions":' "backfill scan: the progress file is only read"
+rm -rf "$BF_MN/backfill"
+
+# A cluster's label comes from the classifier: two of six sessions sharing a
+# first prompt opted out, so four are listed, but all six make it automation.
+BF_R4="$BF/r4 root"
+for i in 71 72 73 74; do
+    bf_session "$BF_R4/-work-heart/$(bf_id $i).jsonl" "$(bf_id $i)" "$BF/work/heart" cli \
+        "Nightly sweep of the heart queue" "Swept ($i)."
+done
+for i in 75 76; do
+    bf_session "$BF_R4/-work-heart/$(bf_id $i).jsonl" "$(bf_id $i)" "$BF/work/heart" cli \
+        "Nightly sweep of the heart queue" "Swept ($i)." "@nomemo keep this one out" "Understood."
+done
+find "$BF_R4" -type f -exec touch -t 202601010000 {} +
+BF_TSV5=$(env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR \
+    HOME="$BF_HOME" MNEMON_DIR="$BF_MN" bash -c '. "$1"; backfill_parse_args --projects-root "$2" --automation-min 5 \
+        && backfill_scan "$BACKFILL_PROJECTS_ROOT"' _ "$BACKFILL_LIB" "$BF_R4" 2>/dev/null)
+assert_eq "$(bf_status "$BF_TSV5" "$(bf_id 71)")/$(bf_status "$BF_TSV5" "$(bf_id 75)")" "skip automation/skip nomemo" \
+    "backfill scan: four plain and two @nomemo sessions of one prompt: the plain ones are automation"
+bf_run --projects-root "$BF_R4" --automation-min 5
+if printf '%s\n' "$BF_OUT" | grep -qE '^ +4 +skipped +'; then
+    PASS=$((PASS+1)); printf '  ok: backfill scan: the cluster table labels that cluster skipped, as the classifier does\n'
+else
+    FAIL=$((FAIL+1)); printf '  FAIL: backfill scan: the cluster label disagrees with the per-session reasons\n'; bf_show
+fi
 rf_stop_all
 rm -rf "$BF" "$BF_STATE"
 
@@ -3719,6 +3762,8 @@ assert_eq "$(br_state '"\(.spent.in) \(.spent.out) \(.spent.calls) \(.spent.repl
     "backfill run: spend is the usage the calls reported"
 assert_eq "$(br_state '"\(.trial.project) \(.trial.tokens_per_call)"')" "atlas 1500" \
     "backfill run: a trial stores its project and tokens per call"
+bf_has "per call (6 calls with usage): in 1200, out 300" \
+    "backfill run: the report gives input and output per call, for calibrating the estimate"
 assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" \
     "backfill run: a finished session's marker, which the backfill caused, is removed"
 assert_eq "$(br_count "$BR_LOG" drawer_add)" "2" "backfill run: each memory note goes through drawer_add once"
@@ -3904,6 +3949,28 @@ assert_eq "$(br_digests "$BR_LOG" | sort | uniq -d | wc -l | tr -d ' ')" "0" "ba
 assert_eq "$(br_digests "$BR_LOG" | wc -l | tr -d ' ')" "6" "backfill run: the re-run sends the rest"
 rf_stop_all
 
+# A closed terminal (SIGHUP) stops the run the same way: the call in flight
+# finishes, marker ownership is settled and progress written.
+br_reset; rm -f "$BR_STATE_SRV"/*; : > "$BR_LOG"
+BR_PORT=$(rf_free_port)
+rf_start "$BR_PORT" "$BR_LOG" "$BR_STATE_SRV" FAKE_DIGEST=priced FAKE_DIGEST_WINGS="atlas,beacon" \
+    FAKE_USAGE=1 FAKE_DRAWER_ADD=1 FAKE_DELAY=1
+br_config "$BR_PORT"
+env -u MNEMON_ENDPOINT -u MNEMON_TOKEN -u CLAUDE_CONFIG_DIR HOME="$BR_HOME" MNEMON_DIR="$BR_MN" \
+    MNEMON_BACKFILL_TTY="$BR/no-tty" MNEMON_BACKFILL_MAX_SLEEP=0 MNEMON_BACKFILL_NOTE_PAUSE=0 \
+    bash "$BACKFILL_SH" --project atlas --yes > "$BR/hup.out" 2>&1 < /dev/null &
+BR_PID=$!
+wait_until 30 grep -q '"session_digest"' "$BR_LOG"
+kill -HUP "$BR_PID" 2>/dev/null
+wait "$BR_PID"
+BF_RC=$?
+BF_OUT=$(cat "$BR/hup.out")
+assert_eq "$BF_RC" "129" "backfill run: SIGHUP exits 129"
+assert_eq "$(br_count "$BR_LOG" session_digest)" "1" "backfill run: SIGHUP finishes the call in flight and starts no other"
+assert_eq "$(br_state ".sessions[\"$(br_sid 1)\"].pointer")" "1" "backfill run: SIGHUP writes progress"
+assert_eq "$(ls "$BR_MN/sessions" | grep -c 'digest.pending')" "0" "backfill run: SIGHUP finishes marker ownership"
+rf_stop_all
+
 # Notes: a 429 is waited out and retried; a wing denial is a drop, counted.
 br_reset; rm -f "$BR_STATE_SRV"/*
 BR_PORT=$(rf_free_port)
@@ -3913,6 +3980,7 @@ br_config "$BR_PORT"
 br_run --project atlas --memory-only --yes
 assert_eq "$(br_count "$BR_LOG" drawer_add)" "3" "backfill run: a 429 on drawer_add is retried"
 bf_has "2 new" "backfill run: both notes are stored after the retry"
+bf_lacks "calls with usage" "backfill run: no call reported usage, no per-call line"
 rf_stop_all
 br_reset; rm -f "$BR_STATE_SRV"/*
 BR_PORT=$(rf_free_port)

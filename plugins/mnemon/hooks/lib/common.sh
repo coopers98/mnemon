@@ -748,9 +748,10 @@ _mnemon_backfill_unfinished_ids() {
     jq -r '(.sessions // {}) | to_entries[] | select(.value.done == false) | .key' "$f" 2>/dev/null || true
 }
 
-# How many sessions a backfill left part-way. These are not "undigested": live
-# capture never sends them (the backfill owns their pointer), mnemon-backfill
-# resumes them.
+# How many sessions a backfill left part-way. These are not "undigested": they
+# are the backfill's to resume (the same mnemon-backfill command continues
+# them). If such a session is itself resumed in Claude Code, live capture
+# digests it from the backfill's pointer like any other session.
 mnemon_backfill_unfinished() {
     local ids
     ids=$(_mnemon_backfill_unfinished_ids)

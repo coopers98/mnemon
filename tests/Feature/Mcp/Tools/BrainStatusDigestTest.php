@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Mcp\Tools;
 
+use App\Models\LlmModel;
 use App\Models\Room;
 use App\Models\Wing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,14 +26,13 @@ class BrainStatusDigestTest extends TestCase
         config([
             'mnemon.llm.model' => 'gpt-test',
             'mnemon.digest.openai_model' => null,
-            'mnemon.digest.pricing.in_per_mtok' => null,
-            'mnemon.digest.pricing.out_per_mtok' => null,
         ]);
 
         $digest = $this->digest();
 
         $this->assertSame('gpt-test', $digest['model']);
         $this->assertNull($digest['price_in_per_mtok']);
+        $this->assertNull($digest['price_cached_in_per_mtok']);
         $this->assertNull($digest['price_out_per_mtok']);
         $this->assertSame(3000, $digest['typical_output_tokens']);
         $this->assertSame(16000, $digest['max_completion_tokens']);
@@ -40,17 +40,33 @@ class BrainStatusDigestTest extends TestCase
         $this->assertArrayNotHasKey('projects', $digest);
     }
 
-    public function test_digest_block_reports_configured_prices(): void
+    public function test_digest_block_reports_the_prices_entered_for_the_digest_model(): void
     {
-        config([
-            'mnemon.digest.pricing.in_per_mtok' => '0.25',
-            'mnemon.digest.pricing.out_per_mtok' => '2',
-        ]);
+        config(['mnemon.llm.model' => 'gpt-test', 'mnemon.digest.openai_model' => null]);
+        LlmModel::create(['provider' => 'openai', 'model' => 'gpt-test',
+            'price_in_per_mtok' => '0.25', 'price_cached_in_per_mtok' => '0.025', 'price_out_per_mtok' => '2']);
+        // Another model's prices are not this one's.
+        LlmModel::create(['provider' => 'openai', 'model' => 'gpt-other', 'price_in_per_mtok' => '9', 'price_out_per_mtok' => '9']);
 
         $digest = $this->digest();
 
         $this->assertSame(0.25, $digest['price_in_per_mtok']);
+        $this->assertSame(0.025, $digest['price_cached_in_per_mtok']);
         $this->assertEquals(2, $digest['price_out_per_mtok']);
+    }
+
+    public function test_swapping_the_digest_model_swaps_the_published_model_and_prices(): void
+    {
+        config(['mnemon.llm.model' => 'gpt-test', 'mnemon.digest.openai_model' => null]);
+        LlmModel::create(['provider' => 'openai', 'model' => 'gpt-test', 'price_in_per_mtok' => '1', 'price_out_per_mtok' => '1']);
+        LlmModel::create(['provider' => 'openai', 'model' => 'gpt-new', 'is_digest_model' => true]);
+
+        $digest = $this->digest();
+
+        // The new model has no price yet: unknown, not the old model's price.
+        $this->assertSame('gpt-new', $digest['model']);
+        $this->assertNull($digest['price_in_per_mtok']);
+        $this->assertNull($digest['price_out_per_mtok']);
     }
 
     public function test_prompt_overhead_grows_with_wings_and_rooms(): void

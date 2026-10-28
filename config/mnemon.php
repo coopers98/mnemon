@@ -95,7 +95,8 @@ return [
         'confidence_floor' => env('MNEMON_DIGEST_FLOOR', 0.5),
 
         // Overrides mnemon.llm.model for digests only. Unset, digests use the
-        // shared model.
+        // shared model. A model marked for digests in the admin panel wins
+        // over both.
         'openai_model' => env('MNEMON_DIGEST_OPENAI_MODEL'),
 
         // Seconds to wait on the digest completion. The old hard-coded 20 was
@@ -108,15 +109,13 @@ return [
         // Caps what one call can spend.
         'max_completion_tokens' => (int) env('MNEMON_DIGEST_MAX_COMPLETION_TOKENS', 16000),
 
-        // What one million tokens cost on the digest model, published by
-        // brain_status so a client can estimate a backfill before running it.
-        // Null until set: Mnemon does not guess prices.
-        'pricing' => [
-            'in_per_mtok' => env('MNEMON_DIGEST_PRICE_IN_PER_MTOK'),
-            'out_per_mtok' => env('MNEMON_DIGEST_PRICE_OUT_PER_MTOK'),
-        ],
+        // Prices are not configured here: they live with each model in the
+        // admin panel (LLM models), where marking a model "use for digests"
+        // also overrides openai_model above.
 
-        // A typical digest's output (reasoning included), for the same estimate.
+        // A typical digest's output (reasoning included), for the backfill
+        // estimate brain_status publishes. The LLM models table shows the
+        // measured average per model to set it from.
         'typical_output_tokens' => (int) env('MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS', 3000),
     ],
     // The public, read-only demo (trymnemon.com). Off unless MNEMON_DEMO=true.

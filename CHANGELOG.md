@@ -30,9 +30,17 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   typical and maximum output, and which wing each of a list of projects
   resolves to, among the wings the token can read) so a client can estimate a
   backfill. New server settings:
-  `MNEMON_DIGEST_MAX_COMPLETION_TOKENS` (default 16000, caps one call's output),
-  `MNEMON_DIGEST_PRICE_IN_PER_MTOK`, `MNEMON_DIGEST_PRICE_OUT_PER_MTOK` (unset:
-  no dollar figures) and `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000).
+  `MNEMON_DIGEST_MAX_COMPLETION_TOKENS` (default 16000, caps one call's output)
+  and `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000).
+- **LLM models in the admin panel: prices per model, and the digest model.**
+  Each model has its input, cached input and output price; unpriced, a
+  backfill shows tokens only. Marking a model **Use for digests** overrides
+  `MNEMON_DIGEST_OPENAI_MODEL` and `MNEMON_LLM_MODEL` for digests, and brings
+  its own price with it. The model the server already runs on gets an
+  unpriced row on migration.
+- **Every digest call's tokens are recorded** with its model, including calls
+  whose answer could not be used. The LLM models page shows calls, average
+  input and output per call, and spend at the current price.
   The two defaults are provisional; the trial's report gives the measured
   figures to set them from. All additions are optional, so plugin 0.3.11 and
   older servers keep working.

@@ -6,6 +6,7 @@ use App\Mcp\Concerns\RequiresScope;
 use App\Mcp\Concerns\RequiresWingAccess;
 use App\Mcp\Support\BrainSessionLogger;
 use App\Models\Drawer;
+use App\Models\LlmModel;
 use App\Models\Room;
 use App\Models\WikiPage;
 use App\Models\Wing;
@@ -153,12 +154,17 @@ class BrainStatusTool extends Tool
             'recent_drawers' => [],
         ]);
 
-        $price = fn (string $key) => ($v = config("mnemon.digest.pricing.{$key}")) === null || $v === '' ? null : (float) $v;
+        // Prices are the model's own row in the admin panel; a model without
+        // one, or without a price entered, publishes null.
+        $model = $driver->model();
+        $row = LlmModel::for($driver->provider(), $model);
+        $price = fn (?string $v) => $v === null ? null : (float) $v;
 
         $digest = [
-            'model' => $driver->model(),
-            'price_in_per_mtok' => $price('in_per_mtok'),
-            'price_out_per_mtok' => $price('out_per_mtok'),
+            'model' => $model,
+            'price_in_per_mtok' => $price($row?->price_in_per_mtok),
+            'price_cached_in_per_mtok' => $price($row?->price_cached_in_per_mtok),
+            'price_out_per_mtok' => $price($row?->price_out_per_mtok),
             'prompt_overhead_tokens' => (int) ceil((mb_strlen($prompt) + 50 * 200) / 4),
             'typical_output_tokens' => (int) config('mnemon.digest.typical_output_tokens', 3000),
             'max_completion_tokens' => (int) config('mnemon.digest.max_completion_tokens', 16000),

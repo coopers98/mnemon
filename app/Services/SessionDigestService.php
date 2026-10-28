@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\DigestUsage;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\SessionDigest;
 use App\Models\WikiPendingWing;
 use App\Models\Wing;
+use App\Services\Digest\DigestUnavailable;
 use App\Support\ProjectWings;
 use App\Support\WingPatterns;
 use Carbon\CarbonInterface;
@@ -93,20 +95,26 @@ class SessionDigestService
             ? $this->unfiledWingSlug($existingWings, $allowedWingPatterns)
             : null;
 
-        $proposals = $this->llm->digest($transcript, [
-            'turn_range' => $turnRange,
-            'existing_wings' => collect($existingWings)->pluck('slug')->all(),
-            'existing_rooms_per_wing' => $existingRooms->groupBy('wing_id')
-                ->map(fn ($rs) => $rs->pluck('slug')->all())->all(),
-            'recent_drawers' => $recentDrawers->map(fn ($d) => [
-                'id' => $d->id,
-                'snippet' => mb_substr($d->content, 0, 200),
-            ])->all(),
-            'session_wing' => $sessionWingSlug,
-        ]);
+        try {
+            $proposals = $this->llm->digest($transcript, [
+                'turn_range' => $turnRange,
+                'existing_wings' => collect($existingWings)->pluck('slug')->all(),
+                'existing_rooms_per_wing' => $existingRooms->groupBy('wing_id')
+                    ->map(fn ($rs) => $rs->pluck('slug')->all())->all(),
+                'recent_drawers' => $recentDrawers->map(fn ($d) => [
+                    'id' => $d->id,
+                    'snippet' => mb_substr($d->content, 0, 200),
+                ])->all(),
+                'session_wing' => $sessionWingSlug,
+            ]);
+        } catch (DigestUnavailable $e) {
+            // A model that answered with something unusable was still paid for.
+            $this->recordUsage($sessionId, $turnRange, succeeded: false);
 
-        // Not every LLM reports usage (test fakes do not).
-        $usage = method_exists($this->llm, 'lastUsage') ? $this->llm->lastUsage() : null;
+            throw $e;
+        }
+
+        $usage = $this->recordUsage($sessionId, $turnRange, succeeded: true);
 
         // One transaction for every write and the slice record. A proposal that
         // fails mid-loop used to leave the drawers before it committed; the
@@ -134,6 +142,39 @@ class SessionDigestService
 
             throw $e;
         }
+    }
+
+    /**
+     * Records what the model call just made cost in tokens, and returns the
+     * usage for the client. Not every LLM reports usage (test fakes do not);
+     * those record nothing.
+     *
+     * @param  array{start:int,end:int}  $turnRange
+     * @return array<string, int>|null
+     */
+    private function recordUsage(string $sessionId, array $turnRange, bool $succeeded): ?array
+    {
+        $usage = method_exists($this->llm, 'lastUsage') ? $this->llm->lastUsage() : null;
+        $model = method_exists($this->llm, 'lastModel') ? $this->llm->lastModel() : null;
+
+        if ($usage === null || $model === null) {
+            return $usage;
+        }
+
+        DigestUsage::create([
+            'provider' => method_exists($this->llm, 'provider') ? $this->llm->provider() : 'unknown',
+            'model' => $model,
+            'session_id' => $sessionId,
+            'turn_start' => $turnRange['start'],
+            'turn_end' => $turnRange['end'],
+            'prompt_tokens' => $usage['prompt_tokens'] ?? 0,
+            'cached_prompt_tokens' => $usage['cached_prompt_tokens'] ?? 0,
+            'completion_tokens' => $usage['completion_tokens'] ?? 0,
+            'reasoning_tokens' => $usage['reasoning_tokens'] ?? 0,
+            'succeeded' => $succeeded,
+        ]);
+
+        return $usage;
     }
 
     /**

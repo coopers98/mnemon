@@ -3,10 +3,12 @@
 namespace Tests\Feature\Mcp\Tools;
 
 use App\Models\BrainSession;
+use App\Models\DigestUsage;
 use App\Models\Drawer;
 use App\Models\Room;
 use App\Models\SessionDigest;
 use App\Models\Wing;
+use App\Services\Digest\DigestUnavailable;
 use App\Services\DrawerWriteService;
 use App\Services\SessionDigestService;
 use Illuminate\Database\DeadlockException;
@@ -376,6 +378,8 @@ class SessionDigestToolTest extends TestCase
         $body = $this->mcpCall('session_digest', $this->usageArgs('sess-usage'), ['mcp:use'])
             ->json('result.structuredContent');
         $this->assertSame(['prompt_tokens' => 10, 'completion_tokens' => 5, 'reasoning_tokens' => 2], $body['usage']);
+        // No model reported: nothing to record usage against.
+        $this->assertSame(0, DigestUsage::count());
 
         // An LLM that cannot report usage (and one that reports none) gives null.
         $this->mockDigestService([]);
@@ -383,6 +387,32 @@ class SessionDigestToolTest extends TestCase
             ->json('result.structuredContent');
         $this->assertArrayHasKey('usage', $body);
         $this->assertNull($body['usage']);
+    }
+
+    public function test_each_model_call_records_its_tokens_against_the_model(): void
+    {
+        $this->bindUsageLlm(['prompt_tokens' => 1000, 'cached_prompt_tokens' => 400, 'completion_tokens' => 300, 'reasoning_tokens' => 200], 'gpt-a');
+        $this->mcpCall('session_digest', $this->usageArgs('sess-rec'), ['mcp:use']);
+        // A replay makes no model call and records nothing.
+        $this->mcpCall('session_digest', $this->usageArgs('sess-rec'), ['mcp:use']);
+
+        $this->assertSame(1, DigestUsage::count());
+        $row = DigestUsage::first();
+        $this->assertSame(['openai', 'gpt-a', 'sess-rec', 0, 4, 1000, 400, 300, 200, true], [
+            $row->provider, $row->model, $row->session_id, $row->turn_start, $row->turn_end,
+            $row->prompt_tokens, $row->cached_prompt_tokens, $row->completion_tokens, $row->reasoning_tokens, $row->succeeded,
+        ]);
+    }
+
+    public function test_an_unusable_answer_is_still_recorded_as_spent(): void
+    {
+        $this->bindUsageLlm(['prompt_tokens' => 50, 'completion_tokens' => 16000, 'reasoning_tokens' => 16000], 'gpt-a', fail: true);
+        $this->mcpCall('session_digest', $this->usageArgs('sess-fail'), ['mcp:use']);
+
+        $row = DigestUsage::sole();
+        $this->assertFalse($row->succeeded);
+        $this->assertSame(16000, $row->completion_tokens);
+        $this->assertSame(0, SessionDigest::where('session_id', 'sess-fail')->count());
     }
 
     public function test_replay_result_has_no_usage(): void
@@ -406,21 +436,35 @@ class SessionDigestToolTest extends TestCase
         ];
     }
 
-    private function bindUsageLlm(array $usage): void
+    private function bindUsageLlm(array $usage, ?string $model = null, bool $fail = false): void
     {
-        $this->app->bind(SessionDigestService::class, function ($app) use ($usage) {
-            $llm = new class($usage)
+        $this->app->bind(SessionDigestService::class, function ($app) use ($usage, $model, $fail) {
+            $llm = new class($usage, $model, $fail)
             {
-                public function __construct(private array $usage) {}
+                public function __construct(private array $usage, private ?string $model, private bool $fail) {}
 
                 public function digest(string $t, array $c): array
                 {
+                    if ($this->fail) {
+                        throw new DigestUnavailable('the model answered with content that is not a proposals list', retryable: true);
+                    }
+
                     return [];
                 }
 
                 public function lastUsage(): ?array
                 {
                     return $this->usage;
+                }
+
+                public function lastModel(): ?string
+                {
+                    return $this->model;
+                }
+
+                public function provider(): string
+                {
+                    return 'openai';
                 }
             };
 

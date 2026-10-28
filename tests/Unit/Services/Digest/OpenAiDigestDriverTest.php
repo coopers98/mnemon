@@ -2,14 +2,18 @@
 
 namespace Tests\Unit\Services\Digest;
 
+use App\Models\LlmModel;
 use App\Services\Digest\DigestUnavailable;
 use App\Services\Digest\OpenAiDigestDriver;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class OpenAiDigestDriverTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_parses_proposals_from_openai_response(): void
     {
         Http::fake([
@@ -69,15 +73,16 @@ class OpenAiDigestDriverTest extends TestCase
         $empty = ['choices' => [['message' => ['content' => '{"proposals":[]}']]]];
         Http::fakeSequence('api.openai.com/*')
             ->push($empty + ['usage' => ['prompt_tokens' => 120, 'completion_tokens' => 80,
+                'prompt_tokens_details' => ['cached_tokens' => 64],
                 'completion_tokens_details' => ['reasoning_tokens' => 50]]])
             ->push($empty + ['usage' => ['prompt_tokens' => 7, 'completion_tokens' => 3]])
             ->push($empty);
 
         $driver->digest('t', []);
-        $this->assertSame(['prompt_tokens' => 120, 'completion_tokens' => 80, 'reasoning_tokens' => 50], $driver->lastUsage());
+        $this->assertSame(['prompt_tokens' => 120, 'cached_prompt_tokens' => 64, 'completion_tokens' => 80, 'reasoning_tokens' => 50], $driver->lastUsage());
 
         $driver->digest('t', []);
-        $this->assertSame(['prompt_tokens' => 7, 'completion_tokens' => 3, 'reasoning_tokens' => 0], $driver->lastUsage());
+        $this->assertSame(['prompt_tokens' => 7, 'cached_prompt_tokens' => 0, 'completion_tokens' => 3, 'reasoning_tokens' => 0], $driver->lastUsage());
 
         $driver->digest('t', []);
         $this->assertNull($driver->lastUsage());
@@ -103,6 +108,29 @@ class OpenAiDigestDriverTest extends TestCase
         (new OpenAiDigestDriver)->digest('t', []);
 
         Http::assertSent(fn ($request) => $request['model'] === 'gpt-digest');
+    }
+
+    public function test_the_model_marked_for_digests_in_the_admin_panel_wins_over_configuration(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => '{"proposals":[]}']]]])]);
+        config(['services.openai.api_key' => 'sk-test']);
+        config(['mnemon.llm.model' => 'gpt-shared', 'mnemon.digest.openai_model' => 'gpt-digest']);
+        LlmModel::create(['provider' => 'openai', 'model' => 'gpt-picked', 'is_digest_model' => true]);
+
+        $driver = new OpenAiDigestDriver;
+        $this->assertNull($driver->lastModel());
+        $driver->digest('t', []);
+
+        Http::assertSent(fn ($request) => $request['model'] === 'gpt-picked');
+        $this->assertSame('gpt-picked', $driver->lastModel());
+    }
+
+    public function test_a_marked_model_of_a_provider_without_a_driver_is_ignored(): void
+    {
+        config(['mnemon.llm.model' => 'gpt-shared', 'mnemon.digest.openai_model' => null]);
+        LlmModel::create(['provider' => 'anthropic', 'model' => 'claude-x', 'is_digest_model' => true]);
+
+        $this->assertSame('gpt-shared', (new OpenAiDigestDriver)->model());
     }
 
     public function test_tells_the_model_which_wing_the_session_belongs_to(): void

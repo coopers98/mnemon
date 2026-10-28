@@ -2,20 +2,23 @@
 
 namespace App\Services\Digest;
 
+use App\Models\LlmModel;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class OpenAiDigestDriver
 {
-    /** @var array{prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null */
+    /** @var array{prompt_tokens: int, cached_prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null */
     private ?array $lastUsage = null;
+
+    private ?string $lastModel = null;
 
     /**
      * Token usage of the most recent digest() call; null before a call or
      * when the response reported none.
      *
-     * @return array{prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null
+     * @return array{prompt_tokens: int, cached_prompt_tokens: int, completion_tokens: int, reasoning_tokens: int}|null
      */
     public function lastUsage(): ?array
     {
@@ -23,11 +26,27 @@ class OpenAiDigestDriver
     }
 
     /**
-     * The model digests run on.
+     * The model the most recent digest() call asked; null before a call.
+     */
+    public function lastModel(): ?string
+    {
+        return $this->lastModel;
+    }
+
+    public function provider(): string
+    {
+        return 'openai';
+    }
+
+    /**
+     * The model digests run on: the one marked in the admin panel, else the
+     * configured one.
      */
     public function model(): string
     {
-        return config('mnemon.digest.openai_model') ?: config('mnemon.llm.model', 'gpt-5.6-luna');
+        return LlmModel::digestModel()?->model
+            ?: config('mnemon.digest.openai_model')
+            ?: config('mnemon.llm.model', 'gpt-5.6-luna');
     }
 
     /**
@@ -61,6 +80,7 @@ class OpenAiDigestDriver
     public function digest(string $transcript, array $context): array
     {
         $this->lastUsage = null;
+        $this->lastModel = null;
 
         $apiKey = config('services.openai.api_key') ?? env('OPENAI_API_KEY');
         if (empty($apiKey)) {
@@ -69,7 +89,7 @@ class OpenAiDigestDriver
             throw new DigestUnavailable('OPENAI_API_KEY is not set on the server', retryable: false);
         }
 
-        $model = $this->model();
+        $model = $this->lastModel = $this->model();
 
         $system = $this->systemPrompt($context);
 
@@ -117,6 +137,7 @@ class OpenAiDigestDriver
         if (is_array($usage)) {
             $this->lastUsage = [
                 'prompt_tokens' => (int) ($usage['prompt_tokens'] ?? 0),
+                'cached_prompt_tokens' => (int) ($usage['prompt_tokens_details']['cached_tokens'] ?? 0),
                 'completion_tokens' => (int) ($usage['completion_tokens'] ?? 0),
                 'reasoning_tokens' => (int) ($usage['completion_tokens_details']['reasoning_tokens'] ?? 0),
             ];

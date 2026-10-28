@@ -937,10 +937,12 @@ a sample of the sessions and extrapolates the rest by size, and says so.
 Two things are the operator's to set on the server, because Mnemon does not
 guess prices or tokens:
 
-- `MNEMON_DIGEST_PRICE_IN_PER_MTOK` and `MNEMON_DIGEST_PRICE_OUT_PER_MTOK`:
-  dollars per million tokens for the digest model. Without them the scan and
-  report show token counts and `cost: unknown (no price published)`, and
-  `--max-cost` is refused.
+- The digest model's prices, in the admin panel under **LLM models**: dollars
+  per million input, cached input and output tokens. Each model has its own
+  row, so changing the digest model there (**Use for digests**) changes the
+  price with it, and a price edit takes effect at once, without a deploy. A
+  model with no price makes the scan and report show token counts and
+  `cost: unknown (no price published)`, and refuses `--max-cost`.
 - `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000) is the output a typical
   digest is assumed to produce, and `MNEMON_DIGEST_MAX_COMPLETION_TOKENS`
   (default 16000) caps one call's output, reasoning included. Both defaults are
@@ -949,6 +951,16 @@ guess prices or tokens:
   an average call, over the calls that reported usage (replays and failed
   calls, which the report's call total includes, are left out). If its `out`
   figure is far from 3000, set `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` to it.
+  The **LLM models** page shows the same averages per model, over every
+  digest call the server has made.
+
+Every digest call, live or backfill, is recorded with its model and token
+counts (a call whose answer could not be used counts too: it was paid for).
+The **LLM models** page totals them per model and prices them at the model's
+current price, so a price correction re-prices past spending. To compare
+models, run the same project's trial on each (mark one, run, mark the next)
+and compare their rows. A row can be kept for a provider Mnemon cannot digest
+with yet, for price comparison only.
 
 The run always has a cap, checked before every call: by default the estimate's
 high figure plus 25%. `--max-tokens <n>` sets it in input plus output tokens;

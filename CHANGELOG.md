@@ -9,6 +9,8 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-28
+
 ### Added
 - **`mnemon-backfill.sh` brings in a device's past Claude Code history.** A
   free scan (`--dry-run`, or `/mnemon:backfill`) lists what could be imported,
@@ -610,6 +612,7 @@ error message**:
 The palace (wings → rooms → drawers), the wiki layer, hybrid retrieval over
 pgvector plus PostgreSQL full-text, and the Filament admin panel.
 
-[Unreleased]: https://github.com/coopers98/mnemon/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/coopers98/mnemon/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/coopers98/mnemon/releases/tag/v1.1.0
 [1.0.1]: https://github.com/coopers98/mnemon/releases/tag/v1.0.1
 [1.0.0]: https://github.com/coopers98/mnemon/releases/tag/v1.0.0

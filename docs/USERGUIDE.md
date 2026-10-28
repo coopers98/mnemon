@@ -944,11 +944,11 @@ guess prices or tokens:
 - `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` (default 3000) is the output a typical
   digest is assumed to produce, and `MNEMON_DIGEST_MAX_COMPLETION_TOKENS`
   (default 16000) caps one call's output, reasoning included. Both defaults are
-  provisional. Take the trial report's average output per digested call; if the
-  report does not print one, divide its output tokens by the calls that
-  returned usage (not counting replays and failed calls, which the report's
-  call total includes). If that figure is far from 3000, set
-  `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` to it.
+  provisional. The trial report has a line
+  `per call (N calls with usage): in X, out Y`: the input and output tokens of
+  an average call, over the calls that reported usage (replays and failed
+  calls, which the report's call total includes, are left out). If its `out`
+  figure is far from 3000, set `MNEMON_DIGEST_TYPICAL_OUTPUT_TOKENS` to it.
 
 The run always has a cap, checked before every call: by default the estimate's
 high figure plus 25%. `--max-tokens <n>` sets it in input plus output tokens;
@@ -984,11 +984,18 @@ imports only notes.
 
 #### Stopping and resuming
 
-Ctrl-C ends the run between calls and prints the report. Run the same command
-again to resume: progress is kept in `~/.mnemon/backfill/state.json`, and each
-session carries on from the line its last accepted digest ended on. Anything
-already stored is recognised by the server and not stored twice. If a run is
-stopped by repeated failures, the report says why; fix that and resume.
+Ctrl-C, or closing the terminal, ends the run between calls and prints the
+report. Run the same command again to resume: progress is kept in
+`~/.mnemon/backfill/state.json`, and each session carries on from the line its
+last accepted digest ended on. Anything already stored is recognised by the
+server and not stored twice. If a run is stopped by repeated failures, the
+report says why; fix that and resume.
+
+A backfill left part-way is not forgotten. The session banner and
+`/mnemon:doctor` say `N old session(s) partly imported; run /mnemon:backfill to
+see how to continue`, and the scan (`/mnemon:backfill`) opens with
+`N session(s) partly imported (resume: --project <name> or --all)`, naming the
+project of the last trial (just `--all` when there was none).
 
 Live capture and the backfill share one progress record per session
 (`~/.mnemon/sessions/<session_id>.json`). Two consequences. A session the
@@ -1003,8 +1010,10 @@ hooks.
 Drawers made by the backfill carry `occurred_at`, the time the conversation or
 note actually happened (the last turn of the slice, or the note's modification
 time), alongside `created_at`, the time it was stored. Search's recency boost,
-`drawer_get` and `wiki_compile`'s ordering of source drawers use `occurred_at`
-when it is set and fall back to `created_at` when it is not. Without it, a
+`drawer_get`, `wiki_compile`'s ordering of source drawers and the recent drawers
+`palace_wake_up` shows at session start use `occurred_at` when it is set and
+fall back to `created_at` when it is not. The palace browser (`/palace`) and the
+admin's Drawers pages show it as "happened" beside the stored time. Without it, a
 backfilled year would all look like it happened today and would outrank
 genuinely recent work. A date in the future is clamped to now.
 

@@ -17,7 +17,9 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
   eligible, with the estimate recalibrated from the trial. Memory notes go in
   through `drawer_add`, transcripts through the digest worker one call at a
   time. Every run has a cap (`--max-tokens`, `--max-cost`, else the estimate's
-  high figure plus 25%) and resumes with the same command. Plugin 0.3.12.
+  high figure plus 25%) and resumes with the same command, after Ctrl-C or a
+  closed terminal too. The trial report gives the input and output tokens of an
+  average call, for calibrating the server's figures. Plugin 0.3.12.
 - **Drawers record when the conversation happened (`occurred_at`).** The
   backfill sets it to the original time. `drawer_add` and `session_digest`
   take an optional `occurred_at`; a time in the future is clamped to now.
@@ -39,8 +41,13 @@ Plugin versions refer to the Claude Code plugin in `plugins/mnemon/`.
 - **Search recency, `drawer_get` and `wiki_compile` use `occurred_at`** when a
   drawer has one, and fall back to `created_at`, so backfilled history does not
   look like it happened today. Drawers without it behave as before.
+- **`palace_wake_up`'s recent drawers are ranked by `occurred_at`** (falling
+  back to `created_at`), so the session banner does not show months-old
+  backfilled drawers as recent. The palace browser and the admin's Drawers
+  pages show `occurred_at` as "happened" when it is set.
 - **The session banner and `/mnemon:doctor` count partly imported sessions
-  separately** from undigested ones and point to `mnemon-backfill` to continue;
+  separately** from undigested ones and point to `/mnemon:backfill`, whose scan
+  names the command that resumes them;
   the banner also offers the backfill once on a device that has never run it.
   Plugin 0.3.12.
 - **The enrolment message prints the backfill commands** (the scan and the

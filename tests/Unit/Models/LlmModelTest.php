@@ -41,6 +41,23 @@ class LlmModelTest extends TestCase
         $this->assertSame($b->id, LlmModel::digestModel()->id);
     }
 
+    public function test_a_provider_without_a_driver_is_never_saved_as_the_digest_model(): void
+    {
+        $openai = LlmModel::create(['provider' => 'openai', 'model' => 'a', 'is_digest_model' => true]);
+        $other = LlmModel::create(['provider' => 'anthropic', 'model' => 'c', 'is_digest_model' => true]);
+
+        // Saved outside the form, it still cannot take the mark from the real one.
+        $this->assertFalse($other->fresh()->is_digest_model);
+        $this->assertSame($openai->id, LlmModel::digestModel()->id);
+    }
+
+    public function test_ids_are_trimmed_on_save(): void
+    {
+        $m = LlmModel::create(['provider' => ' openai', 'model' => 'gpt-a ']);
+
+        $this->assertSame(['openai', 'gpt-a'], [$m->fresh()->provider, $m->fresh()->model]);
+    }
+
     public function test_usage_totals_count_only_this_provider_and_model(): void
     {
         $m = LlmModel::create(['provider' => 'openai', 'model' => 'a']);

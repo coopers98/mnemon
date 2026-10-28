@@ -13,6 +13,8 @@ class LlmModelsTable
     public static function configure(Table $table): Table
     {
         $usage = fn (LlmModel $record) => $record->usageTotals();
+        // PostgreSQL returns decimals as padded strings (0.250000).
+        $price = fn ($state) => $state === null ? null : rtrim(rtrim(number_format((float) $state, 6, '.', ''), '0'), '.');
 
         return $table
             ->columns([
@@ -26,15 +28,18 @@ class LlmModelsTable
                     ->label('Digests')
                     ->boolean(),
                 TextColumn::make('price_in_per_mtok')
+                    ->formatStateUsing($price)
                     ->label('In $/1M')
                     ->placeholder('—')
                     ->alignRight(),
                 TextColumn::make('price_cached_in_per_mtok')
+                    ->formatStateUsing($price)
                     ->label('Cached $/1M')
                     ->placeholder('—')
                     ->alignRight()
                     ->toggleable(),
                 TextColumn::make('price_out_per_mtok')
+                    ->formatStateUsing($price)
                     ->label('Out $/1M')
                     ->placeholder('—')
                     ->alignRight(),

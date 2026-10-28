@@ -27,12 +27,17 @@ class LlmModelForm
                     ->required()
                     ->default('openai')
                     ->maxLength(64)
+                    // Sent to no API, but matched exactly against recorded usage.
+                    ->notRegex('/\s/')
                     ->helperText('Only openai has a digest driver today. Rows for other providers are kept for price comparisons.'),
                 TextInput::make('model')
                     ->required()
                     ->maxLength(255)
                     ->placeholder('e.g. gpt-5.6-luna')
                     ->helperText('The exact model id the provider\'s API takes.')
+                    // Sent verbatim: one pasted space and every digest is a 4xx.
+                    ->notRegex('/\s/')
+                    ->validationMessages(['not_regex' => 'A model id has no spaces.'])
                     ->rule(fn (Get $get, ?LlmModel $record) => Rule::unique('llm_models', 'model')
                         ->where('provider', $get('provider'))
                         ->ignore($record?->getKey())),

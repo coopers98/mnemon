@@ -415,6 +415,18 @@ class SessionDigestToolTest extends TestCase
         $this->assertSame(0, SessionDigest::where('session_id', 'sess-fail')->count());
     }
 
+    public function test_a_failure_to_record_usage_does_not_lose_the_digest(): void
+    {
+        $this->bindUsageLlm(['prompt_tokens' => 10, 'completion_tokens' => 5], 'gpt-a');
+        DigestUsage::creating(fn () => throw new \RuntimeException('usage table unavailable'));
+
+        $body = $this->mcpCall('session_digest', $this->usageArgs('sess-norec'), ['mcp:use'])
+            ->json('result.structuredContent');
+
+        $this->assertSame(10, $body['usage']['prompt_tokens']);
+        $this->assertSame(1, SessionDigest::where('session_id', 'sess-norec')->count());
+    }
+
     public function test_replay_result_has_no_usage(): void
     {
         $this->bindUsageLlm(['prompt_tokens' => 10, 'completion_tokens' => 5, 'reasoning_tokens' => 2]);

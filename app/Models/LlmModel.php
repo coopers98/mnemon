@@ -43,7 +43,18 @@ class LlmModel extends Model
 
     protected static function booted(): void
     {
-        // At most one digest model: marking a row unmarks the others.
+        static::saving(function (LlmModel $row) {
+            $row->provider = trim((string) $row->provider);
+            $row->model = trim((string) $row->model);
+            // A provider without a driver cannot digest, however it is saved.
+            if (! in_array($row->provider, self::DIGEST_PROVIDERS, true)) {
+                $row->is_digest_model = false;
+            }
+        });
+
+        // At most one digest model: marking a row unmarks the others. Two
+        // saves at once can still both stay marked; digestModel() then takes
+        // the most recently saved.
         static::saved(function (LlmModel $row) {
             if ($row->is_digest_model) {
                 static::query()->whereKeyNot($row->getKey())->where('is_digest_model', true)
@@ -58,7 +69,8 @@ class LlmModel extends Model
     public static function digestModel(): ?self
     {
         return static::query()->where('is_digest_model', true)
-            ->whereIn('provider', self::DIGEST_PROVIDERS)->first();
+            ->whereIn('provider', self::DIGEST_PROVIDERS)
+            ->orderByDesc('updated_at')->orderByDesc('id')->first();
     }
 
     public static function for(string $provider, string $model): ?self

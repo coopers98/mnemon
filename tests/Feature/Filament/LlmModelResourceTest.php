@@ -97,6 +97,23 @@ class LlmModelResourceTest extends TestCase
             ->assertHasFormErrors(['model']);
     }
 
+    public function test_a_model_id_with_a_space_is_rejected(): void
+    {
+        Livewire::test(CreateLlmModel::class)
+            ->fillForm(['provider' => 'openai', 'model' => 'gpt-5.6-luna ', 'is_digest_model' => true])
+            ->call('create')
+            ->assertHasFormErrors(['model']);
+
+        $this->assertNull(LlmModel::digestModel());
+    }
+
+    public function test_prices_display_without_padding(): void
+    {
+        $m = LlmModel::create(['provider' => 'openai', 'model' => 'gpt-a', 'price_in_per_mtok' => '0.250000']);
+
+        Livewire::test(ListLlmModels::class)->assertTableColumnFormattedStateSet('price_in_per_mtok', '0.25', $m);
+    }
+
     public function test_a_negative_price_is_rejected(): void
     {
         Livewire::test(CreateLlmModel::class)

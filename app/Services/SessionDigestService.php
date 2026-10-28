@@ -161,18 +161,25 @@ class SessionDigestService
             return $usage;
         }
 
-        DigestUsage::create([
-            'provider' => method_exists($this->llm, 'provider') ? $this->llm->provider() : 'unknown',
-            'model' => $model,
-            'session_id' => $sessionId,
-            'turn_start' => $turnRange['start'],
-            'turn_end' => $turnRange['end'],
-            'prompt_tokens' => $usage['prompt_tokens'] ?? 0,
-            'cached_prompt_tokens' => $usage['cached_prompt_tokens'] ?? 0,
-            'completion_tokens' => $usage['completion_tokens'] ?? 0,
-            'reasoning_tokens' => $usage['reasoning_tokens'] ?? 0,
-            'succeeded' => $succeeded,
-        ]);
+        // Bookkeeping must not cost the result it describes: a failed insert
+        // here would throw before the slice is recorded, and the client would
+        // pay for the call again.
+        try {
+            DigestUsage::create([
+                'provider' => method_exists($this->llm, 'provider') ? $this->llm->provider() : 'unknown',
+                'model' => $model,
+                'session_id' => $sessionId,
+                'turn_start' => $turnRange['start'],
+                'turn_end' => $turnRange['end'],
+                'prompt_tokens' => $usage['prompt_tokens'] ?? 0,
+                'cached_prompt_tokens' => $usage['cached_prompt_tokens'] ?? 0,
+                'completion_tokens' => $usage['completion_tokens'] ?? 0,
+                'reasoning_tokens' => $usage['reasoning_tokens'] ?? 0,
+                'succeeded' => $succeeded,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('mnemon: could not record digest usage', ['reason' => $e->getMessage()]);
+        }
 
         return $usage;
     }
